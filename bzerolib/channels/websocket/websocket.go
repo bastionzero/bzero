@@ -1,0 +1,369 @@
+package websocket
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"sync"
+
+	"github.com/gorilla/websocket"
+	"gopkg.in/tomb.v2"
+
+	"bastionzero.com/bctl/v1/bctl/agent/vault"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
+	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
+)
+
+const (
+	// SignalR Constants
+	signalRMessageTerminatorByte = 0x1E
+	signalRTypeNumber            = 1 // Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#invocation-message-encoding
+)
+
+type IWebsocket interface {
+	Connect() error
+	Send(agentMessage am.AgentMessage)
+}
+
+// This will be the client that we use to store our websocket connection
+type Websocket struct {
+	client     *websocket.Conn
+	logger     *logger.Logger
+	ready      bool
+	subscribed bool
+	tmb        tomb.Tomb
+	channels   map[string]IChannel
+
+	// Ref: https://github.com/gorilla/websocket/issues/119#issuecomment-198710015
+	socketLock sync.Mutex
+	mapLock    sync.RWMutex
+
+	// Buffered channel to keep track of outgoing messages
+	sendQueue chan am.AgentMessage
+
+	// Function for figuring out correct Target SignalR Hub
+	targetSelectHandler func(msg am.AgentMessage) (string, error)
+
+	// Flag to indicate if we should automatically try to reconnect
+	autoReconnect bool
+
+	// Flag for grabbing a challenge (required of the agent control channel to connect to bastion)
+	getChallenge bool
+
+	// Variables used to make the connection
+	serviceUrl  string
+	hubEndpoint string
+	params      map[string]string
+	headers     map[string]string
+}
+
+// Constructor to create a new common websocket client object that can be shared by the daemon and server
+func New(logger *logger.Logger,
+	id string,
+	serviceUrl string,
+	hubEndpoint string,
+	params map[string]string,
+	headers map[string]string,
+	targetSelectHandler func(msg am.AgentMessage) (string, error),
+	autoReconnect bool,
+	getChallenge bool) (*Websocket, error) {
+
+	ws := Websocket{
+		logger:              logger,
+		sendQueue:           make(chan am.AgentMessage, 100),
+		channels:            make(map[string]IChannel),
+		targetSelectHandler: targetSelectHandler,
+		getChallenge:        getChallenge,
+		autoReconnect:       autoReconnect,
+		serviceUrl:          serviceUrl,
+		hubEndpoint:         hubEndpoint,
+		params:              params,
+		headers:             headers,
+		subscribed:          false,
+	}
+
+	ws.Connect()
+
+	// Listener for any incoming messages
+	ws.tmb.Go(func() error {
+		for ws.tmb.Alive() {
+			for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
+				select {
+				case <-ws.tmb.Dying():
+					return nil
+				default:
+					if err := ws.receive(); err != nil {
+						ws.logger.Error(err)
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	// Listener for any messages that need to be sent
+	go func() {
+		for ws.tmb.Alive() {
+			for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
+				select {
+				case <-ws.tmb.Dying():
+					return
+				case msg := <-ws.sendQueue:
+					ws.processOutput(msg)
+				}
+			}
+		}
+	}()
+
+	return &ws, nil
+}
+
+func (w *Websocket) Close(reason error) {
+	// close all of our existing datachannels
+	for _, channel := range w.channels {
+		channel.Close(reason)
+	}
+
+	// tell our tmb to clean up after us
+	w.logger.Infof("websocket closed because: %s", reason)
+	w.tmb.Kill(reason)
+	w.tmb.Wait()
+}
+
+// add channel to channels dictionary for forwarding incoming messages
+func (w *Websocket) Subscribe(id string, channel IChannel) {
+	w.addChannel(id, channel)
+}
+
+// remove channel from channel dictionary
+func (w *Websocket) Unsubscribe(id string) {
+	w.deleteChannel(id)
+}
+
+func (w *Websocket) SubscriberCount() int {
+	return w.lenChannels()
+}
+
+// Returns error on websocket closed
+func (w *Websocket) receive() error {
+
+	// Read incoming message(s)
+	_, rawMessage, err := w.client.ReadMessage()
+
+	if err != nil {
+		w.ready = false
+
+		// Check if it's a clean exit or we don't need to reconnect
+		if websocket.IsCloseError(err, websocket.CloseNormalClosure) || !w.autoReconnect {
+			rerr := errors.New("websocket closed")
+			w.Close(rerr)
+			return rerr
+		} else { // else, reconnect
+			msg := fmt.Errorf("error in websocket, will attempt to reconnect: %s", err)
+			w.logger.Error(msg)
+			w.Connect()
+		}
+	} else {
+		if messages, err := w.unwrapSignalR(rawMessage); err != nil {
+			return err
+		} else {
+			for _, message := range messages {
+				switch message.Target {
+				case "CloseConnection":
+					rerr := errors.New("closing message received; websocket closed")
+					w.Close(rerr)
+					return rerr
+				case "ReadyBastionToClient": // Bastion letting client know the websocket's ready
+					w.logger.Info("Connection Ready")
+					w.ready = true
+				default:
+					w.ready = true
+
+					// push to the right channel
+					agentMessage := message.Arguments[0]
+
+					if channel, ok := w.getChannel(agentMessage.ChannelId); ok {
+						channel.Receive(agentMessage)
+					} else {
+						err := fmt.Errorf("received message that did not correspond to existing channel: %s", agentMessage.ChannelId)
+						w.logger.Error(err)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRWrapper, error) {
+	// Always trim off the termination char if its there
+	if rawMessage[len(rawMessage)-1] == signalRMessageTerminatorByte {
+		rawMessage = rawMessage[0 : len(rawMessage)-1]
+	}
+
+	// Also check to see if we have multiple messages
+	splitmessages := bytes.Split(rawMessage, []byte{signalRMessageTerminatorByte})
+
+	messages := []SignalRWrapper{}
+	for _, msg := range splitmessages {
+		// unwrap signalR
+		var wrappedMessage SignalRWrapper
+		if err := json.Unmarshal(msg, &wrappedMessage); err != nil {
+			return messages, fmt.Errorf("error unmarshalling SignalR message from Bastion: %v", string(msg))
+		}
+
+		// if the messages isn't the signalr type we're expecting, ignore it because it's not going to be an AgentMessage
+		if wrappedMessage.Type != signalRTypeNumber {
+			msg := fmt.Sprintf("Ignoring SignalR message with type %v", wrappedMessage.Type)
+			w.logger.Trace(msg)
+		} else if len(wrappedMessage.Arguments) != 0 { // make sure there is an AgentMessage
+			messages = append(messages, wrappedMessage)
+		}
+	}
+	return messages, nil
+}
+
+// Function to write signalr message to websocket
+func (w *Websocket) processOutput(agentMessage am.AgentMessage) {
+	// Lock our send function so we don't hit any concurrency issues
+	// Ref: https://github.com/gorilla/websocket/issues/698
+	w.socketLock.Lock()
+	defer w.socketLock.Unlock()
+
+	// Select SignalR Endpoint
+	target, err := w.targetSelectHandler(agentMessage) // Agent and Daemon specify their own function to choose target
+	if err != nil {
+		rerr := fmt.Errorf("error in selecting SignalR Endpoint target name: %s", err)
+		w.logger.Error(rerr)
+		return
+	}
+
+	signalRMessage := SignalRWrapper{
+		Target:    target,
+		Type:      signalRTypeNumber,
+		Arguments: []am.AgentMessage{agentMessage},
+	}
+
+	// Write our message to websocket
+	if msgBytes, err := json.Marshal(signalRMessage); err != nil {
+		w.logger.Error(fmt.Errorf("error marshalling outgoing SignalR Message: %v", signalRMessage))
+	} else {
+		if err := w.client.WriteMessage(websocket.TextMessage, append(msgBytes, signalRMessageTerminatorByte)); err != nil {
+			w.logger.Error(err)
+		}
+	}
+}
+
+// Function to write signalr message to websocket
+func (w *Websocket) Send(agentMessage am.AgentMessage) {
+	w.sendQueue <- agentMessage
+}
+
+func (w *Websocket) Connect() {
+	if w.getChallenge {
+		// First get the config from the vault
+		config, _ := vault.LoadVault()
+
+		// If we have a private key, we must solve the challenge
+		if solvedChallenge, err := newChallenge(w.logger, w.params["org_id"], w.params["cluster_id"], config.Data.ClusterName, w.serviceUrl, config.Data.PrivateKey); err != nil {
+			w.logger.Error(fmt.Errorf("error getting challenge: %s", err))
+			return
+		} else {
+			w.params["solved_challenge"] = solvedChallenge
+		}
+
+		// And sign our agent version
+		if signedAgentVersion, err := signString(config.Data.PrivateKey, w.params["agent_version"]); err != nil {
+			w.logger.Error(fmt.Errorf("error signing agent version: %s", err))
+			return
+		} else {
+			w.params["signed_agent_version"] = signedAgentVersion
+		}
+	}
+
+	// Make our POST request
+	negotiateEndpoint := "https://" + w.serviceUrl + w.hubEndpoint + "/negotiate"
+	w.logger.Infof("Starting negotiation with endpoint %s", negotiateEndpoint)
+
+	if response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.params); err != nil {
+		w.logger.Error(fmt.Errorf("error on negotiation: %s. Response: %+v", err, response))
+	} else {
+
+		// Extract out the connection token
+		bodyBytes, _ := ioutil.ReadAll(response.Body)
+		var m map[string]interface{}
+
+		if err := json.Unmarshal(bodyBytes, &m); err != nil {
+			// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
+			w.logger.Error(fmt.Errorf("error un-marshalling negotiate response: %+v", m))
+		}
+
+		// Add the connection id to the list of params
+		w.params["id"] = m["connectionId"].(string)
+		w.params["clientProtocol"] = "1.5"
+		w.params["transport"] = "WebSockets"
+
+		w.logger.Infof("Negotiation successful: %v", response.StatusCode)
+		response.Body.Close()
+	}
+
+	// Build our url u , add our params as well
+	websocketUrl := url.URL{Scheme: "wss", Host: w.serviceUrl, Path: w.hubEndpoint}
+	w.logger.Infof("Connecting to %s", websocketUrl.String())
+
+	q := websocketUrl.Query()
+	for key, value := range w.params {
+		q.Set(key, value)
+	}
+	websocketUrl.RawQuery = q.Encode()
+
+	var err error
+	if w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{"Authorization": []string{w.headers["Authorization"]}}); err != nil {
+		w.logger.Error(err)
+	} else {
+		// Define our protocol and version
+		// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go
+		if err := w.client.WriteMessage(websocket.TextMessage, append([]byte(`{"protocol": "json","version": 1}`), signalRMessageTerminatorByte)); err != nil {
+			w.logger.Info("Error when trying to agree on version for SignalR!")
+			w.client.Close()
+		} else {
+			w.logger.Infof("Connection Successful!")
+			w.ready = true
+		}
+	}
+}
+
+func (w *Websocket) lenChannels() int {
+	w.mapLock.Lock()
+	defer w.mapLock.Unlock()
+
+	return len(w.channels)
+}
+
+func (w *Websocket) addChannel(id string, channel IChannel) {
+	// Helper function so we avoid writing to this map at the same time
+	w.mapLock.Lock()
+	defer w.mapLock.Unlock()
+
+	w.channels[id] = channel
+}
+
+func (w *Websocket) deleteChannel(id string) {
+	w.mapLock.Lock()
+	defer w.mapLock.Unlock()
+
+	delete(w.channels, id)
+}
+
+func (w *Websocket) getChannel(id string) (IChannel, bool) {
+	w.mapLock.Lock()
+	defer w.mapLock.Unlock()
+
+	channel, ok := w.channels[id]
+	return channel, ok
+}

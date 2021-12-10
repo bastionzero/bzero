@@ -1,0 +1,47 @@
+FROM golang:1.16-alpine
+
+RUN mkdir -p /bctl-agent-files && \
+    mkdir -p /bctl-agent
+
+# This flag defines if we are building a prod image or not
+ARG PROD_TRUE="false"
+
+# Copy our repo
+COPY . /bctl-agent-files
+
+# Update our agent version value
+RUN VERSION="$(cat /bctl-agent-files/VERSION)" && \
+    sed -i.bu 's/\$AGENT_VERSION/'"$VERSION"'/g' /bctl-agent-files/bctl/agent/agent.go
+
+# Build our exectuable
+RUN cd /bctl-agent-files/bctl/agent && \
+    go build agent.go
+
+# Move the executable and make it runnable, make our log dir
+RUN mv /bctl-agent-files/bctl/agent/agent /bctl-agent && \
+    chmod +x /bctl-agent/agent && \
+    mkdir /var/log/cwc/
+
+# Install rsync for devs, and python3 for our systemd alt
+RUN if [[ "$PROD_TRUE" != "true" ]] ; then \
+    apk add rsync python3 && \
+    wget https://raw.githubusercontent.com/gdraheim/docker-systemctl-replacement/master/files/docker/systemctl3.py -O /usr/local/bin/systemctl && \
+    chmod +x /usr/local/bin/systemctl && \
+    mkdir -p /etc/systemd/system/ && \
+    touch /etc/systemd/system/bctl-agent.service && \ 
+    mv /bctl-agent-files/bctl-agent.service /etc/systemd/system/bctl-agent.service; \
+    else echo "Not Adding dev tools"; fi
+
+# Move and make start an executable
+RUN mv /bctl-agent-files/start.sh /bctl-agent/start.sh && \
+    chmod +X /bctl-agent/start.sh && chmod 777 /bctl-agent/start.sh
+RUN if [[ "$PROD_TRUE" != "true" ]] ; then \
+    chmod +X /bctl-agent-files/start-dev.sh && chmod 777 /bctl-agent-files/start-dev.sh; \
+    else echo "Not chmoding start-dev.sh"; fi
+
+# Remove all other files if we are building in prod
+RUN if [[ "$PROD_TRUE" == "true" ]] ; then \
+    rm -rf /bctl-agent-files; \
+    else echo  "Not removing go source code"; fi
+
+ENTRYPOINT [ "/bctl-agent/start.sh" ]
