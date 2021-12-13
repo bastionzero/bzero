@@ -308,7 +308,7 @@ func (w *Websocket) Connect() {
 		w.params["clientProtocol"] = "1.5"
 		w.params["transport"] = "WebSockets"
 
-		w.logger.Infof("Negotiation successful: %v", response.StatusCode)
+		w.logger.Info("Negotiation successful")
 		response.Body.Close()
 	}
 
@@ -332,7 +332,7 @@ func (w *Websocket) Connect() {
 			w.logger.Info("Error when trying to agree on version for SignalR!")
 			w.client.Close()
 		} else {
-			w.logger.Infof("Connection Successful!")
+			w.logger.Info("Connection successful!")
 			w.ready = true
 		}
 	}

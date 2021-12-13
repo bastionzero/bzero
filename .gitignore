@@ -5,3 +5,6 @@ bctl/daemon/daemon-windows
 bctl/daemon/daemon-linux
 bctl/daemon/daemon-macos
 bctl/agent/agent
+
+# Macos fluff
+*.DS_Store

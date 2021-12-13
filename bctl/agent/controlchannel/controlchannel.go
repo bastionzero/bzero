@@ -100,7 +100,7 @@ func (c *ControlChannel) Receive(agentMessage am.AgentMessage) {
 
 // Wraps and sends the payload
 func (c *ControlChannel) send(messageType am.MessageType, messagePayload interface{}) error {
-	c.logger.Trace(fmt.Sprintf("control channel is sending %s message", messageType))
+	c.logger.Tracef("control channel is sending %s message", messageType)
 	messageBytes, _ := json.Marshal(messagePayload)
 	agentMessage := am.AgentMessage{
 		ChannelId:      c.id,

@@ -81,6 +81,7 @@ func LoadVault() (*Vault, error) {
 					}, nil
 				}
 			} else {
+				secretsClient := clientset.CoreV1().Secrets(os.Getenv("NAMESPACE"))
 				return &Vault{
 					client: secretsClient,
 					secret: secret,

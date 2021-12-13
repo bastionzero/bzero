@@ -10,13 +10,15 @@ import (
 
 	ed "crypto/ed25519"
 
+	"github.com/google/uuid"
+
 	"bastionzero.com/bctl/v1/bctl/agent/controlchannel"
+	"bastionzero.com/bctl/v1/bctl/agent/rbac"
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"github.com/google/uuid"
 )
 
 var (
@@ -30,13 +32,10 @@ const (
 	hubEndpoint        = "/api/v1/hub/kube-server"
 	controlHubEndpoint = "/api/v1/hub/kube-control"
 	registerEndpoint   = "/api/v1/kube/register-agent"
-
-	// Disable auto-reconnect
-	autoReconnect = false
 )
 
 func main() {
-	// Get agent version
+	// grab agent version
 	agentVersion := getAgentVersion()
 
 	// setup our loggers
@@ -45,21 +44,26 @@ func main() {
 		return
 	}
 	logger.AddAgentVersion(agentVersion)
+	logger.Infof("BastionZero Agent version %s starting up...", agentVersion)
 
 	if err := parseFlags(); err != nil {
 		logger.Error(err)
 		os.Exit(1)
 	}
+	logger.Infof("Information parsed for %s", clusterName)
 
-	// Populate keys if they haven't been generated already
-	err = newAgent(logger, agentVersion)
-	if err != nil {
+	// Check if the agent is registered or not.  If not, generate signing keys,
+	// check kube permissions and setup, and register with the Bastion.
+	if err := register(logger); err != nil {
 		logger.Error(err)
 		return
 	}
 
-	// Connect to the control channel
+	// Connect the control channel to BastionZero
+	logger.Info("Creating connection to BastionZero...")
 	startControlChannel(logger, agentVersion)
+
+	logger.Info("Connection created successfully. Listening for incoming commands...")
 
 	// Sleep forever because otherwise kube will endlessly try restarting
 	// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
@@ -68,7 +72,10 @@ func main() {
 
 func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	// Load in our saved config
-	config, _ := vault.LoadVault()
+	config, err := vault.LoadVault()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve vault: %s", err)
+	}
 
 	// Create our headers and params, headers are empty
 	headers := make(map[string]string)
@@ -97,6 +104,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, hubEndpoint, dcTargetSelectHandler)
 }
 
+// control channel function to select correct SignalR hubs on message egress
 func ccTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.HealthCheck:
@@ -106,6 +114,7 @@ func ccTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	}
 }
 
+// data channel's function to select SignalR hubs base on agent message message type
 func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.DataChannelReady:
@@ -174,12 +183,25 @@ func getAgentVersion() string {
 	}
 }
 
-func newAgent(logger *logger.Logger, agentVersion string) error {
-	config, _ := vault.LoadVault()
+func register(logger *logger.Logger) error {
+	logger.Info("Checking if Agent is already registered...")
+
+	config, err := vault.LoadVault()
+	if err != nil {
+		return fmt.Errorf("could not load vault: %s", err)
+	}
 
 	// Check if vault is empty, if so generate a private, public key pair
 	if config.IsEmpty() {
-		logger.Info("Creating new agent secret")
+		logger.Info("This is a new agent")
+
+		if err := rbac.CheckPermissions(logger, namespace); err != nil {
+			return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
+		} else {
+			logger.Info("Namespace and service account permissions verified.")
+		}
+
+		logger.Info("Creating cryptographic identity...")
 
 		if publicKey, privateKey, err := ed.GenerateKey(nil); err != nil {
 			return fmt.Errorf("error generating key pair: %v", err.Error())
@@ -198,11 +220,11 @@ func newAgent(logger *logger.Logger, agentVersion string) error {
 			}
 
 			// Register with Bastion
-			logger.Info("Registering agent with Bastion")
+			logger.Info("Cryptographic identity created.  Reaching out to BastionZero...")
 			register := controlchannel.RegisterAgentMessage{
 				PublicKey:      pubkeyString,
 				ActivationCode: activationToken,
-				AgentVersion:   agentVersion,
+				AgentVersion:   getAgentVersion(),
 				OrgId:          orgId,
 				EnvironmentId:  environmentId,
 				ClusterName:    clusterName,
@@ -218,18 +240,24 @@ func newAgent(logger *logger.Logger, agentVersion string) error {
 			// Make our POST request
 			response, err := bzhttp.PostRegister(logger, "https://"+serviceUrl+registerEndpoint, "application/json", registerJson)
 			if err != nil || response.StatusCode != http.StatusOK {
-				rerr := fmt.Errorf("error making post request to register agent. Error: %s. Response: %v", err, response)
+				rerr := fmt.Errorf("error making post request to register agent. Error: %s. Response: %+v", err, response)
 				return rerr
 			}
 
+			logger.Info("Agent sucessfully Registered.  BastionZero says hi.")
+
 			// If the registration went ok, save the config
 			if err := config.Save(); err != nil {
-				return fmt.Errorf("error saving vault: %v", err.Error())
+				return fmt.Errorf("error saving vault: %s", err)
 			}
+
+			logger.Info("Agent identity saved.")
+
+			logger.Info("Successfully completed registration.  Starting Agent normally...")
 		}
 	} else {
 		// If the vault isn't empty, don't do anything
-		logger.Info("Found Previous config data")
+		logger.Info("This Agent is already registered.  Starting Agent normally...")
 	}
 	return nil
 }
