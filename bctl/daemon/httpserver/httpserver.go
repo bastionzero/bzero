@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -27,6 +28,10 @@ const (
 	autoReconnect = true
 	getChallenge  = false
 )
+
+type StatusMessage struct {
+	ExitMessage string `json:"ExitMessage"`
+}
 
 type HTTPServer struct {
 	logger      *logger.Logger
@@ -107,12 +112,33 @@ func StartHTTPServer(logger *logger.Logger,
 			listener.rootCallback(logger, w, r)
 		})
 
+		http.HandleFunc("/bastionzero-status", func(w http.ResponseWriter, r *http.Request) {
+			listener.statusCallback(w, r)
+		})
+
 		if err := http.ListenAndServeTLS(":"+daemonPort, certPath, keyPath, nil); err != nil {
 			logger.Error(err)
 		}
 	}()
 
 	return nil
+}
+
+func (k *HTTPServer) statusCallback(w http.ResponseWriter, r *http.Request) {
+	// Build our status message
+	statusMessage := StatusMessage{
+		ExitMessage: k.exitMessage,
+	}
+
+	registerJson, err := json.Marshal(statusMessage)
+	if err != nil {
+		k.logger.Error(fmt.Errorf("error marshalling status message: %+v", err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(registerJson)
 }
 
 // for creating new websockets
