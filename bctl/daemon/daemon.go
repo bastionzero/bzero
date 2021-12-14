@@ -11,7 +11,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
-// Declaring flags as package-accesible variables
+// Declaring flags as package-accessible variables
 var (
 	sessionId, authHeader, targetUser, targetClusterId, serviceUrl           string
 	daemonPort, localhostToken, environmentId, certPath, keyPath, configPath string
