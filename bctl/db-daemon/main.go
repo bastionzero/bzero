@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -111,7 +112,7 @@ func main() {
 	}
 
 	// Now create our local listener for TCP connections
-	laddr, err := net.ResolveTCPAddr("tcp", ":5432")
+	laddr, err := net.ResolveTCPAddr("tcp", ":8000")
 	listener, err := net.ListenTCP("tcp", laddr)
 	if err != nil {
 		logger.Errorf("Failed to open local port to listen: %s", err)
@@ -134,14 +135,47 @@ func handleProxy(lconn *net.TCPConn, logger *logger.Logger, client *websocket.Co
 	// Always ensure we close the local tcp connection
 	defer lconn.Close()
 
+	// Setup a go routine to listen for messages as well, and write to our local connection
+	// Now listen for messages from bastion
+	go func() {
+		for {
+			// Read incoming message(s)
+			_, rawMessage, err := client.ReadMessage()
+
+			if err != nil {
+				logger.Error(err)
+				return
+			} else {
+				// Unwrap the message
+				if messages, err := unwrapSignalR(rawMessage, logger); err != nil {
+					logger.Error(err)
+				} else {
+					for _, message := range messages {
+						logger.Infof("HERE: %s", message.Target)
+
+						//write out result
+						n, err := lconn.Write(message.Arguments[0].MessagePayload)
+						if err != nil {
+							logger.Errorf("Write failed '%s'\n", err)
+							return
+						}
+
+						logger.Infof("Wrote %d bytes to local tcp connection", n)
+					}
+				}
+			}
+		}
+	}()
+
 	// Keep looping till we hit EOF
-	tmp := make([]byte, 256)
+	tmp := make([]byte, 0xffff)
 	for {
 		n, err := lconn.Read(tmp)
 		if err != nil {
 			logger.Errorf("Read failed '%s'\n", err)
 			return
 		}
+
 		buff := tmp[:n]
 
 		signalRMessage := SignalRWrapper{
@@ -162,9 +196,37 @@ func handleProxy(lconn *net.TCPConn, logger *logger.Logger, client *websocket.Co
 			if err := client.WriteMessage(websocket.TextMessage, append(msgBytes, signalRMessageTerminatorByte)); err != nil {
 				logger.Error(err)
 			}
-			logger.Info("ARE WE HERE?")
+			logger.Info("Send message to Bastion")
 		}
 	}
+}
+
+func unwrapSignalR(rawMessage []byte, logger *logger.Logger) ([]SignalRWrapper, error) {
+	// Always trim off the termination char if its there
+	if rawMessage[len(rawMessage)-1] == signalRMessageTerminatorByte {
+		rawMessage = rawMessage[0 : len(rawMessage)-1]
+	}
+
+	// Also check to see if we have multiple messages
+	splitmessages := bytes.Split(rawMessage, []byte{signalRMessageTerminatorByte})
+
+	messages := []SignalRWrapper{}
+	for _, msg := range splitmessages {
+		// unwrap signalR
+		var wrappedMessage SignalRWrapper
+		if err := json.Unmarshal(msg, &wrappedMessage); err != nil {
+			return messages, fmt.Errorf("error unmarshalling SignalR message from Bastion: %v", string(msg))
+		}
+
+		// if the messages isn't the signalr type we're expecting, ignore it because it's not going to be an AgentMessage
+		if wrappedMessage.Type != signalRTypeNumber {
+			msg := fmt.Sprintf("Ignoring SignalR message with type %v", wrappedMessage.Type)
+			logger.Trace(msg)
+		} else if len(wrappedMessage.Arguments) != 0 { // make sure there is an AgentMessage
+			messages = append(messages, wrappedMessage)
+		}
+	}
+	return messages, nil
 }
 
 func parseFlags() error {
