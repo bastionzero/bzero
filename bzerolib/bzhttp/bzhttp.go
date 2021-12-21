@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -102,6 +104,9 @@ func (b *bzhttp) post() (*http.Response, error) {
 				req.Header.Set(name, values)
 			}
 
+			// Add the content type header
+			req.Header.Set("Content-Type", b.contentType)
+
 			// Set any query params
 			q := req.URL.Query()
 			for key, values := range b.params {
@@ -112,6 +117,11 @@ func (b *bzhttp) post() (*http.Response, error) {
 			req.URL.RawQuery = q.Encode()
 
 			response, err = httpClient.Do(req)
+
+			if err != nil {
+				b.logger.Errorf("error making post request: %v", err)
+				return nil, err
+			}
 		}
 
 		// If the status code is unauthorized, do not attempt to retry
@@ -122,6 +132,13 @@ func (b *bzhttp) post() (*http.Response, error) {
 
 		if err != nil || response.StatusCode != http.StatusOK {
 			b.logger.Infof("error making post request, will retry in: %s.", b.backoffParams.NextBackOff())
+
+			bodyBytes, err := io.ReadAll(response.Body)
+			if err != nil {
+				log.Fatal(err)
+			}
+			bodyString := string(bodyBytes)
+			b.logger.Infof("error: %s", bodyString)
 			continue
 		}
 

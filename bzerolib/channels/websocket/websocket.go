@@ -24,6 +24,10 @@ const (
 	// SignalR Constants
 	signalRMessageTerminatorByte = 0x1E
 	signalRTypeNumber            = 1 // Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#invocation-message-encoding
+	createConnectionEndpoint     = "/api/v1/connection/create"
+
+	// Enum target types
+	Cluster = 2
 )
 
 type IWebsocket interface {
@@ -64,6 +68,9 @@ type Websocket struct {
 
 	// Optional command to refresh auth information
 	refreshTokenCommand string
+
+	// Target type for connectionNode
+	targetType int
 }
 
 // Constructor to create a new common websocket client object that can be shared by the daemon and server
@@ -91,6 +98,7 @@ func New(logger *logger.Logger,
 		headers:             headers,
 		subscribed:          false,
 		refreshTokenCommand: refreshTokenCommand,
+		targetType:          Cluster, // TODO, this should be passed in as a var
 	}
 
 	// Connect to the websocket in a go routine incase it takes a long time
@@ -301,8 +309,34 @@ func (w *Websocket) Connect() {
 		}
 	}
 
+	baseUrl := "https://" + w.serviceUrl
+
+	// First hit Bastion in order to get the connectionNode information
+	createConnectionRequest := CreateConnectionRequest{
+		ServerType: w.targetType,
+		ServerId:   w.params["target_cluster_id"],
+		SessionId:  w.params["session_id"],
+		Username:   "testuser",
+	}
+	createConnectionEndpoint := baseUrl + createConnectionEndpoint
+	w.logger.Infof("HERE? %s", createConnectionEndpoint)
+
+	msgBytes, errMarshal := json.Marshal(createConnectionRequest)
+	if errMarshal != nil {
+		w.logger.Error(fmt.Errorf("error marshalling create connection request for connection node: %v", createConnectionRequest))
+		panic(errMarshal)
+	}
+
+	response, errPost := bzhttp.Post(w.logger, createConnectionEndpoint, "application/json", msgBytes, w.headers, w.params)
+	if errPost != nil {
+		w.logger.Error(fmt.Errorf("error on create connection for connection node: %s. Response: %+v", errPost, response))
+		panic(errPost)
+	}
+
+	w.logger.Infof("HERE? %v", response)
+
 	// Make our POST request
-	negotiateEndpoint := "https://" + w.serviceUrl + w.hubEndpoint + "/negotiate"
+	negotiateEndpoint := baseUrl + w.hubEndpoint + "/negotiate"
 	w.logger.Infof("Starting negotiation with endpoint %s", negotiateEndpoint)
 
 	if response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.params); err != nil {
