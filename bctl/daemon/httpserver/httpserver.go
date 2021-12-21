@@ -112,6 +112,10 @@ func StartHTTPServer(logger *logger.Logger,
 			listener.rootCallback(logger, w, r)
 		})
 
+		http.HandleFunc("/bastionzero-ready", func(w http.ResponseWriter, r *http.Request) {
+			listener.isReadyCallback(w, r)
+		})
+
 		http.HandleFunc("/bastionzero-status", func(w http.ResponseWriter, r *http.Request) {
 			listener.statusCallback(w, r)
 		})
@@ -122,6 +126,16 @@ func StartHTTPServer(logger *logger.Logger,
 	}()
 
 	return nil
+}
+
+func (k *HTTPServer) isReadyCallback(w http.ResponseWriter, r *http.Request) {
+	if k.restApiDatachannel.Ready() {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else {
+		w.WriteHeader(http.StatusTooEarly)
+		return
+	}
 }
 
 func (k *HTTPServer) statusCallback(w http.ResponseWriter, r *http.Request) {
@@ -216,17 +230,6 @@ func (h *HTTPServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode
 
 func (h *HTTPServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
 	h.logger.Infof("Handling %s - %s\n", r.URL.Path, r.Method)
-
-	// Special case /bzero-is-ready
-	if strings.HasSuffix(r.URL.Path, "/bzero-is-ready") {
-		if h.restApiDatachannel.Ready() {
-			w.WriteHeader(http.StatusOK)
-			return
-		} else {
-			w.WriteHeader(http.StatusTooEarly)
-			return
-		}
-	}
 
 	// Before processing, check if we're ready to process or if there's been an error
 	switch {
