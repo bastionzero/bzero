@@ -87,7 +87,8 @@ func New(logger *logger.Logger,
 		subscribed:          false,
 	}
 
-	ws.Connect()
+	// Connect to the websocket in a go routine incase it takes a long time
+	go ws.Connect()
 
 	// Listener for any incoming messages
 	ws.tmb.Go(func() error {
