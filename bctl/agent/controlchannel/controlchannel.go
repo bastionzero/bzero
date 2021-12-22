@@ -125,7 +125,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	params["daemon_connection_id"] = message.ConnectionId
 	params["token"] = message.Token
 
-	if ws, err := websocket.New(subLogger, message.ConnectionId, c.serviceUrl, c.hubEndpoint, params, headers, c.dcTargetSelectHandler, false, false, ""); err != nil {
+	if ws, err := websocket.New(subLogger, message.ConnectionId, c.serviceUrl, c.hubEndpoint, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.ClusterAgentControl); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary

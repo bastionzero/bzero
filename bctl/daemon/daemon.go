@@ -53,7 +53,7 @@ func startHTTPServer(logger *logger.Logger) error {
 	params["session_id"] = sessionId
 	params["target_user"] = targetUser
 	params["target_groups"] = targetGroupsRaw
-	params["target_cluster_id"] = targetClusterId
+	params["target_id"] = targetClusterId
 	params["environment_id"] = environmentId
 
 	subLogger := logger.GetComponentLogger("httpserver")
