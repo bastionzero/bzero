@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -60,6 +62,9 @@ type Websocket struct {
 	hubEndpoint string
 	params      map[string]string
 	headers     map[string]string
+
+	// Optional command to refresh auth information
+	refreshTokenCommand string
 }
 
 // Constructor to create a new common websocket client object that can be shared by the daemon and server
@@ -71,7 +76,8 @@ func New(logger *logger.Logger,
 	headers map[string]string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	autoReconnect bool,
-	getChallenge bool) (*Websocket, error) {
+	getChallenge bool,
+	refreshTokenCommand string) (*Websocket, error) {
 
 	ws := Websocket{
 		logger:              logger,
@@ -85,6 +91,7 @@ func New(logger *logger.Logger,
 		params:              params,
 		headers:             headers,
 		subscribed:          false,
+		refreshTokenCommand: refreshTokenCommand,
 	}
 
 	ws.Connect()
@@ -283,6 +290,18 @@ func (w *Websocket) Connect() {
 			return
 		} else {
 			w.params["signed_agent_version"] = signedAgentVersion
+		}
+	}
+
+	// If we have the option to refresh our auth details do it here before reconnecting
+	if w.refreshTokenCommand != "" {
+		// update the id token by calling the passed in zli command
+		if splits := strings.Split(w.refreshTokenCommand, " "); len(splits) >= 2 {
+			if out, err := exec.Command(splits[0], splits[1:]...).CombinedOutput(); err != nil {
+				w.logger.Error(fmt.Errorf("%s while executing zli refresh token command: %s", err, string(out)))
+			}
+		} else {
+			w.logger.Error(fmt.Errorf("not enough arguments to refresh token zli command: %v", len(splits)))
 		}
 	}
 
