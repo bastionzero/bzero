@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
-	"strings"
 	"time"
 
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
@@ -184,12 +182,8 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 
 func (k *Keysplitting) buildBZCert() (bzcrt.BZCert, error) {
 	// update the id token by calling the passed in zli command
-	if splits := strings.Split(k.refreshTokenCommand, " "); len(splits) >= 2 {
-		if out, err := exec.Command(splits[0], splits[1:]...).CombinedOutput(); err != nil {
-			return bzcrt.BZCert{}, fmt.Errorf("%s while executing zli refresh token command: %s", err, string(out))
-		}
-	} else {
-		return bzcrt.BZCert{}, fmt.Errorf("not enough arguments to refresh token zli command: %v", len(splits))
+	if err := util.RunRefreshAuthCommand(k.refreshTokenCommand); err != nil {
+		return bzcrt.BZCert{}, err
 	}
 
 	if configFile, err := os.Open(k.configPath); err != nil {

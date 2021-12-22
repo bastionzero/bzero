@@ -16,6 +16,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
@@ -60,6 +61,9 @@ type Websocket struct {
 	hubEndpoint string
 	params      map[string]string
 	headers     map[string]string
+
+	// Optional command to refresh auth information
+	refreshTokenCommand string
 }
 
 // Constructor to create a new common websocket client object that can be shared by the daemon and server
@@ -71,7 +75,8 @@ func New(logger *logger.Logger,
 	headers map[string]string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	autoReconnect bool,
-	getChallenge bool) (*Websocket, error) {
+	getChallenge bool,
+	refreshTokenCommand string) (*Websocket, error) {
 
 	ws := Websocket{
 		logger:              logger,
@@ -85,6 +90,7 @@ func New(logger *logger.Logger,
 		params:              params,
 		headers:             headers,
 		subscribed:          false,
+		refreshTokenCommand: refreshTokenCommand,
 	}
 
 	ws.Connect()
@@ -283,6 +289,14 @@ func (w *Websocket) Connect() {
 			return
 		} else {
 			w.params["signed_agent_version"] = signedAgentVersion
+		}
+	}
+
+	// If we have the option to refresh our auth details do it here before reconnecting
+	if w.refreshTokenCommand != "" {
+		if err := util.RunRefreshAuthCommand(w.refreshTokenCommand); err != nil {
+			w.logger.Errorf("error executing refresh auth command: %v", err)
+			panic(err)
 		}
 	}
 

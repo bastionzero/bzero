@@ -115,7 +115,7 @@ func (b *bzhttp) post() (*http.Response, error) {
 		}
 
 		// If the status code is unauthorized, do not attempt to retry
-		if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound {
+		if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusUnsupportedMediaType {
 			ticker.Stop()
 			return response, fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
 		}
