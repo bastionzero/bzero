@@ -33,6 +33,9 @@ const (
 	// Enum target types for agent side connections
 	ClusterAgent        = -1
 	ClusterAgentControl = -2
+
+	// Hub endpoints
+	kubeDaemonConnectionNodeHubEndpoint = "/hub/kube/daemon"
 )
 
 type IWebsocket interface {
@@ -66,10 +69,11 @@ type Websocket struct {
 	getChallenge bool
 
 	// Variables used to make the connection
-	serviceUrl  string
-	hubEndpoint string
-	params      map[string]string
-	headers     map[string]string
+	serviceUrl    string
+	hubEndpoint   string
+	params        map[string]string // Params used to authenticate against bastion
+	requestParams map[string]string // Params used to authenticate against the websocket
+	headers       map[string]string
 
 	// Optional command to refresh auth information
 	refreshTokenCommand string
@@ -104,6 +108,7 @@ func New(logger *logger.Logger,
 		serviceUrl:          serviceUrl,
 		hubEndpoint:         hubEndpoint,
 		params:              params,
+		requestParams:       make(map[string]string),
 		headers:             headers,
 		subscribed:          false,
 		refreshTokenCommand: refreshTokenCommand,
@@ -332,23 +337,34 @@ func (w *Websocket) Connect() {
 			panic(cnControllerErr)
 		}
 
-		targetGroups := strings.Split(w.params["target_groups"], ",")
+		targetGroups := []string{}
+		if w.params["target_groups"] != "" {
+			targetGroups = strings.Split(w.params["target_groups"], ",")
+		}
+
 		createConnectionResponse := cnController.CreateKubeConnection(w.params["target_user"], targetGroups, w.params["target_id"])
 
-		// bastionUrl.href.split('.bastionzero.com')[0] + '-connect.bastionzero.com/' + this.connectionNodeId + '/';
+		// Now we can build our connectionnode url
+		w.baseUrl = w.buildConnectionNodeUrl(createConnectionResponse.ConnectionNodeId) + kubeDaemonConnectionNodeHubEndpoint
 
-		w.logger.Infof("HERE? %v", createConnectionResponse)
-		panic("test")
+		// Define our request params
+		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
+		w.requestParams["authToken"] = createConnectionResponse.AuthToken
 	default:
-		w.baseUrl = "https://" + w.serviceUrl
+		// Default base url is just the service url and the hub endpoint
+		w.baseUrl = w.serviceUrl + w.hubEndpoint
+
+		// Default request params are just the params based
+		w.requestParams = w.params
 	}
 
 	// Make our POST request
-	negotiateEndpoint := w.baseUrl + w.hubEndpoint + "/negotiate"
+	negotiateEndpoint := "https://" + w.baseUrl + "/negotiate"
 	w.logger.Infof("Starting negotiation with endpoint %s", negotiateEndpoint)
 
-	if response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.params); err != nil {
+	if response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.requestParams); err != nil {
 		w.logger.Error(fmt.Errorf("error on negotiation: %s. Response: %+v", err, response))
+		panic(err)
 	} else {
 
 		// Extract out the connection token
@@ -370,17 +386,23 @@ func (w *Websocket) Connect() {
 	}
 
 	// Build our url u , add our params as well
-	websocketUrl := url.URL{Scheme: "wss", Host: w.serviceUrl, Path: w.hubEndpoint}
+	// websocketUrl := url.URL{Scheme: "wss", Host: w.serviceUrl, Path: w.hubEndpoint}
+	websocketRawUrl := "wss://" + w.baseUrl
+	websocketUrl, urlParseError := url.Parse(websocketRawUrl)
+	if urlParseError != nil {
+		w.logger.Error(fmt.Errorf("error parsing url %s", websocketRawUrl))
+		panic(urlParseError)
+	}
 	w.logger.Infof("Connecting to %s", websocketUrl.String())
 
 	q := websocketUrl.Query()
-	for key, value := range w.params {
+	for key, value := range w.requestParams {
 		q.Set(key, value)
 	}
 	websocketUrl.RawQuery = q.Encode()
 
 	var err error
-	if w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{"Authorization": []string{w.headers["Authorization"]}}); err != nil {
+	if w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{}); err != nil {
 		w.logger.Error(err)
 	} else {
 		// Define our protocol and version
@@ -423,4 +445,13 @@ func (w *Websocket) getChannel(id string) (IChannel, bool) {
 
 	channel, ok := w.channels[id]
 	return channel, ok
+}
+
+// Helper function to build connection node Url from our base url
+func (w *Websocket) buildConnectionNodeUrl(connectionNodeId string) string {
+	// Determine the prefix of the url (i.e. cloud.bastionzero.com -> cloud)
+	urlPrefix := strings.Split(w.serviceUrl, ".bastionzero.com")[0]
+
+	// Build the connect url
+	return urlPrefix + "-connect.bastionzero.com/" + connectionNodeId
 }
