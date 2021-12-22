@@ -8,8 +8,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os/exec"
-	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -18,6 +16,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
@@ -295,13 +294,9 @@ func (w *Websocket) Connect() {
 
 	// If we have the option to refresh our auth details do it here before reconnecting
 	if w.refreshTokenCommand != "" {
-		// update the id token by calling the passed in zli command
-		if splits := strings.Split(w.refreshTokenCommand, " "); len(splits) >= 2 {
-			if out, err := exec.Command(splits[0], splits[1:]...).CombinedOutput(); err != nil {
-				w.logger.Error(fmt.Errorf("%s while executing zli refresh token command: %s", err, string(out)))
-			}
-		} else {
-			w.logger.Error(fmt.Errorf("not enough arguments to refresh token zli command: %v", len(splits)))
+		if err := util.RunRefreshAuthCommand(w.refreshTokenCommand); err != nil {
+			w.logger.Errorf("error executing refresh auth command: %v", err)
+			panic(err)
 		}
 	}
 
