@@ -32,7 +32,6 @@ type ControlChannel struct {
 
 	// variables for opening websockets
 	serviceUrl            string
-	hubEndpoint           string
 	dcTargetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	// These are all the types of channels we have available
@@ -49,7 +48,6 @@ func Start(logger *logger.Logger,
 	id string,
 	websocket *websocket.Websocket, // control channel websocket
 	serviceUrl string,
-	hubEndpoint string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
 	control := &ControlChannel{
@@ -58,7 +56,6 @@ func Start(logger *logger.Logger,
 		id:        id,
 
 		serviceUrl:            serviceUrl,
-		hubEndpoint:           hubEndpoint,
 		dcTargetSelectHandler: targetSelectHandler,
 
 		inputChan: make(chan am.AgentMessage, 25),
@@ -115,32 +112,33 @@ func (c *ControlChannel) send(messageType am.MessageType, messagePayload interfa
 }
 
 func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
-	subLogger := c.logger.GetWebsocketLogger(message.ConnectionId)
+	subLogger := c.logger.GetWebsocketLogger(message.DaemonWebsocketId)
 
 	// Create our headers and params, headers are empty
 	headers := make(map[string]string)
 
 	// Add our token to our params
 	params := make(map[string]string)
-	params["daemon_connection_id"] = message.ConnectionId
+	params["daemon_websocket_id"] = message.DaemonWebsocketId
+	params["connection_node_id"] = message.ConnectionNodeId
 	params["token"] = message.Token
 
-	if ws, err := websocket.New(subLogger, message.ConnectionId, c.serviceUrl, c.hubEndpoint, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.ClusterAgentControl); err != nil {
+	if ws, err := websocket.New(subLogger, message.DaemonWebsocketId, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.ClusterAgent); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary
-		c.logger.Infof("created websocket with id: %s", message.ConnectionId)
+		c.logger.Infof("created websocket with id: %s", message.DaemonWebsocketId)
 		meta := wsMeta{
 			Client:       ws,
 			DataChannels: make(map[string]websocket.IChannel),
 		}
-		c.updateConnectionsMap(message.ConnectionId, meta)
+		c.updateConnectionsMap(message.DaemonWebsocketId, meta)
 	}
 	return nil
 }
 
 func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
-	wsId := message.ConnectionId
+	wsId := message.DaemonWebsocketId
 	dcId := message.DataChannelId
 
 	subLogger := c.logger.GetDatachannelLogger(dcId)

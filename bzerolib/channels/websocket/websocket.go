@@ -36,6 +36,9 @@ const (
 
 	// Hub endpoints
 	kubeDaemonConnectionNodeHubEndpoint = "/hub/kube/daemon"
+	kubeAgentConnectionNodeHubEndpoint  = "/hub/kube/agent"
+
+	controlHubEndpoint = "/api/v1/hub/kube-control"
 )
 
 type IWebsocket interface {
@@ -70,7 +73,6 @@ type Websocket struct {
 
 	// Variables used to make the connection
 	serviceUrl    string
-	hubEndpoint   string
 	params        map[string]string // Params used to authenticate against bastion
 	requestParams map[string]string // Params used to authenticate against the websocket
 	headers       map[string]string
@@ -89,7 +91,6 @@ type Websocket struct {
 func New(logger *logger.Logger,
 	id string,
 	serviceUrl string,
-	hubEndpoint string,
 	params map[string]string,
 	headers map[string]string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
@@ -106,7 +107,6 @@ func New(logger *logger.Logger,
 		getChallenge:        getChallenge,
 		autoReconnect:       autoReconnect,
 		serviceUrl:          serviceUrl,
-		hubEndpoint:         hubEndpoint,
 		params:              params,
 		requestParams:       make(map[string]string),
 		headers:             headers,
@@ -334,7 +334,7 @@ func (w *Websocket) Connect() {
 		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, bastionUrl, "", w.headers, w.params)
 		if cnControllerErr != nil {
 			w.logger.Error(fmt.Errorf("error creating cnController"))
-			panic(cnControllerErr)
+			return
 		}
 
 		targetGroups := []string{}
@@ -350,12 +350,23 @@ func (w *Websocket) Connect() {
 		// Define our request params
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
-	default:
+	case ClusterAgent:
+		// Build our connectionnode Url
+		w.baseUrl = w.buildConnectionNodeUrl(w.params["connection_node_id"]) + kubeAgentConnectionNodeHubEndpoint
+
+		// Define our reqest params
+		w.requestParams["daemon_websocket_id"] = w.params["daemon_websocket_id"]
+		w.requestParams["token"] = w.params["token"]
+		w.logger.Infof("HERE? %s", w.requestParams["token"])
+	case ClusterAgentControl:
 		// Default base url is just the service url and the hub endpoint
-		w.baseUrl = w.serviceUrl + w.hubEndpoint
+		// This is because we hit bastion to initiate our control hub
+		w.baseUrl = w.serviceUrl + controlHubEndpoint
 
 		// Default request params are just the params based
 		w.requestParams = w.params
+	default:
+
 	}
 
 	// Make our POST request
@@ -364,7 +375,7 @@ func (w *Websocket) Connect() {
 
 	if response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.requestParams); err != nil {
 		w.logger.Error(fmt.Errorf("error on negotiation: %s. Response: %+v", err, response))
-		panic(err)
+		return
 	} else {
 
 		// Extract out the connection token
@@ -391,7 +402,7 @@ func (w *Websocket) Connect() {
 	websocketUrl, urlParseError := url.Parse(websocketRawUrl)
 	if urlParseError != nil {
 		w.logger.Error(fmt.Errorf("error parsing url %s", websocketRawUrl))
-		panic(urlParseError)
+		return
 	}
 	w.logger.Infof("Connecting to %s", websocketUrl.String())
 
@@ -404,6 +415,7 @@ func (w *Websocket) Connect() {
 	var err error
 	if w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{}); err != nil {
 		w.logger.Error(err)
+		return
 	} else {
 		// Define our protocol and version
 		// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go

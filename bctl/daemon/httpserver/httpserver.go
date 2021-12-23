@@ -49,7 +49,6 @@ type HTTPServer struct {
 
 	// fields for opening websockets
 	serviceUrl          string
-	hubEndpoint         string
 	params              map[string]string
 	headers             map[string]string
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
@@ -71,7 +70,6 @@ func StartHTTPServer(logger *logger.Logger,
 	targetGroups []string,
 	localhostToken string,
 	serviceUrl string,
-	hubEndpoint string,
 	params map[string]string,
 	headers map[string]string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
@@ -82,7 +80,6 @@ func StartHTTPServer(logger *logger.Logger,
 		ready:               false,
 		localhostToken:      localhostToken,
 		serviceUrl:          serviceUrl,
-		hubEndpoint:         hubEndpoint,
 		params:              params,
 		headers:             headers,
 		targetSelectHandler: targetSelectHandler,

@@ -21,8 +21,9 @@ type HealthCheckMessage struct {
 
 // websocket and datachannel management payloads
 type OpenWebsocketMessage struct {
-	ConnectionId string `json:"connectionId"`
-	Token        string `json:"token"`
+	DaemonWebsocketId string `json:"daemonWebsocketId"`
+	ConnectionNodeId  string `json:"connectionNodeId"`
+	Token             string `json:"token"`
 }
 
 type CloseWebsocketMessage struct {
@@ -30,10 +31,10 @@ type CloseWebsocketMessage struct {
 }
 
 type OpenDataChannelMessage struct {
-	DataChannelId string   `json:"dataChannelId"`
-	ConnectionId  string   `json:"connectionId"`
-	TargetUser    string   `json:"targetUser"`
-	TargetGroups  []string `json:"targetGroups"`
+	DataChannelId     string   `json:"dataChannelId"`
+	DaemonWebsocketId string   `json:"daemonWebsocketd"`
+	TargetUser        string   `json:"targetUser"`
+	TargetGroups      []string `json:"targetGroups"`
 }
 
 type CloseDataChannelMessage struct {

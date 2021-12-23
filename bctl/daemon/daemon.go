@@ -20,8 +20,7 @@ var (
 )
 
 const (
-	hubEndpoint = "/api/v1/hub/kube"
-	version     = "$DAEMON_VERSION"
+	version = "$DAEMON_VERSION"
 )
 
 func main() {
@@ -69,7 +68,6 @@ func startHTTPServer(logger *logger.Logger) error {
 		targetGroups,
 		localhostToken,
 		serviceUrl,
-		hubEndpoint,
 		params,
 		headers,
 		targetSelectHandler)

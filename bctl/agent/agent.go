@@ -29,9 +29,8 @@ var (
 )
 
 const (
-	hubEndpoint        = "/api/v1/hub/kube-server"
-	controlHubEndpoint = "/api/v1/hub/kube-control"
-	registerEndpoint   = "/api/v1/kube/register-agent"
+	hubEndpoint      = "/api/v1/hub/kube-server"
+	registerEndpoint = "/api/v1/kube/register-agent"
 )
 
 func main() {
@@ -92,7 +91,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	// create a websocket
 	wsId := uuid.New().String()
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
-	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, controlHubEndpoint, params, headers, ccTargetSelectHandler, true, true, "", websocket.ClusterAgent)
+	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.ClusterAgentControl)
 	if err != nil {
 		return err
 	}
@@ -101,7 +100,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	ccId := uuid.New().String()
 	ccLogger := logger.GetControlChannelLogger(ccId)
 
-	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, hubEndpoint, dcTargetSelectHandler)
+	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, dcTargetSelectHandler)
 }
 
 // control channel function to select correct SignalR hubs on message egress
