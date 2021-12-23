@@ -27,12 +27,12 @@ type OpenWebsocketMessage struct {
 }
 
 type CloseWebsocketMessage struct {
-	ConnectionId string `json:"connectionId"`
+	DaemonWebsocketId string `json:"daemonWebsocketId"`
 }
 
 type OpenDataChannelMessage struct {
 	DataChannelId     string   `json:"dataChannelId"`
-	DaemonWebsocketId string   `json:"daemonWebsocketd"`
+	DaemonWebsocketId string   `json:"daemonWebsocketId"`
 	TargetUser        string   `json:"targetUser"`
 	TargetGroups      []string `json:"targetGroups"`
 }

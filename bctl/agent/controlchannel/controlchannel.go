@@ -192,14 +192,14 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 		if err := json.Unmarshal(agentMessage.MessagePayload, &cwRequest); err != nil {
 			return fmt.Errorf("malformed close websocket request")
 		} else {
-			if websocket, ok := c.getConnectionMap(cwRequest.ConnectionId); ok {
+			if websocket, ok := c.getConnectionMap(cwRequest.DaemonWebsocketId); ok {
 				// this can take a little time, but we don't want it blocking other things
 				go func() {
 					websocket.Client.Close(errors.New("websocket closed on daemon"))
-					c.deleteConnectionsMap(cwRequest.ConnectionId)
+					c.deleteConnectionsMap(cwRequest.DaemonWebsocketId)
 				}()
 			} else {
-				return fmt.Errorf("could not close non existent websocket with id: %s", cwRequest.ConnectionId)
+				return fmt.Errorf("could not close non existent websocket with id: %s", cwRequest.DaemonWebsocketId)
 			}
 		}
 	case am.OpenDataChannel:

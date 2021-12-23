@@ -10,7 +10,7 @@ const (
 )
 
 type AgentMessage struct {
-	ChannelId      string `json:"ChannelId"` // acts like a session id to tie messages to a keysplitting hash chain
+	ChannelId      string `json:"channelId"` // acts like a session id to tie messages to a keysplitting hash chain
 	MessageType    string `json:"messageType"`
 	SchemaVersion  string `json:"schemaVersion" default:"1.0"`
 	MessagePayload []byte `json:"messagePayload"`

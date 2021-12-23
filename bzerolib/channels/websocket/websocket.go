@@ -357,7 +357,6 @@ func (w *Websocket) Connect() {
 		// Define our reqest params
 		w.requestParams["daemon_websocket_id"] = w.params["daemon_websocket_id"]
 		w.requestParams["token"] = w.params["token"]
-		w.logger.Infof("HERE? %s", w.requestParams["token"])
 	case ClusterAgentControl:
 		// Default base url is just the service url and the hub endpoint
 		// This is because we hit bastion to initiate our control hub
