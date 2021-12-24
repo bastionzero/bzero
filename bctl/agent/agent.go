@@ -91,7 +91,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	// create a websocket
 	wsId := uuid.New().String()
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
-	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.ClusterAgentControl)
+	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.ClusterAgent)
 	if err != nil {
 		return err
 	}

@@ -155,7 +155,7 @@ func (k *HTTPServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 // for creating new websockets
 func (h *HTTPServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.hubEndpoint, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Cluster); err != nil {
+	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Cluster); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient
