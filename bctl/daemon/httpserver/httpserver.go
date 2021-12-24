@@ -170,15 +170,28 @@ func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocke
 	subLogger := h.logger.GetDatachannelLogger(dcId)
 
 	h.logger.Infof("Creating new datachannel id: %v", dcId)
-	// send new datachannel message to agent
-	odMessage := am.AgentMessage{
-		ChannelId:   dcId,
-		MessageType: string(am.OpenDataChannel),
+
+	// // send new datachannel message to agent
+	// odMessage := am.AgentMessage{
+	// 	ChannelId:   dcId,
+	// 	MessageType: string(am.OpenDataChannel),
+	// }
+	// h.websocket.Send(odMessage)
+
+	// Build the actionParams to send to the datachannel to start the plugin
+	actionParams := kube.KubeActionParams{
+		TargetUser:   h.targetUser,
+		TargetGroups: h.targetGroups,
 	}
-	h.websocket.Send(odMessage)
+
+	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
+	if marshalErr != nil {
+		h.logger.Error(fmt.Errorf("error marshalling action params for kube"))
+		return &datachannel.DataChannel{}, marshalErr
+	}
 
 	action = "kube/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, h.targetUser, h.targetGroups); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {

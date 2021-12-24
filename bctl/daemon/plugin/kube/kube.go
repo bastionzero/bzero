@@ -38,6 +38,11 @@ type IKubeDaemonAction interface {
 	Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error
 }
 
+type KubeActionParams struct {
+	TargetUser   string   `json:"targetUser"`
+	TargetGroups []string `json:"targetGroups"`
+}
+
 type KubeDaemonPlugin struct {
 	tmb    *tomb.Tomb
 	logger *logger.Logger
@@ -48,9 +53,13 @@ type KubeDaemonPlugin struct {
 
 	actions       map[string]IKubeDaemonAction
 	actionMapLock sync.RWMutex // for keeping the action map thread-safe
+
+	// Kube-specific vars
+	targetUser   string
+	targetGroups []string
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger) (*KubeDaemonPlugin, error) {
+func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams KubeActionParams) (*KubeDaemonPlugin, error) {
 	plugin := KubeDaemonPlugin{
 		tmb:             parentTmb,
 		logger:          logger,
@@ -58,6 +67,8 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger) (*KubeDaemonPlugin, error)
 		streamInputChan: make(chan smsg.StreamMessage, 25),
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
 		actions:         make(map[string]IKubeDaemonAction),
+		targetUser:      actionParams.TargetUser,
+		targetGroups:    actionParams.TargetGroups,
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of

@@ -324,7 +324,6 @@ func (w *Websocket) Connect() {
 		}
 	}
 
-	baseUrl := "https://" + w.serviceUrl
 	// Switch based on the targetType
 	switch w.targetType {
 	case Cluster:

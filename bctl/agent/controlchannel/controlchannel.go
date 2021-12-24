@@ -74,8 +74,12 @@ func Start(logger *logger.Logger,
 		for {
 			select {
 			case <-control.tmb.Dying():
-				// We need to close all open datachannels if the control channel has been closed
-				// TODO: this
+				// We need to close all open client connections if the control channel has been closed
+				logger.Info("Closing all agent connections since control channel has been closed")
+
+				for _, wsMetadata := range control.connections {
+					wsMetadata.Client.Close(fmt.Errorf("control channel has been closed"))
+				}
 				return nil
 			case agentMessage := <-control.inputChan:
 				if err := control.processInput(agentMessage); err != nil {
@@ -149,7 +153,7 @@ func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
 	if websocketMeta, ok := c.getConnectionMap(wsId); !ok {
 		return fmt.Errorf("agent does not have a websocket associated with id %s", wsId)
 	} else {
-		if datachannel, err := datachannel.New(subLogger, &c.tmb, websocketMeta.Client, message.TargetUser, message.TargetGroups, dcId); err != nil {
+		if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn); err != nil {
 			return err
 		} else {
 			// add our new datachannel to our connections dictionary

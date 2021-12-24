@@ -31,10 +31,9 @@ type CloseWebsocketMessage struct {
 }
 
 type OpenDataChannelMessage struct {
-	DataChannelId     string   `json:"dataChannelId"`
-	DaemonWebsocketId string   `json:"daemonWebsocketId"`
-	TargetUser        string   `json:"targetUser"`
-	TargetGroups      []string `json:"targetGroups"`
+	DataChannelId     string `json:"dataChannelId"`
+	DaemonWebsocketId string `json:"daemonWebsocketId"`
+	Syn               []byte `json:"syn"`
 }
 
 type CloseDataChannelMessage struct {

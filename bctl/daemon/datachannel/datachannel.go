@@ -26,6 +26,11 @@ const (
 	maxRetries = 3
 )
 
+type OpenDataChannelPayload struct {
+	ActionParams []byte `json:"actionParams"`
+	Action       string `json:"action"`
+}
+
 type DataChannel struct {
 	websocket *websocket.Websocket
 	logger    *logger.Logger
@@ -36,10 +41,6 @@ type DataChannel struct {
 	plugin       *kube.KubeDaemonPlugin
 	keysplitting keysplitting.IKeysplitting
 	handshook    bool // aka whether we need to send a syn
-
-	// Kube-specific vars
-	targetUser   string
-	targetGroups []string
 
 	// channels for incoming and outgoing messages
 	inputChan chan am.AgentMessage
@@ -62,8 +63,7 @@ func New(logger *logger.Logger,
 	refreshTokenCommand string,
 	configPath string,
 	action string,
-	targetUser string,
-	targetGroups []string) (*DataChannel, *tomb.Tomb, error) {
+	actionParams []byte) (*DataChannel, *tomb.Tomb, error) {
 
 	keysplitter, err := keysplitting.New("", configPath, refreshTokenCommand)
 	if err != nil {
@@ -79,9 +79,6 @@ func New(logger *logger.Logger,
 
 		keysplitting: keysplitter,
 		handshook:    false,
-
-		targetUser:   targetUser,
-		targetGroups: targetGroups,
 
 		inputChan:   make(chan am.AgentMessage, 25),
 		ksInputChan: make(chan am.AgentMessage, 25),
@@ -127,10 +124,16 @@ func New(logger *logger.Logger,
 		}
 	}()
 
-	// start plugin based on action, currently we only have one tho
-	if err := dc.startKubeDaemonPlugin(action); err != nil {
+	// start plugin based on action
+	if strings.HasPrefix(action, "kube") {
+		if err := dc.startKubeDaemonPlugin(action, actionParams); err != nil {
+			logger.Error(err)
+			return &DataChannel{}, &dc.tmb, err
+		}
+	} else {
+		err := fmt.Errorf("unhandled action passed to daemon datachannel: %s", action)
 		logger.Error(err)
-		return &DataChannel{}, &dc.tmb, err
+		return &DataChannel{}, &tomb.Tomb{}, err
 	}
 
 	return dc, &dc.tmb, nil
@@ -145,9 +148,50 @@ func (d *DataChannel) Close(reason error) {
 	d.tmb.Wait()
 }
 
-func (d *DataChannel) startKubeDaemonPlugin(action string) error {
+func (d *DataChannel) startKubeDaemonPlugin(action string, actionParams []byte) error {
+	// Deserialize the action params
+	var actionParamsDeserialized kube.KubeActionParams
+	if err := json.Unmarshal(actionParams, &actionParamsDeserialized); err != nil {
+		rerr := fmt.Errorf("error deserializing actions params")
+		d.logger.Error(rerr)
+		return rerr
+	}
+
+	synMessage, buildSynErr := d.keysplitting.BuildSyn(action, actionParams)
+	if buildSynErr != nil {
+		d.logger.Errorf("error building syn")
+		return buildSynErr
+	}
+
+	// Marshal the syn
+	synBytes, synMarshalErr := json.Marshal(synMessage)
+	if synMarshalErr != nil {
+		d.logger.Errorf("error marshalling syn")
+		return synMarshalErr
+	}
+
+	messagePayload := OpenDataChannelPayload{
+		ActionParams: synBytes, // TODO: This needs to become a syn
+		Action:       action,
+	}
+
+	// Marshall the messagePayload
+	messagePayloadBytes, marshalErr := json.Marshal(messagePayload)
+	if marshalErr != nil {
+		d.logger.Errorf("error marshalling OpenDataChannelPayload")
+		return marshalErr
+	}
+
+	// send new datachannel message to agent, as we can build the syn here
+	odMessage := am.AgentMessage{
+		ChannelId:      d.id,
+		MessagePayload: messagePayloadBytes,
+		MessageType:    string(am.OpenDataChannel),
+	}
+	d.websocket.Send(odMessage)
+
 	subLogger := d.logger.GetPluginLogger("KubeDaemon")
-	if plugin, err := kube.New(&d.tmb, subLogger); err != nil {
+	if plugin, err := kube.New(&d.tmb, subLogger, actionParamsDeserialized); err != nil {
 		rerr := fmt.Errorf("could not start kube daemon plugin: %s", err)
 		d.logger.Error(rerr)
 		return rerr
@@ -205,8 +249,8 @@ func (d *DataChannel) sendSyn(action string) error {
 
 	d.handshook = false
 	payload := map[string]string{
-		"TargetUser":   d.targetUser,
-		"TargetGroups": strings.Join(d.targetGroups, ","),
+		// "TargetUser":   d.targetUser,
+		// "TargetGroups": strings.Join(d.targetGroups, ","),
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
