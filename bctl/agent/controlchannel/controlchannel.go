@@ -149,7 +149,7 @@ func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
 	if websocketMeta, ok := c.getConnectionMap(wsId); !ok {
 		return fmt.Errorf("agent does not have a websocket associated with id %s", wsId)
 	} else {
-		if datachannel, err := datachannel.New(subLogger, &c.tmb, websocketMeta.Client, message.TargetUser, message.TargetGroups, dcId); err != nil {
+		if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn); err != nil {
 			return err
 		} else {
 			// add our new datachannel to our connections dictionary

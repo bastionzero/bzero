@@ -28,9 +28,9 @@ const (
 )
 
 type DataChannel struct {
-	websocket *websocket.Websocket
-	logger    *logger.Logger
 	tmb       tomb.Tomb
+	logger    *logger.Logger
+	websocket *websocket.Websocket
 	id        string
 
 	plugin       plugin.IPlugin
@@ -38,18 +38,13 @@ type DataChannel struct {
 
 	// incoming and outgoing message channels
 	inputChan chan am.AgentMessage
-
-	// Kube-specific vars
-	targetUser   string
-	targetGroups []string
 }
 
-func New(logger *logger.Logger,
-	parentTmb *tomb.Tomb,
+func New(parentTmb *tomb.Tomb,
+	logger *logger.Logger,
 	websocket *websocket.Websocket,
-	targetUser string,
-	targetGroups []string,
-	id string) (*DataChannel, error) {
+	id string,
+	syn string) (*DataChannel, error) {
 
 	keysplitter, err := keysplitting.New()
 	if err != nil {
@@ -61,8 +56,6 @@ func New(logger *logger.Logger,
 		websocket:    websocket,
 		logger:       logger,
 		keysplitting: keysplitter,
-		targetUser:   targetUser,
-		targetGroups: targetGroups,
 		inputChan:    make(chan am.AgentMessage, 50),
 		id:           id,
 	}
@@ -79,13 +72,28 @@ func New(logger *logger.Logger,
 			case <-parentTmb.Dying(): // control channel is dying
 				return errors.New("agent was orphaned too young and can't be batman :'(")
 			case <-datachannel.tmb.Dying():
-				time.Sleep(30 * time.Second) // allow the datachannel to close gracefully
+				time.Sleep(30 * time.Second) // allow the datachannel to close gracefully TODO: Figure out a better way to gracefully die
 				return nil
 			case agentMessage := <-datachannel.inputChan: // receive messages
-				datachannel.process(agentMessage)
+				datachannel.processInput(agentMessage)
 			}
 		}
 	})
+
+	// validate the Syn message
+	var synPayload ksmsg.KeysplittingMessage
+	if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
+		rerr := fmt.Errorf("malformed Keysplitting message")
+		logger.Error(rerr)
+		return &DataChannel{}, rerr
+	} else if synPayload.Type != ksmsg.Syn {
+		err := fmt.Errorf("datachannel must be started with a SYN message")
+		logger.Error(err)
+		return &DataChannel{}, err
+	}
+
+	// process our syn to startup the plugin
+	datachannel.handleKeysplittingMessage(&synPayload)
 
 	return datachannel, nil
 }
@@ -135,7 +143,7 @@ func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 	d.inputChan <- agentMessage
 }
 
-func (d *DataChannel) process(agentMessage am.AgentMessage) {
+func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 	d.logger.Info("received message type: " + agentMessage.MessageType)
 
 	switch am.MessageType(agentMessage.MessageType) {
@@ -174,7 +182,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 			}
 
 			// Start plugin
-			if err := d.startPlugin(PluginName(parsedAction[0])); err != nil {
+			if err := d.startPlugin(PluginName(parsedAction[0]), synPayload.ActionPayload); err != nil {
 				d.sendError(rrr.ComponentStartupError, err)
 				return
 			}
@@ -199,7 +207,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	}
 }
 
-func (d *DataChannel) startPlugin(pluginName PluginName) error {
+func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	switch pluginName {
@@ -219,11 +227,17 @@ func (d *DataChannel) startPlugin(pluginName PluginName) error {
 			}
 		}()
 
+		// startup the plugin
 		subLogger := d.logger.GetPluginLogger(string(pluginName))
-		d.plugin = kube.New(&d.tmb, subLogger, streamOutputChan, d.targetUser, d.targetGroups)
+		if plugin, err := kube.New(&d.tmb, subLogger, streamOutputChan, payload); err != nil {
+			return err
+		} else {
+			d.plugin = plugin
+		}
+
 		d.logger.Infof("%s plugin started!", pluginName)
 	default:
-		return fmt.Errorf("tried to start an unhandled plugin")
+		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)
 	}
 	return nil
 }

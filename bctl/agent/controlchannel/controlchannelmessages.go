@@ -11,7 +11,7 @@ type RegisterAgentMessage struct {
 	AgentVersion   string `json:"agentVersion"`
 	OrgId          string `json:"orgId"`
 	EnvironmentId  string `json:"environmentId"`
-	ClusterName    string `json:"clusterName"`
+	ClusterName    string `json:"clusterName"` // TODO: genericize
 	ClusterId      string `json:"clusterId"`
 }
 
@@ -31,10 +31,9 @@ type CloseWebsocketMessage struct {
 }
 
 type OpenDataChannelMessage struct {
-	DataChannelId     string   `json:"dataChannelId"`
-	DaemonWebsocketId string   `json:"daemonWebsocketId"`
-	TargetUser        string   `json:"targetUser"`
-	TargetGroups      []string `json:"targetGroups"`
+	DataChannelId     string `json:"dataChannelId"`
+	DaemonWebsocketId string `json:"daemonWebsocketId"`
+	Syn               string `json:"syn"`
 }
 
 type CloseDataChannelMessage struct {
