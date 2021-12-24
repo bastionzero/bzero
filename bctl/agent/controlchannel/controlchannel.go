@@ -74,6 +74,8 @@ func Start(logger *logger.Logger,
 		for {
 			select {
 			case <-control.tmb.Dying():
+				// We need to close all open datachannels if the control channel has been closed
+				// TODO: this
 				return nil
 			case agentMessage := <-control.inputChan:
 				if err := control.processInput(agentMessage); err != nil {
