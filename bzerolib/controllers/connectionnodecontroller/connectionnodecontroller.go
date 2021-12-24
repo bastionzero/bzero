@@ -82,7 +82,7 @@ func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targe
 	getAuthDetailsEndpoint := c.bastionUrl + strings.Replace(getKubeAuthDetailsEndpoint, "$ID", createConnectionResponse.ConnectionId, -1)
 	httpGetAuthDetailsResponse, errPost := bzhttp.Get(c.logger, getAuthDetailsEndpoint, c.headers, c.params)
 	if errPost != nil {
-		c.logger.Error(fmt.Errorf("error on create kube connection for connection node: %s. Response: %+v", errPost, httpCreateConnectionResponse))
+		c.logger.Error(fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpCreateConnectionResponse))
 		panic(errPost)
 	}
 

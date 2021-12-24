@@ -328,8 +328,10 @@ func (w *Websocket) Connect() {
 	// Switch based on the targetType
 	switch w.targetType {
 	case Cluster:
-		// First hit Bastion in order to get the connectionNode information, build our controller
+		// Define our bastionURL
 		bastionUrl := "https://" + w.serviceUrl
+
+		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
 		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, bastionUrl, "", w.headers, w.params)
 		if cnControllerErr != nil {

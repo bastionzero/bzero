@@ -151,7 +151,7 @@ func (b *bzhttp) post() (*http.Response, error) {
 		}
 
 		if err != nil || response.StatusCode != http.StatusOK {
-			b.logger.Infof("error making post request, will retry in: %s.", b.backoffParams.NextBackOff())
+			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
 			bodyBytes, err := io.ReadAll(response.Body)
 			if err != nil {
@@ -231,7 +231,7 @@ func (b *bzhttp) get() (*http.Response, error) {
 		}
 
 		if err != nil || response.StatusCode != http.StatusOK {
-			b.logger.Infof("error making post request, will retry in: %s.", b.backoffParams.NextBackOff())
+			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
 			bodyBytes, err := io.ReadAll(response.Body)
 			if err != nil {
