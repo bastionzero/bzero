@@ -10,6 +10,7 @@ import (
 
 	tomb "gopkg.in/tomb.v2"
 
+	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -27,8 +28,8 @@ const (
 )
 
 type OpenDataChannelPayload struct {
-	ActionParams []byte `json:"actionParams"`
-	Action       string `json:"action"`
+	Syn    []byte `json:"syn"`
+	Action string `json:"action"`
 }
 
 type DataChannel struct {
@@ -150,7 +151,7 @@ func (d *DataChannel) Close(reason error) {
 
 func (d *DataChannel) startKubeDaemonPlugin(action string, actionParams []byte) error {
 	// Deserialize the action params
-	var actionParamsDeserialized kube.KubeActionParams
+	var actionParamsDeserialized agms.KubeActionParams
 	if err := json.Unmarshal(actionParams, &actionParamsDeserialized); err != nil {
 		rerr := fmt.Errorf("error deserializing actions params")
 		d.logger.Error(rerr)
@@ -171,8 +172,8 @@ func (d *DataChannel) startKubeDaemonPlugin(action string, actionParams []byte) 
 	}
 
 	messagePayload := OpenDataChannelPayload{
-		ActionParams: synBytes, // TODO: This needs to become a syn
-		Action:       action,
+		Syn:    synBytes,
+		Action: action,
 	}
 
 	// Marshall the messagePayload

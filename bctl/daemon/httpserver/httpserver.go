@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
+	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
@@ -179,7 +180,7 @@ func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocke
 	// h.websocket.Send(odMessage)
 
 	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := kube.KubeActionParams{
+	actionParams := agms.KubeActionParams{
 		TargetUser:   h.targetUser,
 		TargetGroups: h.targetGroups,
 	}

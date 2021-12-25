@@ -362,11 +362,13 @@ func (w *Websocket) Connect() {
 		// Default base url is just the service url and the hub endpoint
 		// This is because we hit bastion to initiate our control hub
 		w.baseUrl = w.serviceUrl + controlHubEndpoint
+		w.logger.Infof("HERE: %s", w.baseUrl)
 
 		// Default request params are just the params based
 		w.requestParams = w.params
 	default:
-
+		w.logger.Error(fmt.Errorf("unhandled target type; %d", w.targetType))
+		return
 	}
 
 	// Make our POST request

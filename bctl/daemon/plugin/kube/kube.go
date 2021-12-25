@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
+	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/actions/exec"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/actions/portforward"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/actions/restapi"
@@ -38,11 +39,6 @@ type IKubeDaemonAction interface {
 	Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error
 }
 
-type KubeActionParams struct {
-	TargetUser   string   `json:"targetUser"`
-	TargetGroups []string `json:"targetGroups"`
-}
-
 type KubeDaemonPlugin struct {
 	tmb    *tomb.Tomb
 	logger *logger.Logger
@@ -59,7 +55,7 @@ type KubeDaemonPlugin struct {
 	targetGroups []string
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams KubeActionParams) (*KubeDaemonPlugin, error) {
+func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.KubeActionParams) (*KubeDaemonPlugin, error) {
 	plugin := KubeDaemonPlugin{
 		tmb:             parentTmb,
 		logger:          logger,

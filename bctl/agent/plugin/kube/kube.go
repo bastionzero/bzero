@@ -38,7 +38,7 @@ type JustRequestId struct {
 	RequestId string `json:"requestId"`
 }
 
-type KubeSYNPayload struct {
+type KubeActionParams struct {
 	TargetUser   string   `json:"targetUser"`
 	TargetGroups []string `json:"targetGroups"`
 }
@@ -64,7 +64,7 @@ func New(parentTmb *tomb.Tomb,
 	payload []byte) (*KubePlugin, error) {
 
 	// Unmarshal the Syn payload
-	var synPayload KubeSYNPayload
+	var synPayload KubeActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
 		return &KubePlugin{}, fmt.Errorf("malformed Kube plugin SYN payload %v", string(payload))
 	}
