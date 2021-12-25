@@ -131,6 +131,11 @@ func New(logger *logger.Logger,
 			logger.Error(err)
 			return &DataChannel{}, &dc.tmb, err
 		}
+	} else if strings.HasPrefix(action, "db") {
+		if err := dc.startDbDaemonPlugin(action, actionParams); err != nil {
+			logger.Error(err)
+			return &DataChannel{}, &dc.tmb, err
+		}
 	} else {
 		err := fmt.Errorf("unhandled action passed to daemon datachannel: %s", action)
 		logger.Error(err)
@@ -200,9 +205,60 @@ func (d *DataChannel) startKubeDaemonPlugin(action string, actionParams []byte) 
 		d.plugin = plugin
 	}
 
-	// go func() {
-	// 	d.sendSyn(action)
-	// }()
+	return nil
+}
+
+func (d *DataChannel) startDbDaemonPlugin(action string, actionParams []byte) error {
+	// Deserialize the action params
+	// var actionParamsDeserialized agms.KubeActionParams
+	// if err := json.Unmarshal(actionParams, &actionParamsDeserialized); err != nil {
+	// 	rerr := fmt.Errorf("error deserializing actions params")
+	// 	d.logger.Error(rerr)
+	// 	return rerr
+	// }
+
+	synMessage, buildSynErr := d.keysplitting.BuildSyn(action, actionParams)
+	if buildSynErr != nil {
+		d.logger.Errorf("error building syn")
+		return buildSynErr
+	}
+
+	// Marshal the syn
+	synBytes, synMarshalErr := json.Marshal(synMessage)
+	if synMarshalErr != nil {
+		d.logger.Errorf("error marshalling syn")
+		return synMarshalErr
+	}
+
+	messagePayload := OpenDataChannelPayload{
+		Syn:    synBytes,
+		Action: action,
+	}
+
+	// Marshall the messagePayload
+	messagePayloadBytes, marshalErr := json.Marshal(messagePayload)
+	if marshalErr != nil {
+		d.logger.Errorf("error marshalling OpenDataChannelPayload")
+		return marshalErr
+	}
+
+	// send new datachannel message to agent, as we can build the syn here
+	odMessage := am.AgentMessage{
+		ChannelId:      d.id,
+		MessagePayload: messagePayloadBytes,
+		MessageType:    string(am.OpenDataChannel),
+	}
+	d.websocket.Send(odMessage)
+
+	// TODO: Create the plugin here
+	// subLogger := d.logger.GetPluginLogger("KubeDaemon")
+	// if plugin, err := kube.New(&d.tmb, subLogger, actionParamsDeserialized); err != nil {
+	// 	rerr := fmt.Errorf("could not start kube daemon plugin: %s", err)
+	// 	d.logger.Error(rerr)
+	// 	return rerr
+	// } else {
+	// 	d.plugin = plugin
+	// }
 
 	return nil
 }

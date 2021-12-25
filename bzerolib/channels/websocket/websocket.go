@@ -29,6 +29,7 @@ const (
 
 	// Enum target types
 	Cluster = 2
+	Db      = 3
 
 	// Enum target types for agent side connections
 	ClusterAgent        = -1
@@ -351,6 +352,9 @@ func (w *Websocket) Connect() {
 		// Define our request params
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
+	case Db:
+		// TODO: Setup everything here
+		return
 	case ClusterAgent:
 		// Build our connectionnode Url
 		w.baseUrl = w.buildConnectionNodeUrl(w.params["connection_node_id"]) + kubeAgentConnectionNodeHubEndpoint

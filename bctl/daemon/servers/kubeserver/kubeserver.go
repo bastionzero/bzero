@@ -1,4 +1,4 @@
-package httpserver
+package kubeserver
 
 import (
 	"encoding/json"
@@ -34,7 +34,7 @@ type StatusMessage struct {
 	ExitMessage string `json:"ExitMessage"`
 }
 
-type HTTPServer struct {
+type KubeServer struct {
 	logger      *logger.Logger
 	websocket   *websocket.Websocket // TODO: This will need to be a dictionary for when we have multiple
 	tmb         tomb.Tomb
@@ -61,7 +61,7 @@ type HTTPServer struct {
 	targetGroups        []string
 }
 
-func StartHTTPServer(logger *logger.Logger,
+func StartKubeServer(logger *logger.Logger,
 	daemonPort string,
 	certPath string,
 	keyPath string,
@@ -75,7 +75,7 @@ func StartHTTPServer(logger *logger.Logger,
 	headers map[string]string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
-	listener := &HTTPServer{
+	listener := &KubeServer{
 		logger:              logger,
 		exitMessage:         "",
 		ready:               false,
@@ -126,7 +126,7 @@ func StartHTTPServer(logger *logger.Logger,
 	return nil
 }
 
-func (k *HTTPServer) isReadyCallback(w http.ResponseWriter, r *http.Request) {
+func (k *KubeServer) isReadyCallback(w http.ResponseWriter, r *http.Request) {
 	if k.restApiDatachannel.Ready() {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -136,7 +136,7 @@ func (k *HTTPServer) isReadyCallback(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (k *HTTPServer) statusCallback(w http.ResponseWriter, r *http.Request) {
+func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 	// Build our status message
 	statusMessage := StatusMessage{
 		ExitMessage: k.exitMessage,
@@ -154,7 +154,7 @@ func (k *HTTPServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // for creating new websockets
-func (h *HTTPServer) newWebsocket(wsId string) error {
+func (h *KubeServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
 	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Cluster); err != nil {
 		return err
@@ -165,7 +165,7 @@ func (h *HTTPServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
+func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
 	subLogger := h.logger.GetDatachannelLogger(dcId)
@@ -226,13 +226,13 @@ func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocke
 	}
 }
 
-func (h *HTTPServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
+func (h *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
 	w.WriteHeader(statusCode)
 	h.logger.Error(errors.New(msg))
 	w.Write([]byte(msg))
 }
 
-func (h *HTTPServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
+func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
 	h.logger.Infof("Handling %s - %s\n", r.URL.Path, r.Method)
 
 	// Before processing, check if we're ready to process or if there's been an error

@@ -43,6 +43,9 @@ type KubeActionParams struct {
 	TargetGroups []string `json:"targetGroups"`
 }
 
+type DbActionParams struct {
+}
+
 type KubePlugin struct {
 	tmb *tomb.Tomb // datachannel's tomb
 
