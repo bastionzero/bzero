@@ -200,9 +200,9 @@ func (d *DataChannel) startKubeDaemonPlugin(action string, actionParams []byte) 
 		d.plugin = plugin
 	}
 
-	go func() {
-		d.sendSyn(action)
-	}()
+	// go func() {
+	// 	d.sendSyn(action)
+	// }()
 
 	return nil
 }

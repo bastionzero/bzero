@@ -35,9 +35,10 @@ const (
 	CloseDataChannel MessageType = "closeDataChannel"
 
 	// websocket controller messages
-	OpenWebsocket      MessageType = "openWebsocket"
-	CloseWebsocket     MessageType = "closeWebsocket"
-	ReconnectWebsocket MessageType = "reconnectWebsocket"
+	OpenWebsocket        MessageType = "openWebsocket"
+	CloseWebsocket       MessageType = "closeWebsocket"
+	CloseDaemonWebsocket MessageType = "closeDaemonWebsocket"
+	ReconnectWebsocket   MessageType = "reconnectWebsocket"
 
 	// message for force closing all connections an agent has
 	CloseAllConnections MessageType = "closeAllConnections"

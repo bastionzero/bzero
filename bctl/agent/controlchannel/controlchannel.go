@@ -78,6 +78,15 @@ func Start(logger *logger.Logger,
 				logger.Info("Closing all agent connections since control channel has been closed")
 
 				for _, wsMetadata := range control.connections {
+					// First send a close message over the agent websocket
+					wsMetadata.Client.Send(am.AgentMessage{
+						MessageType:    string(am.CloseDaemonWebsocket),
+						MessagePayload: []byte{},
+						SchemaVersion:  am.SchemaVersion,
+						ChannelId:      "-1", // Channel Id does not since this applies to all datachannels
+					})
+
+					// Then close the websocket
 					wsMetadata.Client.Close(fmt.Errorf("control channel has been closed"))
 				}
 				return nil

@@ -81,19 +81,19 @@ func New(parentTmb *tomb.Tomb,
 	})
 
 	// validate the Syn message
-	// var synPayload ksmsg.KeysplittingMessage
-	// if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
-	// 	rerr := fmt.Errorf("malformed Keysplitting message")
-	// 	logger.Error(rerr)
-	// 	return &DataChannel{}, rerr
-	// } else if synPayload.Type != ksmsg.Syn {
-	// 	err := fmt.Errorf("datachannel must be started with a SYN message")
-	// 	logger.Error(err)
-	// 	return &DataChannel{}, err
-	// }
+	var synPayload ksmsg.KeysplittingMessage
+	if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
+		rerr := fmt.Errorf("malformed Keysplitting message")
+		logger.Error(rerr)
+		return &DataChannel{}, rerr
+	} else if synPayload.Type != ksmsg.Syn {
+		err := fmt.Errorf("datachannel must be started with a SYN message")
+		logger.Error(err)
+		return &DataChannel{}, err
+	}
 
-	// // process our syn to startup the plugin
-	// datachannel.handleKeysplittingMessage(&synPayload)
+	// process our syn to startup the plugin
+	datachannel.handleKeysplittingMessage(&synPayload)
 
 	return datachannel, nil
 }
@@ -181,9 +181,18 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 				return
 			}
 
-			// Start plugin
-			if err := d.startPlugin(PluginName(parsedAction[0]), synPayload.ActionPayload); err != nil {
-				d.sendError(rrr.ComponentStartupError, err)
+			// Start plugin based on action
+			actionPrefix := parsedAction[0]
+			switch actionPrefix {
+			case "kube":
+				if err := d.startPlugin(PluginName(parsedAction[0]), synPayload.ActionPayload); err != nil {
+					d.sendError(rrr.ComponentStartupError, err)
+					return
+				}
+			default:
+				actionErr := fmt.Errorf("unhandled action prefix: %s", actionPrefix)
+				d.logger.Error(actionErr)
+				d.sendError(rrr.KeysplittingExecutionError, actionErr)
 				return
 			}
 

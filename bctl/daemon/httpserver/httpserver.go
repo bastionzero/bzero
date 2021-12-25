@@ -172,13 +172,6 @@ func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocke
 
 	h.logger.Infof("Creating new datachannel id: %v", dcId)
 
-	// // send new datachannel message to agent
-	// odMessage := am.AgentMessage{
-	// 	ChannelId:   dcId,
-	// 	MessageType: string(am.OpenDataChannel),
-	// }
-	// h.websocket.Send(odMessage)
-
 	// Build the actionParams to send to the datachannel to start the plugin
 	actionParams := agms.KubeActionParams{
 		TargetUser:   h.targetUser,
