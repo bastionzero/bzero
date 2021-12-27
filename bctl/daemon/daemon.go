@@ -76,6 +76,8 @@ func main() {
 func startDbServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	subLogger := logger.GetComponentLogger("dbserver")
 
+	params["target_id"] = targetId
+
 	return dbserver.StartDbServer(subLogger,
 		daemonPort,
 		refreshTokenCommand,

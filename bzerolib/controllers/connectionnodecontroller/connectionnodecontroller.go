@@ -23,10 +23,10 @@ const (
 	createKubeConnectionEndpoint = "/api/v2/connections/kube"
 
 	// Db related
-	createDbConnectionEndpoint = "api/v2/connection/db"
+	createDbConnectionEndpoint = "/api/v2/connections/db"
 
 	// General endpoints
-	getAuthDetailsEndpoint = "/api/v2/connections/$ID/connection-auth-details"
+	getAuthDetailsEndpoint = "/api/v2/connections/$TYPE/$ID/connection-auth-details"
 )
 
 func New(logger *logger.Logger,
@@ -84,12 +84,12 @@ func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targe
 		panic(err)
 	}
 
-	return c.createCnConnection(createConnectionResponse.ConnectionId)
+	return c.createCnConnection(createConnectionResponse.ConnectionId, "kube")
 }
 
 func (c *ConnectionNodeController) CreateDbConnection(targetId string) ConnectionDetailsResponse {
 	// Create our request
-	createDbConnectionRequest := CreateKubeConnectionRequest{
+	createDbConnectionRequest := CreateDbConnectionRequest{
 		TargetId: targetId,
 	}
 
@@ -125,12 +125,16 @@ func (c *ConnectionNodeController) CreateDbConnection(targetId string) Connectio
 		panic(err)
 	}
 
-	return c.createCnConnection(createConnectionResponse.ConnectionId)
+	return c.createCnConnection(createConnectionResponse.ConnectionId, "db")
 }
 
-func (c *ConnectionNodeController) createCnConnection(connectionId string) ConnectionDetailsResponse {
+func (c *ConnectionNodeController) createCnConnection(connectionId string, typeOfConnection string) ConnectionDetailsResponse {
 	// Now use the connectionId to get the connectionNodeId and AuthToken
+
+	// Add our ID and type
 	getAuthDetailsEndpoint := c.bastionUrl + strings.Replace(getAuthDetailsEndpoint, "$ID", connectionId, -1)
+	getAuthDetailsEndpoint = strings.Replace(getAuthDetailsEndpoint, "$TYPE", typeOfConnection, -1)
+
 	httpGetAuthDetailsResponse, errPost := bzhttp.Get(c.logger, getAuthDetailsEndpoint, c.headers, c.params)
 	if errPost != nil {
 		c.logger.Error(fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpGetAuthDetailsResponse))

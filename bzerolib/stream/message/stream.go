@@ -24,4 +24,6 @@ const (
 
 	PortForwardData  StreamType = "kube/portforward/data"
 	PortForwardError StreamType = "kube/portforward/error"
+
+	DbOut StreamType = "db/dataout"
 )

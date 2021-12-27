@@ -24,6 +24,7 @@ type OpenWebsocketMessage struct {
 	DaemonWebsocketId string `json:"daemonWebsocketId"`
 	ConnectionNodeId  string `json:"connectionNodeId"`
 	Token             string `json:"token"`
+	Type              string `json:"type"`
 }
 
 type CloseWebsocketMessage struct {

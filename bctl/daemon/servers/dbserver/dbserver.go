@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 
 	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -70,11 +70,11 @@ func StartDbServer(logger *logger.Logger,
 	}
 
 	// Create a single datachannel for all of our db calls
-	// if datachannel, err := listener.newDataChannel(string(db.Start), listener.websocket); err == nil {
-	// 	listener.datachannel = datachannel
-	// } else {
-	// 	return err
-	// }
+	if datachannel, err := listener.newDataChannel(string(agms.Init), listener.websocket); err == nil {
+		listener.datachannel = datachannel
+	} else {
+		return err
+	}
 
 	// Now create our local listener for TCP connections
 	logger.Infof("Resolving TCP address for port: %s", daemonPort)
@@ -91,6 +91,12 @@ func StartDbServer(logger *logger.Logger,
 		os.Exit(1)
 	}
 
+	// Always ensure we close the local tcp connection when we exit
+	defer localTcpListener.Close()
+
+	// Wait until the datachannel is ready, block here?
+	// TODO: This
+
 	// Block and keep listening for new tcp events
 	for {
 		conn, err := localTcpListener.AcceptTCP()
@@ -99,78 +105,48 @@ func StartDbServer(logger *logger.Logger,
 			continue
 		}
 
-		go listener.handleProxy(conn, logger)
+		// Always generate a requestId, each new proxy connection is its own request
+		requestId := uuid.New().String()
+
+		go listener.handleProxy(conn, logger, requestId)
 	}
 }
 
-func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger) {
-	// Always ensure we close the local tcp connection
-	defer lconn.Close()
+// TODO: Create function that listens to TcpOuput and forwards to the correct handleProxy instance
 
-	// // Setup a go routine to listen for messages as well, and write to our local connection
-	// // Now listen for messages from bastion
-	// go func() {
-	// 	for {
-	// 		// Read incoming message(s)
-	// 		_, rawMessage, err := client.ReadMessage()
+func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, requestId string) {
+	// Tell the agent to start a new dial session
 
-	// 		if err != nil {
-	// 			logger.Error(err)
-	// 			return
-	// 		} else {
-	// 			// Unwrap the message
-	// 			if messages, err := unwrapSignalR(rawMessage, logger); err != nil {
-	// 				logger.Error(err)
-	// 			} else {
-	// 				for _, message := range messages {
-	// 					logger.Infof("HERE: %s", message.Target)
-
-	// 					//write out result
-	// 					n, err := lconn.Write(message.Arguments[0].MessagePayload)
-	// 					if err != nil {
-	// 						logger.Errorf("Write failed '%s'\n", err)
-	// 						return
-	// 					}
-
-	// 					logger.Infof("Wrote %d bytes to local tcp connection", n)
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// }()
+	// Listen to stream messages coming from bastion, and forward to our local connection
+	go func() {
+		for {
+			select {
+			case data := <-h.datachannel.DbPlugin.TcpOuput:
+				_, err := lconn.Write(data)
+				if err != nil {
+					logger.Errorf("Write failed '%s'\n", err)
+				}
+			}
+		}
+	}()
 
 	// Keep looping till we hit EOF
 	tmp := make([]byte, 0xffff)
 	for {
 		n, err := lconn.Read(tmp)
+		if err == io.EOF {
+			// Tell the agent to stop the dial session
+			return
+		}
 		if err != nil {
 			logger.Errorf("Read failed '%s'\n", err)
+			// Tell the agent to stop the dial session
 			return
 		}
 
 		buff := tmp[:n]
-		h.logger.Infof("HERE: %s", buff)
 
-		// signalRMessage := SignalRWrapper{
-		// 	Target: "RequestDaemonToBastionV1",
-		// 	Type:   signalRTypeNumber,
-		// 	Arguments: []AgentMessage{{
-		// 		ChannelId:      "test",
-		// 		MessageType:    "keysplitting",
-		// 		SchemaVersion:  "v1",
-		// 		MessagePayload: buff,
-		// 	}},
-		// }
-
-		// Write our message to websocket
-		// if msgBytes, err := json.Marshal(signalRMessage); err != nil {
-		// 	logger.Error(fmt.Errorf("error marshalling outgoing SignalR Message: %v", signalRMessage))
-		// } else {
-		// 	if err := client.WriteMessage(websocket.TextMessage, append(msgBytes, signalRMessageTerminatorByte)); err != nil {
-		// 		logger.Error(err)
-		// 	}
-		// 	logger.Info("Send message to Bastion")
-		// }
+		h.datachannel.FeedTcp(string(agms.DataIn), buff)
 	}
 }
 
@@ -227,10 +203,8 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 					}
 					h.websocket.Send(cdMessage)
 
-					// close our websocket if the datachannel we closed was the last and it's not rest api
-					if kube.KubeDaemonAction(action) != kube.RestApi && h.websocket.SubscriberCount() == 0 {
-						h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
-					}
+					// close our websocket
+					h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
 					return
 				}
 			}

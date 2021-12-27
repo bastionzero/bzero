@@ -137,6 +137,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	params["daemon_websocket_id"] = message.DaemonWebsocketId
 	params["connection_node_id"] = message.ConnectionNodeId
 	params["token"] = message.Token
+	params["connection_type"] = message.Type
 
 	if ws, err := websocket.New(subLogger, message.DaemonWebsocketId, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
@@ -256,6 +257,17 @@ func checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckClusterToBast
 
 	// Also let bastion know a list of valid cluster roles
 	// Create our api object
+	if vault.InCluster() {
+		return checkInClusterHealth()
+	}
+
+	return AliveCheckClusterToBastionMessage{
+		Alive:        true,
+		ClusterUsers: []string{},
+	}, nil
+}
+
+func checkInClusterHealth() (AliveCheckClusterToBastionMessage, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return AliveCheckClusterToBastionMessage{}, err

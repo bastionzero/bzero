@@ -196,10 +196,13 @@ func register(logger *logger.Logger) error {
 	if config.IsEmpty() {
 		logger.Info("This is a new agent")
 
-		if err := rbac.CheckPermissions(logger, namespace); err != nil {
-			return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
-		} else {
-			logger.Info("Namespace and service account permissions verified.")
+		if vault.InCluster() {
+			// Only check RBAC permissions if we are inside a cluster
+			if err := rbac.CheckPermissions(logger, namespace); err != nil {
+				return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
+			} else {
+				logger.Info("Namespace and service account permissions verified.")
+			}
 		}
 
 		logger.Info("Creating cryptographic identity...")

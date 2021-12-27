@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -135,6 +136,9 @@ func handleProxy(lconn *net.TCPConn, logger *logger.Logger, client *websocket.Co
 	// Always ensure we close the local tcp connection
 	defer lconn.Close()
 
+	// Define a done chan when the local connection is finished
+	doneChan := make(chan bool)
+
 	// Setup a go routine to listen for messages as well, and write to our local connection
 	// Now listen for messages from bastion
 	go func() {
@@ -157,6 +161,7 @@ func handleProxy(lconn *net.TCPConn, logger *logger.Logger, client *websocket.Co
 						n, err := lconn.Write(message.Arguments[0].MessagePayload)
 						if err != nil {
 							logger.Errorf("Write failed '%s'\n", err)
+							doneChan <- true
 							return
 						}
 
@@ -170,34 +175,44 @@ func handleProxy(lconn *net.TCPConn, logger *logger.Logger, client *websocket.Co
 	// Keep looping till we hit EOF
 	tmp := make([]byte, 0xffff)
 	for {
-		n, err := lconn.Read(tmp)
-		if err != nil {
-			logger.Errorf("Read failed '%s'\n", err)
+		select {
+		case <-doneChan:
 			return
-		}
-
-		buff := tmp[:n]
-
-		signalRMessage := SignalRWrapper{
-			Target: "RequestDaemonToBastionV1",
-			Type:   signalRTypeNumber,
-			Arguments: []AgentMessage{{
-				ChannelId:      "test",
-				MessageType:    "keysplitting",
-				SchemaVersion:  "v1",
-				MessagePayload: buff,
-			}},
-		}
-
-		// Write our message to websocket
-		if msgBytes, err := json.Marshal(signalRMessage); err != nil {
-			logger.Error(fmt.Errorf("error marshalling outgoing SignalR Message: %v", signalRMessage))
-		} else {
-			if err := client.WriteMessage(websocket.TextMessage, append(msgBytes, signalRMessageTerminatorByte)); err != nil {
-				logger.Error(err)
+		default:
+			n, err := lconn.Read(tmp)
+			if err != nil {
+				if err == io.EOF {
+					logger.Info("tcp connection finished")
+				} else {
+					logger.Errorf("Read failed '%s'\n", err)
+				}
+				return
 			}
-			logger.Info("Send message to Bastion")
+
+			buff := tmp[:n]
+
+			signalRMessage := SignalRWrapper{
+				Target: "RequestDaemonToBastionV1",
+				Type:   signalRTypeNumber,
+				Arguments: []AgentMessage{{
+					ChannelId:      "test",
+					MessageType:    "keysplitting",
+					SchemaVersion:  "v1",
+					MessagePayload: buff,
+				}},
+			}
+
+			// Write our message to websocket
+			if msgBytes, err := json.Marshal(signalRMessage); err != nil {
+				logger.Error(fmt.Errorf("error marshalling outgoing SignalR Message: %v", signalRMessage))
+			} else {
+				if err := client.WriteMessage(websocket.TextMessage, append(msgBytes, signalRMessageTerminatorByte)); err != nil {
+					logger.Error(err)
+				}
+				logger.Info("Send message to Bastion")
+			}
 		}
+
 	}
 }
 

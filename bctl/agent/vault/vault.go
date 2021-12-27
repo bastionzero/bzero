@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/tucnak/store"
 	coreV1 "k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -16,12 +17,20 @@ import (
 
 const (
 	keyConfig = "keyConfig"
+
+	// Env var to flag if we are in a kube cluster
+	inClusterEnvVar = "BASTIONZERO_IN_CLUSTER"
+
+	// Vault systemd consts
+	vaultPath = "bzero.vault.json" // TODO : figureout where this ends up lol
 )
 
 type Vault struct {
+	Data SecretData
+
+	// Kube secret related
 	client coreV1Types.SecretInterface
 	secret *coreV1.Secret
-	Data   SecretData
 }
 
 type SecretData struct {
@@ -36,6 +45,43 @@ type SecretData struct {
 }
 
 func LoadVault() (*Vault, error) {
+	if InCluster() {
+		// This means we are in the cluster
+		return clusterVault()
+	} else {
+		return systemdVault()
+	}
+}
+
+func InCluster() bool {
+	if val := os.Getenv(inClusterEnvVar); val == "1" {
+		return true
+	} else {
+		return false
+	}
+}
+
+func systemdVault() (*Vault, error) {
+	var secretData SecretData
+
+	store.Init("bzero-config")
+
+	// First check if we've created the vault before
+	if err := store.Load(vaultPath, &secretData); err != nil {
+
+		// Now save the secret data
+		if err := store.Save(vaultPath, &secretData); err != nil {
+			return &Vault{}, fmt.Errorf("error saving vault information: %v", err.Error())
+		}
+	}
+	return &Vault{
+		client: nil, // systemd vault does not have a client
+		secret: nil, // systemd vault does not have a secret
+		Data:   secretData,
+	}, nil
+}
+
+func clusterVault() (*Vault, error) {
 	// Create our api object
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -102,6 +148,22 @@ func (v *Vault) IsEmpty() bool {
 }
 
 func (v *Vault) Save() error {
+	if InCluster() {
+		// This means we are in the cluster
+		return v.saveCluster()
+	} else {
+		return v.saveSystemd()
+	}
+}
+
+func (v *Vault) saveSystemd() error {
+	if err := store.Save(vaultPath, v.Data); err != nil {
+		return fmt.Errorf("error saving vault information: %v", err.Error())
+	}
+	return nil
+}
+
+func (v *Vault) saveCluster() error {
 	// Now encode the secretConfig
 	encodedSecretConfig, err := EncodeToBytes(v.Data)
 	if err != nil {

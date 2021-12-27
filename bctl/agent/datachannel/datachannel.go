@@ -242,8 +242,6 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 		} else {
 			d.plugin = plugin
 		}
-
-		d.logger.Infof("%s plugin started!", pluginName)
 	default:
 		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)
 	}

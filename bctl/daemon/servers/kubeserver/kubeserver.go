@@ -271,25 +271,25 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 	case isExecRequest(r):
 		// create new datachannel and feed it kubectl handlers
 		if datachannel, err := h.newDataChannel(string(kube.Exec), h.websocket); err == nil {
-			datachannel.Feed(string(kube.Exec), logId, command, w, r)
+			datachannel.FeedHttp(string(kube.Exec), logId, command, w, r)
 		}
 	// Similar to exec it's interactive but instead has a input and error stream
 	case isPortForwardRequest(r):
 		// create new datachannel and feed it kubectl handlers
 		if datachannel, err := h.newDataChannel(string(kube.Stream), h.websocket); err == nil {
-			datachannel.Feed(string(kube.PortForward), logId, command, w, r)
+			datachannel.FeedHttp(string(kube.PortForward), logId, command, w, r)
 		}
 	// persistent, yet not interactive commands that serve continual output but only listen for a single, request-cancelling input
 	case isStreamRequest(r):
 		// create new datachannel and feed it kubectl handlers
 		if datachannel, err := h.newDataChannel(string(kube.Stream), h.websocket); err == nil {
-			datachannel.Feed(string(kube.Stream), logId, command, w, r)
+			datachannel.FeedHttp(string(kube.Stream), logId, command, w, r)
 		}
 
 	// simple call and response aka restapi requests
 	default:
 		// grab our existing rest api datachannel and feed it new handlers
-		h.restApiDatachannel.Feed(string(kube.RestApi), logId, command, w, r)
+		h.restApiDatachannel.FeedHttp(string(kube.RestApi), logId, command, w, r)
 	}
 }
 
