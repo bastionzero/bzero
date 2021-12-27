@@ -32,12 +32,12 @@ const (
 	Db      = 3
 
 	// Enum target types for agent side connections
-	ClusterAgent        = -1
+	AgentWebsocket      = -1
 	ClusterAgentControl = -2
 
 	// Hub endpoints
-	kubeDaemonConnectionNodeHubEndpoint = "/hub/kube/daemon"
-	kubeAgentConnectionNodeHubEndpoint  = "/hub/kube/agent"
+	kubeDaemonConnectionNodeHubEndpoint = "/hub/daemon"
+	kubeAgentConnectionNodeHubEndpoint  = "/hub/agent"
 
 	controlHubEndpoint = "/api/v1/hub/kube-control"
 )
@@ -352,10 +352,31 @@ func (w *Websocket) Connect() {
 		// Define our request params
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
+
+		w.requestParams["websocketType"] = w.params["websocketType"]
 	case Db:
-		// TODO: Setup everything here
-		return
-	case ClusterAgent:
+		// Define our bastionURL
+		bastionUrl := "https://" + w.serviceUrl
+
+		// First hit Bastion in order to get the connectionNode information, build our controller
+		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
+		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, bastionUrl, "", w.headers, w.params)
+		if cnControllerErr != nil {
+			w.logger.Error(fmt.Errorf("error creating cnController"))
+			return
+		}
+
+		createConnectionResponse := cnController.CreateDbConnection(w.params["target_id"])
+
+		// Now we can build our connectionnode url
+		w.baseUrl = w.buildConnectionNodeUrl(createConnectionResponse.ConnectionNodeId) + kubeDaemonConnectionNodeHubEndpoint
+
+		// Define our request params
+		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
+		w.requestParams["authToken"] = createConnectionResponse.AuthToken
+
+		w.requestParams["websocketType"] = w.params["websocketType"]
+	case AgentWebsocket:
 		// Build our connectionnode Url
 		w.baseUrl = w.buildConnectionNodeUrl(w.params["connection_node_id"]) + kubeAgentConnectionNodeHubEndpoint
 
@@ -366,7 +387,6 @@ func (w *Websocket) Connect() {
 		// Default base url is just the service url and the hub endpoint
 		// This is because we hit bastion to initiate our control hub
 		w.baseUrl = w.serviceUrl + controlHubEndpoint
-		w.logger.Infof("HERE: %s", w.baseUrl)
 
 		// Default request params are just the params based
 		w.requestParams = w.params

@@ -39,7 +39,6 @@ type KubeServer struct {
 	websocket   *websocket.Websocket // TODO: This will need to be a dictionary for when we have multiple
 	tmb         tomb.Tomb
 	exitMessage string
-	ready       bool
 
 	// RestApi is a special case where we want to be able to constantly retrieve it so we can feed any new RestApi
 	// requests that come in and skip the overhead of asking for a new datachannel and sending a Syn
@@ -78,7 +77,6 @@ func StartKubeServer(logger *logger.Logger,
 	listener := &KubeServer{
 		logger:              logger,
 		exitMessage:         "",
-		ready:               false,
 		localhostToken:      localhostToken,
 		serviceUrl:          serviceUrl,
 		params:              params,
@@ -195,7 +193,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 			for {
 				select {
 				case <-h.tmb.Dying():
-					datachannel.Close(errors.New("http server closing"))
+					datachannel.Close(errors.New("kube server closing"))
 					return
 				case <-dcTmb.Dying():
 					// Wait until everything is dead and any close processes are sent before killing the datachannel

@@ -53,11 +53,13 @@ func main() {
 
 	switch plugin {
 	case "kube":
+		params["websocketType"] = "kube"
 		if err := startKubeServer(logger, headers, params); err != nil {
 			logger.Error(err)
 			panic(err)
 		}
 	case "db":
+		params["websocketType"] = "db"
 		if err := startDbServer(logger, headers, params); err != nil {
 			logger.Error(err)
 			panic(err)

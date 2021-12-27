@@ -7,6 +7,10 @@ type CreateKubeConnectionRequest struct {
 	TargetId     string   `json:"targetId"`
 }
 
+type CreateDbConnectionRequest struct {
+	TargetId string `json:"targetId"`
+}
+
 // Http Responses
 type CreateConnectionResponse struct {
 	ConnectionId string `json:"connectionId"`
@@ -18,7 +22,7 @@ type ConnectionAuthDetailsResponse struct {
 }
 
 // Controller Types
-type CreateKubeConnectionResponse struct {
+type ConnectionDetailsResponse struct {
 	ConnectionNodeId string
 	AuthToken        string
 	ConnectionId     string

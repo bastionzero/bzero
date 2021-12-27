@@ -11,7 +11,8 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin"
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
+	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
@@ -25,6 +26,7 @@ type PluginName string
 
 const (
 	Kube PluginName = "kube"
+	Db   PluginName = "db"
 )
 
 type DataChannel struct {
@@ -183,19 +185,10 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 
 			// Start plugin based on action
 			actionPrefix := parsedAction[0]
-			switch actionPrefix {
-			case "kube":
-				if err := d.startPlugin(PluginName(parsedAction[0]), synPayload.ActionPayload); err != nil {
-					d.sendError(rrr.ComponentStartupError, err)
-					return
-				}
-			default:
-				actionErr := fmt.Errorf("unhandled action prefix: %s", actionPrefix)
-				d.logger.Error(actionErr)
-				d.sendError(rrr.KeysplittingExecutionError, actionErr)
+			if err := d.startPlugin(PluginName(actionPrefix), synPayload.ActionPayload); err != nil {
+				d.sendError(rrr.ComponentStartupError, err)
 				return
 			}
-
 			d.sendKeysplitting(keysplittingMessage, "", []byte{}) // empty payload
 		}
 	case ksmsg.Data:
@@ -219,24 +212,32 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
+	// create channel and listener and pass it to the new plugin
+	streamOutputChan := make(chan smsg.StreamMessage, 20)
+	go func() {
+		for {
+			select {
+			case <-d.tmb.Dying():
+				return
+			case streamMessage := <-streamOutputChan:
+				d.logger.Infof("Sending %s stream message", streamMessage.Type)
+				d.send(am.Stream, streamMessage)
+			}
+		}
+	}()
+
+	subLogger := d.logger.GetPluginLogger(string(pluginName))
+
 	switch pluginName {
 	case Kube:
-		// create channel and listener and pass it to the new plugin
-		streamOutputChan := make(chan smsg.StreamMessage, 20)
-		go func() {
-			for {
-				select {
-				case <-d.tmb.Dying():
-					return
-				case streamMessage := <-streamOutputChan:
-					d.logger.Infof("Sending %s stream message", streamMessage.Type)
-					d.send(am.Stream, streamMessage)
-				}
-			}
-		}()
-
-		subLogger := d.logger.GetPluginLogger(string(pluginName))
 		if plugin, err := kube.New(&d.tmb, subLogger, streamOutputChan, payload); err != nil {
+			return err
+		} else {
+			d.plugin = plugin
+		}
+
+	case Db:
+		if plugin, err := db.New(&d.tmb, subLogger, streamOutputChan, payload); err != nil {
 			return err
 		} else {
 			d.plugin = plugin
@@ -246,5 +247,8 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 	default:
 		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)
 	}
+
+	d.logger.Infof("%s plugin started!", pluginName)
+
 	return nil
 }

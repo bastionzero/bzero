@@ -19,8 +19,14 @@ type ConnectionNodeController struct {
 }
 
 const (
-	createKubeConnectionEndpoint = "/api/v2/connections/create-kube"
-	getKubeAuthDetailsEndpoint   = "/api/v2/connections/$ID/kube-auth-details"
+	// Kube related
+	createKubeConnectionEndpoint = "/api/v2/connections/kube"
+
+	// Db related
+	createDbConnectionEndpoint = "api/v2/connection/db"
+
+	// General endpoints
+	getAuthDetailsEndpoint = "/api/v2/connections/$ID/connection-auth-details"
 )
 
 func New(logger *logger.Logger,
@@ -38,7 +44,7 @@ func New(logger *logger.Logger,
 	}, nil
 }
 
-func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targetGroups []string, targetId string) CreateKubeConnectionResponse {
+func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targetGroups []string, targetId string) ConnectionDetailsResponse {
 	// Create our request
 	createKubeConnectionRequest := CreateKubeConnectionRequest{
 		TargetUser:   targetUser,
@@ -78,11 +84,56 @@ func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targe
 		panic(err)
 	}
 
+	return c.createCnConnection(createConnectionResponse.ConnectionId)
+}
+
+func (c *ConnectionNodeController) CreateDbConnection(targetId string) ConnectionDetailsResponse {
+	// Create our request
+	createDbConnectionRequest := CreateKubeConnectionRequest{
+		TargetId: targetId,
+	}
+
+	// Build the endpoint we want to hit
+	createConnectionEndpoint := c.bastionUrl + createDbConnectionEndpoint
+
+	// Marshall the request
+	msgBytes, errMarshal := json.Marshal(createDbConnectionRequest)
+	if errMarshal != nil {
+		c.logger.Error(fmt.Errorf("error marshalling create db connection request for connection node: %v", createDbConnectionRequest))
+		panic(errMarshal)
+	}
+
+	// Perform the request
+	httpCreateConnectionResponse, errPost := bzhttp.Post(c.logger, createConnectionEndpoint, "application/json", msgBytes, c.headers, c.params)
+	if errPost != nil {
+		c.logger.Error(fmt.Errorf("error on create db connection for connection node: %s. Response: %+v", errPost, httpCreateConnectionResponse))
+		panic(errPost)
+	}
+
+	// Read all the bytes from the response
+	createConnectionResponseBytes, readAllErr := ioutil.ReadAll(httpCreateConnectionResponse.Body)
+	if readAllErr != nil {
+		c.logger.Error(fmt.Errorf("error reading bytes from create connection response"))
+		panic(readAllErr)
+	}
+
+	// Unmarshal the bytes
+	createConnectionResponse := &CreateConnectionResponse{}
+	if err := json.Unmarshal(createConnectionResponseBytes, &createConnectionResponse); err != nil {
+		// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
+		c.logger.Error(fmt.Errorf("error un-marshalling create connection response"))
+		panic(err)
+	}
+
+	return c.createCnConnection(createConnectionResponse.ConnectionId)
+}
+
+func (c *ConnectionNodeController) createCnConnection(connectionId string) ConnectionDetailsResponse {
 	// Now use the connectionId to get the connectionNodeId and AuthToken
-	getAuthDetailsEndpoint := c.bastionUrl + strings.Replace(getKubeAuthDetailsEndpoint, "$ID", createConnectionResponse.ConnectionId, -1)
+	getAuthDetailsEndpoint := c.bastionUrl + strings.Replace(getAuthDetailsEndpoint, "$ID", connectionId, -1)
 	httpGetAuthDetailsResponse, errPost := bzhttp.Get(c.logger, getAuthDetailsEndpoint, c.headers, c.params)
 	if errPost != nil {
-		c.logger.Error(fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpCreateConnectionResponse))
+		c.logger.Error(fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpGetAuthDetailsResponse))
 		panic(errPost)
 	}
 
@@ -102,9 +153,9 @@ func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targe
 	}
 
 	// Return the auth details response
-	return CreateKubeConnectionResponse{
+	return ConnectionDetailsResponse{
 		ConnectionNodeId: getAuthDetailsResponse.ConnectionNodeId,
 		AuthToken:        getAuthDetailsResponse.AuthToken,
-		ConnectionId:     createConnectionResponse.ConnectionId,
+		ConnectionId:     connectionId,
 	}
 }

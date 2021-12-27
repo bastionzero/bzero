@@ -7,7 +7,7 @@ import (
 	"net"
 	"os"
 
-	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -27,7 +27,6 @@ type DbServer struct {
 	logger    *logger.Logger
 	websocket *websocket.Websocket // TODO: This will need to be a dictionary for when we have multiple
 	tmb       tomb.Tomb
-	ready     bool
 
 	// Db connections only require a single datachannel
 	datachannel *datachannel.DataChannel
@@ -55,7 +54,6 @@ func StartDbServer(logger *logger.Logger,
 
 	listener := &DbServer{
 		logger:              logger,
-		ready:               false,
 		serviceUrl:          serviceUrl,
 		params:              params,
 		headers:             headers,
@@ -71,7 +69,7 @@ func StartDbServer(logger *logger.Logger,
 		return err
 	}
 
-	// Create a single datachannel for all of our rest api calls to reduce overhead
+	// Create a single datachannel for all of our db calls
 	// if datachannel, err := listener.newDataChannel(string(db.Start), listener.websocket); err == nil {
 	// 	listener.datachannel = datachannel
 	// } else {
@@ -93,7 +91,7 @@ func StartDbServer(logger *logger.Logger,
 		os.Exit(1)
 	}
 
-	// Now keep listening for new tcp events
+	// Block and keep listening for new tcp events
 	for {
 		conn, err := localTcpListener.AcceptTCP()
 		if err != nil {
@@ -103,8 +101,6 @@ func StartDbServer(logger *logger.Logger,
 
 		go listener.handleProxy(conn, logger)
 	}
-
-	return nil
 }
 
 func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger) {
@@ -217,7 +213,7 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 			for {
 				select {
 				case <-h.tmb.Dying():
-					datachannel.Close(errors.New("http server closing"))
+					datachannel.Close(errors.New("db server closing"))
 					return
 				case <-dcTmb.Dying():
 					// Wait until everything is dead and any close processes are sent before killing the datachannel

@@ -138,7 +138,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	params["connection_node_id"] = message.ConnectionNodeId
 	params["token"] = message.Token
 
-	if ws, err := websocket.New(subLogger, message.DaemonWebsocketId, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.ClusterAgent); err != nil {
+	if ws, err := websocket.New(subLogger, message.DaemonWebsocketId, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary
@@ -167,12 +167,6 @@ func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
 		} else {
 			// add our new datachannel to our connections dictionary
 			websocketMeta.DataChannels[dcId] = datachannel
-
-			// let the daemon know the datachannel is ready
-			websocketMeta.Client.Send(am.AgentMessage{
-				ChannelId:   dcId,
-				MessageType: string(am.DataChannelReady),
-			})
 		}
 	}
 	return nil
