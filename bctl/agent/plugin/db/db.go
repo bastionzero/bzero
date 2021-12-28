@@ -4,9 +4,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
+	"strings"
+	"sync"
 
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/db/actions/dbdial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
@@ -15,12 +17,16 @@ import (
 type DbAction string
 
 const (
-	Init   DbAction = "init"
-	Start  DbAction = "start"
-	DataIn DbAction = "datain"
+	Dial DbAction = "dial"
+	// Start  DbAction = "start"
+	// DataIn DbAction = "datain"
 )
 
 type DbActionParams struct {
+}
+
+type JustRequestId struct {
+	RequestId string `json:"requestId"`
 }
 
 type IDbAction interface {
@@ -38,10 +44,13 @@ type DbPlugin struct {
 	targetPort string
 	targetHost string
 
+	requestId string
+
 	remoteAddress *net.TCPAddr
 
 	// Keep track of all the dials TCP connections
-	actions map[string]IDbAction
+	actions        map[string]IDbAction
+	actionsMapLock sync.Mutex
 }
 
 func New(parentTmb *tomb.Tomb,
@@ -72,52 +81,19 @@ func New(parentTmb *tomb.Tomb,
 		actions:          make(map[string]IDbAction),
 	}
 
-	// Setup a go routine to listen for messages coming from this local connection and forward to the client
-	// TODO: Setup tomb for this to be cancelled
-	// This needs to be its own action
-	go func() {
-		// For each start, call the dial function
-		rconn, err := net.DialTCP("tcp", nil, raddr)
-		if err != nil {
-			logger.Errorf("Failed to dial remote address: %s", err)
-			// Let the agent know that there was an error
-			return
-		}
-
-		buff := make([]byte, 0xffff)
-		for {
-			n, err := rconn.Read(buff)
-			if err == io.EOF {
-				// Let our daemon know that we have got the EOF error and we need to close the connection
-				return
-			}
-			if err != nil {
-				logger.Errorf("Read failed '%s'\n", err)
-
-				// Let the daemon know that we received an error
-				return
-			}
-			tcpBytesBuffer := buff[:n]
-
-			logger.Infof("Received %d bytes from local tcp connection, sending to bastion", n)
-
-			// Now send this to bastion
-			str := base64.StdEncoding.EncodeToString(tcpBytesBuffer)
-			message := smsg.StreamMessage{
-				Type:           string(smsg.DbOut),
-				RequestId:      "", // No requestId for db messages
-				SequenceNumber: 0,  // No sequence number needed for db messages
-				Content:        str,
-				LogId:          "", // No log id for db messages
-			}
-			ch <- message
-		}
-	}()
-
 	return plugin, nil
 }
 
 func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	k.logger.Infof("Plugin received Data message with %v action", action)
+
+	// parse action
+	parsedAction := strings.Split(action, "/")
+	if len(parsedAction) < 2 {
+		return "", []byte{}, fmt.Errorf("malformed action: %s", action)
+	}
+	dbAction := parsedAction[1]
+
 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
 	// so that we can murder its family
@@ -132,36 +108,69 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 		return "", []byte{}, base64Err
 	}
 
-	// TODO: Create an action that starts a dial session
-	// This needs to then update our action map, that way we can continue to send data to it in the background
+	// Grab just the request ID so that we can look up whether it's associated with a previously started action object
+	var justrid JustRequestId
+	var rid string
+	if err := json.Unmarshal(actionPayloadSafe, &justrid); err != nil {
+		return "", []byte{}, fmt.Errorf("could not unmarshal json: %v", err.Error())
+	} else {
+		rid = justrid.RequestId
+	}
 
-	switch DbAction(action) {
-	case DataIn:
-		// Deserialize the action payload
-		var dataIn DbDataInActionPayload
-		if err := json.Unmarshal(actionPayloadSafe, &dataIn); err != nil {
-			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
+	// Lookup if we already started an action for this requestId
+	if act, ok := k.getActionsMap(rid); ok {
+		// If we did, send the payload data to this action
+		action, payload, err := act.Receive(action, actionPayloadSafe)
+
+		// Check if that last message closed the action, if so delete from map
+		if act.Closed() {
+			k.deleteActionsMap(rid)
+		}
+
+		return action, payload, err
+	} else {
+		subLogger := k.logger.GetActionLogger(action)
+		subLogger.AddRequestId(rid)
+		switch DbAction(dbAction) {
+		case Dial:
+			// Create a new dbdial action
+			a, err := dbdial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
+			k.updateActionsMap(a, rid) // save action for later input
+
+			if err != nil {
+				rerr := fmt.Errorf("could not start new action object: %s", err)
+				k.logger.Error(rerr)
+				return "", []byte{}, rerr
+			}
+
+			// Send the payload to the action and add it to the map for future incoming requests
+			action, payload, err := a.Receive(action, actionPayloadSafe)
+			return action, payload, err
+		default:
+			rerr := fmt.Errorf("unhandled db action: %v", action)
 			k.logger.Error(rerr)
 			return "", []byte{}, rerr
 		}
-
-		// Decode the data first
-		dataToWrite, _ := base64.StdEncoding.DecodeString(dataIn.Data)
-
-		// Find our which request we need to forward this data too by looking up the requestId in the actionMap
-
-		// Send this data to our remote connection
-		k.logger.Info("Received data from bastion, forwarding to remote tcp connection")
-		// _, err := k.remoteConnection.Write(dataToWrite) // TODO: this returns an error, catch that error as well
-		// if err != nil {
-		// 	k.logger.Errorf("error writing to to remote connection: %v", err)
-		// }
-
-		return action, []byte{}, nil
-	default:
-		rerr := fmt.Errorf("unhandled db action: %v", action)
-		k.logger.Error(rerr)
-		return "", []byte{}, rerr
 	}
 
+}
+
+// Helper function so we avoid writing to this map at the same time
+func (k *DbPlugin) updateActionsMap(newAction IDbAction, id string) {
+	k.actionsMapLock.Lock()
+	k.actions[id] = newAction
+	k.actionsMapLock.Unlock()
+}
+
+func (k *DbPlugin) deleteActionsMap(rid string) {
+	k.actionsMapLock.Lock()
+	delete(k.actions, rid)
+	k.actionsMapLock.Unlock()
+}
+
+func (k *DbPlugin) getActionsMap(rid string) (IDbAction, bool) {
+	k.actionsMapLock.Lock()
+	defer k.actionsMapLock.Unlock()
+	act, ok := k.actions[rid]
+	return act, ok
 }

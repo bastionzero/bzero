@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 
@@ -18,14 +17,14 @@ import (
 )
 
 const (
-	// websocket connection parameters for all datachannels created by http server
+	// websocket connection parameters for all datachannels created by tcp server
 	autoReconnect = true
 	getChallenge  = false
 )
 
 type DbServer struct {
 	logger    *logger.Logger
-	websocket *websocket.Websocket // TODO: This will need to be a dictionary for when we have multiple
+	websocket *websocket.Websocket
 	tmb       tomb.Tomb
 
 	// Db connections only require a single datachannel
@@ -70,7 +69,7 @@ func StartDbServer(logger *logger.Logger,
 	}
 
 	// Create a single datachannel for all of our db calls
-	if datachannel, err := listener.newDataChannel(string(agms.Init), listener.websocket); err == nil {
+	if datachannel, err := listener.newDataChannel(string(agms.Dial), listener.websocket); err == nil {
 		listener.datachannel = datachannel
 	} else {
 		return err
@@ -112,42 +111,9 @@ func StartDbServer(logger *logger.Logger,
 	}
 }
 
-// TODO: Create function that listens to TcpOuput and forwards to the correct handleProxy instance
-
 func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, requestId string) {
-	// Tell the agent to start a new dial session
-
-	// Listen to stream messages coming from bastion, and forward to our local connection
-	go func() {
-		for {
-			select {
-			case data := <-h.datachannel.DbPlugin.TcpOuput:
-				_, err := lconn.Write(data)
-				if err != nil {
-					logger.Errorf("Write failed '%s'\n", err)
-				}
-			}
-		}
-	}()
-
-	// Keep looping till we hit EOF
-	tmp := make([]byte, 0xffff)
-	for {
-		n, err := lconn.Read(tmp)
-		if err == io.EOF {
-			// Tell the agent to stop the dial session
-			return
-		}
-		if err != nil {
-			logger.Errorf("Read failed '%s'\n", err)
-			// Tell the agent to stop the dial session
-			return
-		}
-
-		buff := tmp[:n]
-
-		h.datachannel.FeedTcp(string(agms.DataIn), buff)
-	}
+	// Start the dial plugin
+	h.datachannel.FeedTcp(string(agms.Dial), lconn)
 }
 
 // for creating new websockets

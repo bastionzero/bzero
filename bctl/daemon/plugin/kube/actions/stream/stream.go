@@ -65,7 +65,7 @@ func (s *StreamAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
 }
 
 func (s *StreamAction) ReceiveStream(smessage smsg.StreamMessage) {
-	s.logger.Debugf("Stream action recieved %v stream", smessage.Type)
+	s.logger.Debugf("Stream action received %v stream", smessage.Type)
 	s.streamInputChan <- smessage
 }
 

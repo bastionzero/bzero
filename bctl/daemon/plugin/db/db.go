@@ -1,13 +1,16 @@
 package db
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
+	"sync"
 
+	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
 	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db/actions/dbdial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -17,8 +20,14 @@ import (
 type IDbDaemonAction interface {
 	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(tmb *tomb.Tomb) error
+	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
 }
+
+type DbDaemonAction string
+
+const (
+	Dial DbDaemonAction = "dial"
+)
 
 type DbDaemonPlugin struct {
 	tmb    *tomb.Tomb
@@ -28,8 +37,8 @@ type DbDaemonPlugin struct {
 	streamInputChan chan smsg.StreamMessage
 	outputQueue     chan plugin.ActionWrapper
 
-	// Input and output to communicate with the server
-	TcpOuput chan []byte
+	actions       map[string]IDbDaemonAction
+	actionMapLock sync.RWMutex // for keeping the action map thread-safe
 
 	// Db-specific vars
 	targetHost     string
@@ -44,13 +53,13 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.DbAction
 		streamInputChan: make(chan smsg.StreamMessage, 25),
 		sequenceNumber:  0,
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
+		actions:         make(map[string]IDbDaemonAction),
 		targetHost:      "",
 		targetPort:      "",
-		TcpOuput:        make(chan []byte, 25),
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
-	// the keysplitting syncronous chain
+	// the keysplitting synchronous chain
 	go func() {
 		for {
 			select {
@@ -66,17 +75,20 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.DbAction
 }
 
 func (k *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
+	k.logger.Debugf("Stream action received %v stream", smessage.Type)
 	k.streamInputChan <- smessage
 }
 
 func (k *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
-	// check for end of stream
-	contentBytes, _ := base64.StdEncoding.DecodeString(smessage.Content)
+	// find action by requestid in map and push stream message to it
+	if act, ok := k.getActionsMap(smessage.RequestId); ok {
+		act.ReceiveStream(smessage)
+		return nil
+	}
 
-	// Send the strem message to our tcpoutput channel so our server can pick it up
-	k.TcpOuput <- contentBytes
-
-	return nil
+	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been compleated", smessage.RequestId)
+	k.logger.Error(rerr)
+	return rerr
 }
 
 func (k *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
@@ -111,33 +123,80 @@ func (k *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte
 		return nil
 	}
 
+	// No keysplitting data comes from dial plugins on the agent
+	k.logger.Errorf("keysplitting message received. This should now happen")
 	return nil
 }
 
-func (k *DbDaemonPlugin) Feed(action string, data []byte) error {
+func (k *DbDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
+	// Always generate a requestId, each new kube command is its own request
+	requestId := uuid.New().String()
+
+	// Create action logger
+	actLogger := k.logger.GetActionLogger(action)
+	actLogger.AddRequestId(requestId)
+
+	var act IDbDaemonAction
+	var actOutputChan chan plugin.ActionWrapper
+
 	switch agms.DbAction(action) {
-	case agms.DataIn:
-		// Package and forward this request to bastion
-		// Encode the bytes first
-		dataToSend := base64.StdEncoding.EncodeToString(data)
-		payload := agms.DbDataInActionPayload{
-			Data:           dataToSend,
-			SequenceNumber: k.sequenceNumber,
-		}
-
-		// send action payload to plugin to be sent to agent
-		payloadBytes, _ := json.Marshal(payload)
-		k.outputQueue <- plugin.ActionWrapper{
-			Action:        string(agms.DataIn),
-			ActionPayload: payloadBytes,
-		}
-
-		// Increment sequence number
-		k.sequenceNumber += 1
+	case agms.Dial:
+		act, actOutputChan = dbdial.New(actLogger, requestId)
 	default:
 		rerr := fmt.Errorf("unrecognized db action: %v", string(action))
 		k.logger.Error(rerr)
 		return rerr
 	}
+
+	// add the action to the action map for future interaction
+	k.updateActionsMap(act, requestId)
+
+	// listen to action output channel, remove action from map if channel is closed
+	go func() {
+		for {
+			select {
+			case <-k.tmb.Dying():
+				return
+			case m, more := <-actOutputChan:
+				if more {
+					k.outputQueue <- m
+				} else {
+					k.deleteActionsMap(requestId)
+					return
+				}
+			}
+		}
+	}()
+
+	k.logger.Infof("Created %s action with requestId %v", string(action), requestId)
+
+	// send local tcp connection to action
+	if err := act.Start(k.tmb, lconn); err != nil {
+		k.logger.Error(fmt.Errorf("%s error: %s", string(action), err))
+	}
+
 	return nil
+}
+
+func (k *DbDaemonPlugin) updateActionsMap(newAction IDbDaemonAction, id string) {
+	// Helper function so we avoid writing to this map at the same time
+	k.actionMapLock.Lock()
+	defer k.actionMapLock.Unlock()
+
+	k.actions[id] = newAction
+}
+
+func (k *DbDaemonPlugin) deleteActionsMap(rid string) {
+	k.actionMapLock.Lock()
+	defer k.actionMapLock.Unlock()
+
+	delete(k.actions, rid)
+}
+
+func (k *DbDaemonPlugin) getActionsMap(rid string) (IDbDaemonAction, bool) {
+	k.actionMapLock.Lock()
+	defer k.actionMapLock.Unlock()
+
+	act, ok := k.actions[rid]
+	return act, ok
 }

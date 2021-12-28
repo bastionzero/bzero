@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -280,9 +281,9 @@ func (d *DataChannel) FeedHttp(action string, logId string, command string, w ht
 	}
 }
 
-func (d *DataChannel) FeedTcp(action string, data []byte) error {
+func (d *DataChannel) FeedTcp(action string, lconn *net.TCPConn) error {
 	if d.DbPlugin != nil {
-		d.DbPlugin.Feed(action, data)
+		d.DbPlugin.Feed(action, lconn)
 		return nil
 	} else {
 		rerr := fmt.Errorf("no plugin is associated with this datachannel")
