@@ -23,6 +23,9 @@ const (
 )
 
 type DbActionParams struct {
+	TargetPort     string
+	TargetHost     string
+	TargetHostName string
 }
 
 type JustRequestId struct {
@@ -41,10 +44,12 @@ type DbPlugin struct {
 
 	streamOutputChan chan smsg.StreamMessage
 
+	// Either use the host:port
 	targetPort string
 	targetHost string
 
-	requestId string
+	// Or the full host name (i.e. DNS entry)
+	targetHostName string
 
 	remoteAddress *net.TCPAddr
 
@@ -64,16 +69,23 @@ func New(parentTmb *tomb.Tomb,
 		return &DbPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
+	// Determine if we are using target hostname or host:port
+	address := synPayload.TargetHostName
+	if address == "" {
+		address = synPayload.TargetHost + ":" + synPayload.TargetPort
+	}
+
 	// Open up a connection to the TCP addr we are trying to connect to
-	raddr, err := net.ResolveTCPAddr("tcp", ":5432")
+	raddr, err := net.ResolveTCPAddr("tcp", address)
 	if err != nil {
 		logger.Errorf("Failed to resolve remote address: %s", err)
 		return &DbPlugin{}, fmt.Errorf("failed to resolve remote address: %s", err)
 	}
 
 	plugin := &DbPlugin{
-		targetPort:       "5432",
-		targetHost:       "localhost",
+		targetPort:       synPayload.TargetPort,
+		targetHost:       synPayload.TargetHost,
+		targetHostName:   synPayload.TargetHostName,
 		logger:           logger,
 		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,

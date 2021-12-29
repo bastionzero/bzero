@@ -33,6 +33,12 @@ type DbServer struct {
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
+	// Db specific vars
+	// Either user the full dns (i.e. targetHostName) or the host:port
+	targetHostName string
+	targetPort     string
+	targetHost     string
+
 	// fields for new datachannels
 	daemonport          string
 	params              map[string]string
@@ -44,6 +50,9 @@ type DbServer struct {
 
 func StartDbServer(logger *logger.Logger,
 	daemonPort string,
+	targetHostName string,
+	targetPort string,
+	targetHost string,
 	refreshTokenCommand string,
 	configPath string,
 	serviceUrl string,
@@ -60,6 +69,9 @@ func StartDbServer(logger *logger.Logger,
 		configPath:          configPath,
 		refreshTokenCommand: refreshTokenCommand,
 		daemonport:          daemonPort,
+		targetHostName:      targetHostName,
+		targetHost:          targetHost,
+		targetPort:          targetPort,
 	}
 
 	// Create a new websocket
@@ -136,7 +148,11 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 	h.logger.Infof("Creating new datachannel id: %v", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := agms.DbActionParams{}
+	actionParams := agms.DbActionParams{
+		TargetPort:     h.targetPort,
+		TargetHost:     h.targetHost,
+		TargetHostName: h.targetHostName,
+	}
 
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
 	if marshalErr != nil {

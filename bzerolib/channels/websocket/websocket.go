@@ -17,6 +17,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
+	"bastionzero.com/bctl/v1/bzerolib/controllers/agentcontroller"
 	"bastionzero.com/bctl/v1/bzerolib/controllers/connectionnodecontroller"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -300,8 +301,11 @@ func (w *Websocket) Connect() {
 		// First get the config from the vault
 		config, _ := vault.LoadVault()
 
+		// Build our agentController
+		agentController := agentcontroller.New(w.logger, w.serviceUrl, map[string]string{}, map[string]string{}, w.params["target_type"])
+
 		// If we have a private key, we must solve the challenge
-		if solvedChallenge, err := newChallenge(w.logger, w.params["org_id"], w.params["cluster_id"], config.Data.ClusterName, w.serviceUrl, config.Data.PrivateKey); err != nil {
+		if solvedChallenge, err := agentController.GetChallenge(w.params["org_id"], w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["target_type"]); err != nil {
 			w.logger.Error(fmt.Errorf("error getting challenge: %s", err))
 			return
 		} else {
@@ -309,7 +313,7 @@ func (w *Websocket) Connect() {
 		}
 
 		// And sign our agent version
-		if signedAgentVersion, err := signString(config.Data.PrivateKey, w.params["agent_version"]); err != nil {
+		if signedAgentVersion, err := agentcontroller.SignString(config.Data.PrivateKey, w.params["agent_version"]); err != nil {
 			w.logger.Error(fmt.Errorf("error signing agent version: %s", err))
 			return
 		} else {

@@ -21,6 +21,9 @@ var (
 	targetGroupsRaw, targetUser, certPath, keyPath string
 	localhostToken, configPath                     string
 	targetGroups                                   []string
+
+	// Db specifc values
+	targetHostName, targetPort, targetHost string
 )
 
 const (
@@ -80,6 +83,9 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 
 	return dbserver.StartDbServer(subLogger,
 		daemonPort,
+		targetHostName,
+		targetPort,
+		targetHost,
 		refreshTokenCommand,
 		configPath,
 		serviceUrl,
@@ -139,9 +145,13 @@ func parseFlags() error {
 	flag.StringVar(&logPath, "logPath", "", "Path to log file for daemon")
 	flag.StringVar(&refreshTokenCommand, "refreshTokenCommand", "", "zli constructed command for refreshing id tokens")
 
-	flag.Parse()
+	// Db plugin variables
+	flag.StringVar(&targetPort, "targetPort", "", "Remote target port to connect to (if -targetHostName not provided)")
+	flag.StringVar(&targetHost, "targetHost", "", "Remote target host to connect to (if -targetHostName not provided)")
+	flag.StringVar(&targetHostName, "targetHostName", "", "Remote target HostName to connect to (if -targetPort and -targetHost not provided)")
 
 	// Check we have all required flags
+	flag.Parse()
 	if sessionId == "" || authHeader == "" || serviceUrl == "" ||
 		logPath == "" || configPath == "" || daemonPort == "" {
 		return fmt.Errorf("missing flags")
@@ -152,10 +162,15 @@ func parseFlags() error {
 	case "kube":
 		if targetUser == "" || targetGroupsRaw == "" || targetId == "" ||
 			localhostToken == "" || certPath == "" || keyPath == "" {
-			return fmt.Errorf("missing plugin flags")
+			return fmt.Errorf("missing kube plugin flags")
 		}
 	case "db":
-		// Db does not have any specific vars
+		// We need targetHostName OR targetPort AND targetHost
+		if targetHostName == "" {
+			if targetPort == "" && targetHost == "" {
+				return fmt.Errorf("missing db plugin flags")
+			}
+		}
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

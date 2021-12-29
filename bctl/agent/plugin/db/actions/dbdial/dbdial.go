@@ -18,7 +18,6 @@ type DbDialSubAction string
 const (
 	DbDialStart  DbDialSubAction = "db/dial/start"
 	DbDialDataIn DbDialSubAction = "db/dial/datain"
-	// StreamStop  StreamSubAction = "kube/stream/stop"
 )
 
 type DbDial struct {

@@ -38,7 +38,7 @@ type SecretData struct {
 	PrivateKey  string
 	OrgId       string
 	ServiceUrl  string
-	ClusterName string
+	TargetName  string
 	Namespace   string
 	IdpProvider string
 	IdpOrgId    string
@@ -91,7 +91,7 @@ func clusterVault() (*Vault, error) {
 	if clientset, err := kubernetes.NewForConfig(config); err != nil {
 		return &Vault{}, fmt.Errorf("error creating new config: %v", err.Error())
 	} else {
-		secretName := "bctl-" + os.Getenv("CLUSTER_NAME") + "-secret"
+		secretName := "bctl-" + os.Getenv("TARGET_NAME") + "-secret"
 
 		// Create our secrets client
 		secretsClient := clientset.CoreV1().Secrets(os.Getenv("NAMESPACE"))

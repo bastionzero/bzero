@@ -2,10 +2,8 @@ package main
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 
 	ed "crypto/ed25519"
@@ -15,22 +13,17 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/controlchannel"
 	"bastionzero.com/bctl/v1/bctl/agent/rbac"
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
-	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/controllers/agentcontroller"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
 var (
-	serviceUrl, orgId, clusterName   string
+	serviceUrl, orgId, targetName    string
 	environmentId, activationToken   string
 	idpProvider, namespace, idpOrgId string
-	clusterId                        string
-)
-
-const (
-	hubEndpoint      = "/api/v1/hub/kube-server"
-	registerEndpoint = "/api/v1/kube/register-agent"
+	targetId, targetType             string
 )
 
 func main() {
@@ -49,7 +42,7 @@ func main() {
 		logger.Error(err)
 		os.Exit(1)
 	}
-	logger.Infof("Information parsed for %s", clusterName)
+	logger.Infof("Information parsed for %s", targetName)
 
 	// Check if the agent is registered or not.  If not, generate signing keys,
 	// check kube permissions and setup, and register with the Bastion.
@@ -84,8 +77,9 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 		"public_key":    config.Data.PublicKey,
 		"agent_version": agentVersion,
 		"org_id":        orgId,
-		"cluster_id":    clusterId,
-		"cluster_name":  clusterName,
+		"target_id":     targetId,
+		"target_name":   targetName,
+		"target_type":   targetType,
 	}
 
 	// create a websocket
@@ -100,14 +94,14 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	ccId := uuid.New().String()
 	ccLogger := logger.GetControlChannelLogger(ccId)
 
-	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, dcTargetSelectHandler)
+	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, targetType, dcTargetSelectHandler)
 }
 
 // control channel function to select correct SignalR hubs on message egress
 func ccTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.HealthCheck:
-		return "AliveCheckClusterToBastion", nil
+		return "AliveCheckAgentToBastion", nil
 	default:
 		return "", fmt.Errorf("unsupported message type")
 	}
@@ -135,8 +129,8 @@ func parseFlags() error {
 	// Our expected flags we need to start
 	flag.StringVar(&serviceUrl, "serviceUrl", "", "Service URL to use")
 	flag.StringVar(&orgId, "orgId", "", "OrgId to use")
-	flag.StringVar(&clusterName, "clusterName", "", "Cluster name to use")
-	flag.StringVar(&clusterId, "clusterId", "", "Cluster Id to use")
+	flag.StringVar(&targetName, "targetName", "", "Target name to use")
+	flag.StringVar(&targetId, "targetId", "", "Target Id to use")
 	flag.StringVar(&environmentId, "environmentId", "", "Optional environmentId to specify")
 	flag.StringVar(&activationToken, "activationToken", "", "Activation Token to use to register the cluster")
 
@@ -147,12 +141,18 @@ func parseFlags() error {
 	serviceUrl = os.Getenv("SERVICE_URL")
 	activationToken = os.Getenv("ACTIVATION_TOKEN")
 	orgId = os.Getenv("ORG_ID")
-	clusterName = os.Getenv("CLUSTER_NAME")
-	clusterId = os.Getenv("CLUSTER_ID")
+	targetName = os.Getenv("TARGET_NAME")
+	targetId = os.Getenv("TARGET_ID")
 	environmentId = os.Getenv("ENVIRONMENT")
 	idpProvider = os.Getenv("IDP_PROVIDER")
 	idpOrgId = os.Getenv("IDP_ORG_ID")
 	namespace = os.Getenv("NAMESPACE")
+
+	if vault.InCluster() {
+		targetType = "kube"
+	} else {
+		targetType = "bzero"
+	}
 
 	// Ensure we have all needed vars
 	missing := []string{}
@@ -163,8 +163,11 @@ func parseFlags() error {
 	case orgId == "":
 		missing = append(missing, "orgId")
 		fallthrough
-	case clusterName == "":
-		missing = append(missing, "clusterName")
+	case targetName == "":
+		missing = append(missing, "targetName")
+		fallthrough
+	case targetId == "":
+		missing = append(missing, "targetId")
 		fallthrough
 	case activationToken == "":
 		missing = append(missing, "activationToken")
@@ -217,38 +220,21 @@ func register(logger *logger.Logger) error {
 				PrivateKey:  privkeyString,
 				OrgId:       orgId,
 				ServiceUrl:  serviceUrl,
-				ClusterName: clusterName,
+				TargetName:  targetName,
 				Namespace:   namespace,
 				IdpProvider: idpProvider,
 				IdpOrgId:    idpOrgId,
 			}
 
 			// Register with Bastion
-			logger.Info("Cryptographic identity created.  Reaching out to BastionZero...")
-			register := controlchannel.RegisterAgentMessage{
-				PublicKey:      pubkeyString,
-				ActivationCode: activationToken,
-				AgentVersion:   getAgentVersion(),
-				OrgId:          orgId,
-				EnvironmentId:  environmentId,
-				ClusterName:    clusterName,
-				ClusterId:      clusterId,
+			logger.Info("Cryptographic identity created.  Registering with BastionZero...")
+			agentController := agentcontroller.New(logger, serviceUrl, map[string]string{}, map[string]string{}, targetType)
+
+			if err := agentController.RegisterAgent(pubkeyString, activationToken, getAgentVersion(), orgId, environmentId, targetName, targetId, targetType); err != nil {
+				return fmt.Errorf("error registering agent: %s", err)
 			}
 
-			registerJson, err := json.Marshal(register)
-			if err != nil {
-				msg := fmt.Errorf("error marshalling registration data: %s", err)
-				return msg
-			}
-
-			// Make our POST request
-			response, err := bzhttp.PostRegister(logger, "https://"+serviceUrl+registerEndpoint, "application/json", registerJson)
-			if err != nil || response.StatusCode != http.StatusOK {
-				rerr := fmt.Errorf("error making post request to register agent. Error: %s. Response: %+v", err, response)
-				return rerr
-			}
-
-			logger.Info("Agent sucessfully Registered.  BastionZero says hi.")
+			logger.Info("Agent successfully Registered.  BastionZero says hi.")
 
 			// If the registration went ok, save the config
 			if err := config.Save(); err != nil {

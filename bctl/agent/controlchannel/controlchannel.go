@@ -37,6 +37,8 @@ type ControlChannel struct {
 	// These are all the types of channels we have available
 	inputChan chan am.AgentMessage
 
+	targetType string
+
 	// struct for keeping track of all connections key'ed with connectionId (websockets with associated datachannels)
 	connections     map[string]wsMeta
 	connectionsLock sync.Mutex
@@ -48,6 +50,7 @@ func Start(logger *logger.Logger,
 	id string,
 	websocket *websocket.Websocket, // control channel websocket
 	serviceUrl string,
+	targetType string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
 	control := &ControlChannel{
@@ -57,6 +60,8 @@ func Start(logger *logger.Logger,
 
 		serviceUrl:            serviceUrl,
 		dcTargetSelectHandler: targetSelectHandler,
+
+		targetType: targetType,
 
 		inputChan: make(chan am.AgentMessage, 25),
 
@@ -184,7 +189,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 			return fmt.Errorf("malformed check health request: %s", err)
 		} else {
 			// send message to be processed
-			if msg, err := checkHealth(healthCheckMessage); err != nil {
+			if msg, err := c.checkHealth(healthCheckMessage); err != nil {
 				return fmt.Errorf("error processing health check message: %s", err)
 			} else {
 				c.send(am.HealthCheck, msg)
@@ -244,15 +249,15 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 	return nil
 }
 
-func checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckClusterToBastionMessage, error) {
+func (c *ControlChannel) checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckAgentToBastionMessage, error) {
 	// Load in our saved config
 	secretData, err := vault.LoadVault()
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 
 	// Update the vault value
-	secretData.Data.ClusterName = healthCheckMessage.ClusterName
+	secretData.Data.TargetName = healthCheckMessage.TargetName
 	secretData.Save()
 
 	// Also let bastion know a list of valid cluster roles
@@ -261,26 +266,26 @@ func checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckClusterToBast
 		return checkInClusterHealth()
 	}
 
-	return AliveCheckClusterToBastionMessage{
+	return AliveCheckAgentToBastionMessage{
 		Alive:        true,
 		ClusterUsers: []string{},
 	}, nil
 }
 
-func checkInClusterHealth() (AliveCheckClusterToBastionMessage, error) {
+func checkInClusterHealth() (AliveCheckAgentToBastionMessage, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 
 	// Then get all cluster roles
 	clusterRoleBindings, err := clientset.RbacV1().ClusterRoleBindings().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 
 	clusterUsers := make(map[string]bool)
@@ -301,7 +306,7 @@ func checkInClusterHealth() (AliveCheckClusterToBastionMessage, error) {
 	// Then get all roles
 	roleBindings, err := clientset.RbacV1().RoleBindings("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 
 	for _, roleBindings := range roleBindings.Items {
@@ -323,7 +328,7 @@ func checkInClusterHealth() (AliveCheckClusterToBastionMessage, error) {
 		users = append(users, key)
 	}
 
-	return AliveCheckClusterToBastionMessage{
+	return AliveCheckAgentToBastionMessage{
 		Alive:        true,
 		ClusterUsers: users,
 	}, nil
