@@ -1,4 +1,4 @@
-package dbserver
+package webserver
 
 import (
 	"encoding/json"
@@ -22,18 +22,18 @@ const (
 	getChallenge  = false
 )
 
-type DbServer struct {
+type WebServer struct {
 	logger    *logger.Logger
 	websocket *websocket.Websocket
 	tmb       tomb.Tomb
 
-	// Db connections only require a single datachannel
+	// Web connections only require a single datachannel
 	datachannel *datachannel.DataChannel
 
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
-	// Db specific vars
+	// Web specific vars
 	// Either user the full dns (i.e. targetHostName) or the host:port
 	targetHostName string
 	targetPort     string
@@ -48,7 +48,7 @@ type DbServer struct {
 	configPath          string
 }
 
-func StartDbServer(logger *logger.Logger,
+func StartWebServer(logger *logger.Logger,
 	daemonPort string,
 	targetHostName string,
 	targetPort string,
@@ -60,7 +60,7 @@ func StartDbServer(logger *logger.Logger,
 	headers map[string]string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
-	listener := &DbServer{
+	listener := &WebServer{
 		logger:              logger,
 		serviceUrl:          serviceUrl,
 		params:              params,
@@ -123,13 +123,13 @@ func StartDbServer(logger *logger.Logger,
 	}
 }
 
-func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, requestId string) {
+func (h *WebServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, requestId string) {
 	// Start the dial plugin
 	h.datachannel.FeedTcp(string(agms.Dial), lconn)
 }
 
 // for creating new websockets
-func (h *DbServer) newWebsocket(wsId string) error {
+func (h *WebServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
 	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Db); err != nil {
 		return err
@@ -140,7 +140,7 @@ func (h *DbServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
+func (h *WebServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
 	subLogger := h.logger.GetDatachannelLogger(dcId)
@@ -148,7 +148,7 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 	h.logger.Infof("Creating new datachannel id: %v", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := agms.DbActionParams{
+	actionParams := agms.WebActionParams{
 		TargetPort:     h.targetPort,
 		TargetHost:     h.targetHost,
 		TargetHostName: h.targetHostName,
@@ -156,11 +156,11 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
 	if marshalErr != nil {
-		h.logger.Error(fmt.Errorf("error marshalling action params for db"))
+		h.logger.Error(fmt.Errorf("error marshalling action params for web"))
 		return &datachannel.DataChannel{}, marshalErr
 	}
 
-	action = "db/" + action
+	action = "web/" + action
 	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
@@ -171,7 +171,7 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 			for {
 				select {
 				case <-h.tmb.Dying():
-					datachannel.Close(errors.New("db server closing"))
+					datachannel.Close(errors.New("web server closing"))
 					return
 				case <-dcTmb.Dying():
 					// Wait until everything is dead and any close processes are sent before killing the datachannel

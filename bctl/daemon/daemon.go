@@ -8,6 +8,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
+	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
@@ -67,6 +68,12 @@ func main() {
 			logger.Error(err)
 			panic(err)
 		}
+	case "web":
+		params["websocketType"] = "web"
+		if err := startWebServer(logger, headers, params); err != nil {
+			logger.Error(err)
+			panic(err)
+		}
 	default:
 		pluginErr := fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 		logger.Error(pluginErr)
@@ -74,6 +81,24 @@ func main() {
 	}
 
 	select {} // sleep forever?
+}
+
+func startWebServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+	subLogger := logger.GetComponentLogger("webserver")
+
+	params["target_id"] = targetId
+
+	return webserver.StartWebServer(subLogger,
+		daemonPort,
+		targetHostName,
+		targetPort,
+		targetHost,
+		refreshTokenCommand,
+		configPath,
+		serviceUrl,
+		params,
+		headers,
+		targetSelectHandler)
 }
 
 func startDbServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
@@ -132,7 +157,7 @@ func parseFlags() error {
 	// Our expected flags we need to start
 	flag.StringVar(&serviceUrl, "serviceURL", "", "Service URL to use")
 	flag.StringVar(&targetId, "targetId", "", "Kube Cluster Id to Connect to")
-	flag.StringVar(&plugin, "plugin", "", "Plugin to activate")
+	flag.StringVar(&plugin, "plugin", "", "Plugin to activate (kube, db, web)")
 	flag.StringVar(&daemonPort, "daemonPort", "", "Daemon Port To Use")
 
 	// Kube plugin variables
@@ -165,6 +190,7 @@ func parseFlags() error {
 			return fmt.Errorf("missing kube plugin flags")
 		}
 	case "db":
+	case "web":
 		// We need targetHostName OR targetPort AND targetHost
 		if targetHostName == "" {
 			if targetPort == "" && targetHost == "" {

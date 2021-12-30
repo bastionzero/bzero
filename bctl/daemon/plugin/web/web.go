@@ -1,4 +1,4 @@
-package db
+package web
 
 import (
 	"encoding/json"
@@ -9,27 +9,27 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
-	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db/actions/dbdial"
+	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/web"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
-type IDbDaemonAction interface {
+type IWebDaemonAction interface {
 	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
 }
 
-type DbDaemonAction string
+type WebDaemonAction string
 
 const (
-	Dial DbDaemonAction = "dial"
+	Dial WebDaemonAction = "dial"
 )
 
-type DbDaemonPlugin struct {
+type WebDaemonPlugin struct {
 	tmb    *tomb.Tomb
 	logger *logger.Logger
 
@@ -37,23 +37,23 @@ type DbDaemonPlugin struct {
 	streamInputChan chan smsg.StreamMessage
 	outputQueue     chan plugin.ActionWrapper
 
-	actions       map[string]IDbDaemonAction
+	actions       map[string]IWebDaemonAction
 	actionMapLock sync.RWMutex // for keeping the action map thread-safe
 
-	// Db-specific vars
+	// Web-specific vars
 	targetHost     string
 	targetPort     string
 	sequenceNumber int
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.DbActionParams) (*DbDaemonPlugin, error) {
-	plugin := DbDaemonPlugin{
+func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.WebActionParams) (*WebDaemonPlugin, error) {
+	plugin := WebDaemonPlugin{
 		tmb:             parentTmb,
 		logger:          logger,
 		streamInputChan: make(chan smsg.StreamMessage, 25),
 		sequenceNumber:  0,
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
-		actions:         make(map[string]IDbDaemonAction),
+		actions:         make(map[string]IWebDaemonAction),
 		targetHost:      "",
 		targetPort:      "",
 	}
@@ -74,12 +74,12 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.DbAction
 	return &plugin, nil
 }
 
-func (k *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
+func (k *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 	k.logger.Debugf("Stream action received %v stream", smessage.Type)
 	k.streamInputChan <- smessage
 }
 
-func (k *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
+func (k *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	// find action by requestid in map and push stream message to it
 	if act, ok := k.getActionsMap(smessage.RequestId); ok {
 		act.ReceiveStream(smessage)
@@ -91,7 +91,7 @@ func (k *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	return rerr
 }
 
-func (k *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
 	// First, process the incoming message
 	if err := k.processKeysplitting(action, actionPayload); err != nil {
 		return "", []byte{}, err
@@ -117,7 +117,7 @@ func (k *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte
 	}
 }
 
-func (k *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+func (k *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
 	// if actionPayload is empty, then there's nothing we need to process
 	if len(actionPayload) == 0 {
 		return nil
@@ -128,22 +128,22 @@ func (k *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte
 	return nil
 }
 
-func (k *DbDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
-	// Always generate a requestId, each new db command is its own request
+func (k *WebDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
+	// Always generate a requestId, each new web command is its own request
 	requestId := uuid.New().String()
 
 	// Create action logger
 	actLogger := k.logger.GetActionLogger(action)
 	actLogger.AddRequestId(requestId)
 
-	var act IDbDaemonAction
+	var act IWebDaemonAction
 	var actOutputChan chan plugin.ActionWrapper
 
-	switch agms.DbAction(action) {
+	switch agms.WebAction(action) {
 	case agms.Dial:
-		act, actOutputChan = dbdial.New(actLogger, requestId)
+		act, actOutputChan = webdial.New(actLogger, requestId)
 	default:
-		rerr := fmt.Errorf("unrecognized db action: %v", string(action))
+		rerr := fmt.Errorf("unrecognized web action: %v", string(action))
 		k.logger.Error(rerr)
 		return rerr
 	}
@@ -178,7 +178,7 @@ func (k *DbDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
 	return nil
 }
 
-func (k *DbDaemonPlugin) updateActionsMap(newAction IDbDaemonAction, id string) {
+func (k *WebDaemonPlugin) updateActionsMap(newAction IWebDaemonAction, id string) {
 	// Helper function so we avoid writing to this map at the same time
 	k.actionMapLock.Lock()
 	defer k.actionMapLock.Unlock()
@@ -186,14 +186,14 @@ func (k *DbDaemonPlugin) updateActionsMap(newAction IDbDaemonAction, id string) 
 	k.actions[id] = newAction
 }
 
-func (k *DbDaemonPlugin) deleteActionsMap(rid string) {
+func (k *WebDaemonPlugin) deleteActionsMap(rid string) {
 	k.actionMapLock.Lock()
 	defer k.actionMapLock.Unlock()
 
 	delete(k.actions, rid)
 }
 
-func (k *DbDaemonPlugin) getActionsMap(rid string) (IDbDaemonAction, bool) {
+func (k *WebDaemonPlugin) getActionsMap(rid string) (IWebDaemonAction, bool) {
 	k.actionMapLock.Lock()
 	defer k.actionMapLock.Unlock()
 

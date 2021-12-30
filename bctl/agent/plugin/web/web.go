@@ -1,4 +1,4 @@
-package db
+package web
 
 import (
 	"encoding/base64"
@@ -8,25 +8,19 @@ import (
 	"strings"
 	"sync"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/db/actions/dbdial"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
 
-type DbAction string
+type WebAction string
 
 const (
-	Dial DbAction = "dial"
+	Dial WebAction = "dial"
 	// Start  DbAction = "start"
 	// DataIn DbAction = "datain"
 )
-
-type DbActionParams struct {
-	TargetPort     string
-	TargetHost     string
-	TargetHostName string
-}
 
 type WebActionParams struct {
 	TargetPort     string
@@ -38,12 +32,12 @@ type JustRequestId struct {
 	RequestId string `json:"requestId"`
 }
 
-type IDbAction interface {
+type IWebAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
 	Closed() bool
 }
 
-type DbPlugin struct {
+type WebPlugin struct {
 	tmb *tomb.Tomb // datachannel's tomb
 
 	logger *logger.Logger
@@ -60,19 +54,19 @@ type DbPlugin struct {
 	remoteAddress *net.TCPAddr
 
 	// Keep track of all the dials TCP connections
-	actions        map[string]IDbAction
+	actions        map[string]IWebAction
 	actionsMapLock sync.Mutex
 }
 
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
-	payload []byte) (*DbPlugin, error) {
+	payload []byte) (*WebPlugin, error) {
 
 	// Unmarshal the Syn payload
-	var synPayload DbActionParams
+	var synPayload WebActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
-		return &DbPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
+		return &WebPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
 	// Determine if we are using target hostname or host:port
@@ -85,10 +79,10 @@ func New(parentTmb *tomb.Tomb,
 	raddr, err := net.ResolveTCPAddr("tcp", address)
 	if err != nil {
 		logger.Errorf("Failed to resolve remote address: %s", err)
-		return &DbPlugin{}, fmt.Errorf("failed to resolve remote address: %s", err)
+		return &WebPlugin{}, fmt.Errorf("failed to resolve remote address: %s", err)
 	}
 
-	plugin := &DbPlugin{
+	plugin := &WebPlugin{
 		targetPort:       synPayload.TargetPort,
 		targetHost:       synPayload.TargetHost,
 		targetHostName:   synPayload.TargetHostName,
@@ -96,13 +90,13 @@ func New(parentTmb *tomb.Tomb,
 		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,
 		remoteAddress:    raddr,
-		actions:          make(map[string]IDbAction),
+		actions:          make(map[string]IWebAction),
 	}
 
 	return plugin, nil
 }
 
-func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	k.logger.Infof("Plugin received Data message with %v action", action)
 
 	// parse action
@@ -110,7 +104,7 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 	if len(parsedAction) < 2 {
 		return "", []byte{}, fmt.Errorf("malformed action: %s", action)
 	}
-	dbAction := parsedAction[1]
+	webAction := parsedAction[1]
 
 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
@@ -149,10 +143,10 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 	} else {
 		subLogger := k.logger.GetActionLogger(action)
 		subLogger.AddRequestId(rid)
-		switch DbAction(dbAction) {
+		switch WebAction(webAction) {
 		case Dial:
 			// Create a new dbdial action
-			a, err := dbdial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
+			a, err := webdial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
 			k.updateActionsMap(a, rid) // save action for later input
 
 			if err != nil {
@@ -174,19 +168,19 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 }
 
 // Helper function so we avoid writing to this map at the same time
-func (k *DbPlugin) updateActionsMap(newAction IDbAction, id string) {
+func (k *WebPlugin) updateActionsMap(newAction IWebAction, id string) {
 	k.actionsMapLock.Lock()
 	k.actions[id] = newAction
 	k.actionsMapLock.Unlock()
 }
 
-func (k *DbPlugin) deleteActionsMap(rid string) {
+func (k *WebPlugin) deleteActionsMap(rid string) {
 	k.actionsMapLock.Lock()
 	delete(k.actions, rid)
 	k.actionsMapLock.Unlock()
 }
 
-func (k *DbPlugin) getActionsMap(rid string) (IDbAction, bool) {
+func (k *WebPlugin) getActionsMap(rid string) (IWebAction, bool) {
 	k.actionsMapLock.Lock()
 	defer k.actionsMapLock.Unlock()
 	act, ok := k.actions[rid]
