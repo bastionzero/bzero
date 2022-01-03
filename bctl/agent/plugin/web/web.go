@@ -72,7 +72,7 @@ func New(parentTmb *tomb.Tomb,
 	// Determine if we are using target hostname or host:port
 	address := synPayload.TargetHostName
 	if address == "" {
-		address = synPayload.TargetHost + ":" + string(synPayload.TargetPort)
+		address = synPayload.TargetHost + ":" + fmt.Sprint(synPayload.TargetPort)
 	}
 
 	// Open up a connection to the TCP addr we are trying to connect to
