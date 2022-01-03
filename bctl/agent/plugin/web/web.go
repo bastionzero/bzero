@@ -23,7 +23,7 @@ const (
 )
 
 type WebActionParams struct {
-	TargetPort     string
+	TargetPort     int
 	TargetHost     string
 	TargetHostName string
 }
@@ -45,7 +45,7 @@ type WebPlugin struct {
 	streamOutputChan chan smsg.StreamMessage
 
 	// Either use the host:port
-	targetPort string
+	targetPort int
 	targetHost string
 
 	// Or the full host name (i.e. DNS entry)
@@ -72,7 +72,7 @@ func New(parentTmb *tomb.Tomb,
 	// Determine if we are using target hostname or host:port
 	address := synPayload.TargetHostName
 	if address == "" {
-		address = synPayload.TargetHost + ":" + synPayload.TargetPort
+		address = synPayload.TargetHost + ":" + string(synPayload.TargetPort)
 	}
 
 	// Open up a connection to the TCP addr we are trying to connect to

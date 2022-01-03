@@ -13,6 +13,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/plugin"
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
@@ -27,6 +28,7 @@ type PluginName string
 const (
 	Kube PluginName = "kube"
 	Db   PluginName = "db"
+	Web  PluginName = "web"
 )
 
 type DataChannel struct {
@@ -238,6 +240,12 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 
 	case Db:
 		if plugin, err := db.New(&d.tmb, subLogger, streamOutputChan, payload); err != nil {
+			return err
+		} else {
+			d.plugin = plugin
+		}
+	case Web:
+		if plugin, err := web.New(&d.tmb, subLogger, streamOutputChan, payload); err != nil {
 			return err
 		} else {
 			d.plugin = plugin

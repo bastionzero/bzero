@@ -36,7 +36,7 @@ type DbServer struct {
 	// Db specific vars
 	// Either user the full dns (i.e. targetHostName) or the host:port
 	targetHostName string
-	targetPort     string
+	targetPort     int
 	targetHost     string
 
 	// fields for new datachannels
@@ -51,7 +51,7 @@ type DbServer struct {
 func StartDbServer(logger *logger.Logger,
 	daemonPort string,
 	targetHostName string,
-	targetPort string,
+	targetPort int,
 	targetHost string,
 	refreshTokenCommand string,
 	configPath string,

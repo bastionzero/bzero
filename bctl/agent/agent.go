@@ -154,6 +154,8 @@ func parseFlags() error {
 		targetType = "bzero"
 	}
 
+	// TODO: Try to pull from vault, incase this agent is being restarted, we should not always expect these env vars
+
 	// Ensure we have all needed vars
 	missing := []string{}
 	switch {

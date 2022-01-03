@@ -24,7 +24,8 @@ var (
 	targetGroups                                   []string
 
 	// Db specifc values
-	targetHostName, targetPort, targetHost string
+	targetHostName, targetHost string
+	targetPort                 int
 )
 
 const (
@@ -171,7 +172,7 @@ func parseFlags() error {
 	flag.StringVar(&refreshTokenCommand, "refreshTokenCommand", "", "zli constructed command for refreshing id tokens")
 
 	// Db plugin variables
-	flag.StringVar(&targetPort, "targetPort", "", "Remote target port to connect to (if -targetHostName not provided)")
+	flag.IntVar(&targetPort, "targetPort", -1, "Remote target port to connect to (if -targetHostName not provided)")
 	flag.StringVar(&targetHost, "targetHost", "", "Remote target host to connect to (if -targetHostName not provided)")
 	flag.StringVar(&targetHostName, "targetHostName", "", "Remote target HostName to connect to (if -targetPort and -targetHost not provided)")
 
@@ -193,7 +194,7 @@ func parseFlags() error {
 	case "web":
 		// We need targetHostName OR targetPort AND targetHost
 		if targetHostName == "" {
-			if targetPort == "" && targetHost == "" {
+			if targetPort == -1 && targetHost == "" {
 				return fmt.Errorf("missing db plugin flags")
 			}
 		}

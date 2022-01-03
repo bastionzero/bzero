@@ -13,9 +13,11 @@ import (
 
 	dbagms "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kubeagms "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	webagms "bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
@@ -44,6 +46,7 @@ type DataChannel struct {
 
 	plugin       *kube.KubeDaemonPlugin
 	DbPlugin     *db.DbDaemonPlugin
+	WebPlugin    *web.WebDaemonPlugin
 	keysplitting keysplitting.IKeysplitting
 	handshook    bool // aka whether we need to send a syn
 
@@ -137,6 +140,11 @@ func New(logger *logger.Logger,
 		}
 	} else if strings.HasPrefix(action, "db") {
 		if err := dc.startDbDaemonPlugin(action, actionParams); err != nil {
+			logger.Error(err)
+			return &DataChannel{}, &dc.tmb, err
+		}
+	} else if strings.HasPrefix(action, "web") {
+		if err := dc.startWebDaemonPlugin(action, actionParams); err != nil {
 			logger.Error(err)
 			return &DataChannel{}, &dc.tmb, err
 		}
@@ -266,6 +274,66 @@ func (d *DataChannel) startDbDaemonPlugin(action string, actionParams []byte) er
 
 	// TODO: This is really ugly
 	d.plugin = nil
+	d.WebPlugin = nil
+
+	return nil
+}
+
+func (d *DataChannel) startWebDaemonPlugin(action string, actionParams []byte) error {
+	// Deserialize the action params
+	var actionParamsDeserialized webagms.WebActionParams
+	if err := json.Unmarshal(actionParams, &actionParamsDeserialized); err != nil {
+		rerr := fmt.Errorf("error deserializing actions params")
+		d.logger.Error(rerr)
+		return rerr
+	}
+
+	synMessage, buildSynErr := d.keysplitting.BuildSyn(action, actionParams)
+	if buildSynErr != nil {
+		d.logger.Errorf("error building syn")
+		return buildSynErr
+	}
+
+	// Marshal the syn
+	synBytes, synMarshalErr := json.Marshal(synMessage)
+	if synMarshalErr != nil {
+		d.logger.Errorf("error marshalling syn")
+		return synMarshalErr
+	}
+
+	messagePayload := OpenDataChannelPayload{
+		Syn:    synBytes,
+		Action: action,
+	}
+
+	// Marshall the messagePayload
+	messagePayloadBytes, marshalErr := json.Marshal(messagePayload)
+	if marshalErr != nil {
+		d.logger.Errorf("error marshalling OpenDataChannelPayload")
+		return marshalErr
+	}
+
+	// send new datachannel message to agent, as we can build the syn here
+	odMessage := am.AgentMessage{
+		ChannelId:      d.id,
+		MessagePayload: messagePayloadBytes,
+		MessageType:    string(am.OpenDataChannel),
+	}
+	d.websocket.Send(odMessage)
+
+	// Create the plugin
+	subLogger := d.logger.GetPluginLogger("WebDaemon")
+	if plugin, err := web.New(&d.tmb, subLogger, actionParamsDeserialized); err != nil {
+		rerr := fmt.Errorf("could not start db daemon plugin: %s", err)
+		d.logger.Error(rerr)
+		return rerr
+	} else {
+		d.WebPlugin = plugin
+	}
+
+	// TODO: This is really ugly
+	d.plugin = nil
+	d.DbPlugin = nil
 
 	return nil
 }
@@ -284,6 +352,9 @@ func (d *DataChannel) FeedHttp(action string, logId string, command string, w ht
 func (d *DataChannel) FeedTcp(action string, lconn *net.TCPConn) error {
 	if d.DbPlugin != nil {
 		d.DbPlugin.Feed(action, lconn)
+		return nil
+	} else if d.WebPlugin != nil {
+		d.WebPlugin.Feed(action, lconn)
 		return nil
 	} else {
 		rerr := fmt.Errorf("no plugin is associated with this datachannel")
@@ -402,10 +473,12 @@ func (d *DataChannel) handleStream(agentMessage am.AgentMessage) error {
 		return rerr
 	}
 
+	// TODO: this is gross
 	if d.plugin != nil {
 		d.plugin.ReceiveStream(sMessage)
+	} else if d.WebPlugin != nil {
+		d.WebPlugin.ReceiveStream(sMessage)
 	} else {
-		// TODO: this is gross
 		d.DbPlugin.ReceiveStream(sMessage)
 	}
 
@@ -464,6 +537,8 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 		return rerr
 	}
 
+	// TODO: This is really ugly
+
 	// Send message to plugin's input message handler
 	if d.plugin != nil {
 		if action, returnPayload, err := d.plugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
@@ -481,7 +556,24 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 			return err
 		}
 	}
-	// TODO: This is really ugly
+
+	if d.WebPlugin != nil {
+		if action, returnPayload, err := d.WebPlugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
+
+			// We need to know the last message for invisible response to keysplitting validation errors
+			d.lastMessage = plugin.ActionWrapper{
+				Action:        action,
+				ActionPayload: returnPayload,
+			}
+
+			return d.sendKeysplitting(&ksMessage, action, returnPayload)
+
+		} else {
+			d.logger.Error(err)
+			return err
+		}
+	}
+
 	// Else this is a TCP plugin
 	if action, returnPayload, err := d.DbPlugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
 

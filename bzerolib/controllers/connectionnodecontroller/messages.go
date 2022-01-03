@@ -7,7 +7,7 @@ type CreateKubeConnectionRequest struct {
 	TargetId     string   `json:"targetId"`
 }
 
-type CreateDbConnectionRequest struct {
+type CreateConnectionRequest struct {
 	TargetId string `json:"targetId"`
 }
 

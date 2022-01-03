@@ -36,7 +36,7 @@ type WebServer struct {
 	// Web specific vars
 	// Either user the full dns (i.e. targetHostName) or the host:port
 	targetHostName string
-	targetPort     string
+	targetPort     int
 	targetHost     string
 
 	// fields for new datachannels
@@ -51,7 +51,7 @@ type WebServer struct {
 func StartWebServer(logger *logger.Logger,
 	daemonPort string,
 	targetHostName string,
-	targetPort string,
+	targetPort int,
 	targetHost string,
 	refreshTokenCommand string,
 	configPath string,
@@ -131,7 +131,7 @@ func (h *WebServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, reque
 // for creating new websockets
 func (h *WebServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Db); err != nil {
+	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Web); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient

@@ -22,7 +22,7 @@ const (
 	inClusterEnvVar = "BASTIONZERO_IN_CLUSTER"
 
 	// Vault systemd consts
-	vaultPath = "bzero.vault.json" // TODO : figureout where this ends up lol
+	vaultPath = "bzero.vault.json" // This can be found uin ~/.config/bzero-config/bzero.vault.json
 )
 
 type Vault struct {

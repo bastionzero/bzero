@@ -31,6 +31,7 @@ const (
 	// Enum target types
 	Cluster = 2
 	Db      = 3
+	Web     = 4
 
 	// Enum target types for agent side connections
 	AgentWebsocket      = -1
@@ -371,6 +372,28 @@ func (w *Websocket) Connect() {
 		}
 
 		createConnectionResponse := cnController.CreateDbConnection(w.params["target_id"])
+
+		// Now we can build our connectionnode url
+		w.baseUrl = w.buildConnectionNodeUrl(createConnectionResponse.ConnectionNodeId) + kubeDaemonConnectionNodeHubEndpoint
+
+		// Define our request params
+		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
+		w.requestParams["authToken"] = createConnectionResponse.AuthToken
+
+		w.requestParams["websocketType"] = w.params["websocketType"]
+	case Web:
+		// Define our bastionURL
+		bastionUrl := "https://" + w.serviceUrl
+
+		// First hit Bastion in order to get the connectionNode information, build our controller
+		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
+		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, bastionUrl, "", w.headers, w.params)
+		if cnControllerErr != nil {
+			w.logger.Error(fmt.Errorf("error creating cnController"))
+			return
+		}
+
+		createConnectionResponse := cnController.CreateWebConnection(w.params["target_id"])
 
 		// Now we can build our connectionnode url
 		w.baseUrl = w.buildConnectionNodeUrl(createConnectionResponse.ConnectionNodeId) + kubeDaemonConnectionNodeHubEndpoint
