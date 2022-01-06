@@ -114,6 +114,11 @@ func (b *bzhttp) post() (*http.Response, error) {
 
 		if len(b.headers) == 0 && len(b.params) == 0 {
 			response, err = httpClient.Post(b.endpoint, b.contentType, bytes.NewBuffer(b.body))
+
+			if err != nil {
+				b.logger.Errorf("error making post request: %v", err)
+				return nil, err
+			}
 		} else {
 			// Make our Request
 			req, _ := http.NewRequest("POST", b.endpoint, bytes.NewBuffer(b.body))
