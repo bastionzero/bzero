@@ -35,21 +35,21 @@ type MrZAPMessage struct {
 	Signature    string           `json:"signature"`
 }
 
-func (k *MrZAPMessage) VerifySignature(publicKey string) error {
+func (m *MrZAPMessage) VerifySignature(publicKey string) error {
 	pubKeyBits, _ := base64.StdEncoding.DecodeString(publicKey)
 	if len(pubKeyBits) != 32 {
 		return fmt.Errorf("public key has invalid length %v", len(pubKeyBits))
 	}
 	pubkey := ed.PublicKey(pubKeyBits)
 
-	hashBits, ok := util.HashPayload(k.MrZAPPayload)
+	hashBits, ok := util.HashPayload(m.MrZAPPayload)
 	if !ok {
 		return fmt.Errorf("could not hash the mrzap payload")
 	}
 
-	sigBits, _ := base64.StdEncoding.DecodeString(k.Signature)
+	sigBits, _ := base64.StdEncoding.DecodeString(m.Signature)
 
-	//log.Printf("\npubkey: %v\nhash: %v\nsignature: %v", publicKey, string(hashBits), k.Signature)
+	//log.Printf("\npubkey: %v\nhash: %v\nsignature: %v", publicKey, string(hashBits), m.Signature)
 
 	if ok := ed.Verify(pubkey, hashBits, sigBits); ok {
 		return nil
@@ -58,22 +58,22 @@ func (k *MrZAPMessage) VerifySignature(publicKey string) error {
 	}
 }
 
-func (k *MrZAPMessage) Sign(privateKey string) error {
+func (m *MrZAPMessage) Sign(privateKey string) error {
 	keyBytes, _ := base64.StdEncoding.DecodeString(privateKey)
 	if len(keyBytes) != 64 {
 		return fmt.Errorf("invalid private key length: %v", len(keyBytes))
 	}
 	privkey := ed.PrivateKey(keyBytes)
 
-	hashBits, _ := util.HashPayload(k.MrZAPPayload)
+	hashBits, _ := util.HashPayload(m.MrZAPPayload)
 
 	sig := ed.Sign(privkey, hashBits)
-	k.Signature = base64.StdEncoding.EncodeToString(sig)
+	m.Signature = base64.StdEncoding.EncodeToString(sig)
 
 	return nil
 }
 
-func (k *MrZAPMessage) UnmarshalJSON(data []byte) error {
+func (m *MrZAPMessage) UnmarshalJSON(data []byte) error {
 	var objmap map[string]*json.RawMessage
 
 	if err := json.Unmarshal(data, &objmap); err != nil {
@@ -84,44 +84,44 @@ func (k *MrZAPMessage) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(*objmap["type"], &t); err != nil {
 		return err
 	} else {
-		k.Type = MrZAPPayloadType(t)
+		m.Type = MrZAPPayloadType(t)
 	}
 
 	if err := json.Unmarshal(*objmap["signature"], &s); err != nil {
 		return err
 	} else {
-		k.Signature = s
+		m.Signature = s
 	}
 
 	kPayload := *objmap["mrZAPPayload"]
-	switch k.Type {
+	switch m.Type {
 	case Syn:
 		var synPayload SynPayload
 		if err := json.Unmarshal(kPayload, &synPayload); err != nil {
 			return fmt.Errorf("malformed Syn Payload")
 		} else {
-			k.MrZAPPayload = synPayload
+			m.MrZAPPayload = synPayload
 		}
 	case SynAck:
 		var synAckPayload SynAckPayload
 		if err := json.Unmarshal(kPayload, &synAckPayload); err != nil {
 			return fmt.Errorf("malformed SynAck Payload")
 		} else {
-			k.MrZAPPayload = synAckPayload
+			m.MrZAPPayload = synAckPayload
 		}
 	case Data:
 		var dataPayload DataPayload
 		if err := json.Unmarshal(kPayload, &dataPayload); err != nil {
 			return fmt.Errorf("malformed Data Payload")
 		} else {
-			k.MrZAPPayload = dataPayload
+			m.MrZAPPayload = dataPayload
 		}
 	case DataAck:
 		var dataAckPayload DataAckPayload
 		if err := json.Unmarshal(kPayload, &dataAckPayload); err != nil {
 			return fmt.Errorf("malformed DataAck Payload")
 		} else {
-			k.MrZAPPayload = dataAckPayload
+			m.MrZAPPayload = dataAckPayload
 		}
 	default:
 		// TODO: explicitly check type of outer vs. inner payload

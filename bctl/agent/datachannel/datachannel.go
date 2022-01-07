@@ -152,12 +152,12 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.MrZAP:
-		var ksMessage mzmsg.MrZAPMessage
-		if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
+		var mzMessage mzmsg.MrZAPMessage
+		if err := json.Unmarshal(agentMessage.MessagePayload, &mzMessage); err != nil {
 			rerr := fmt.Errorf("malformed MrZAP message")
 			d.sendError(rrr.MrZAPValidationError, rerr)
 		} else {
-			d.handleMrZAPMessage(&ksMessage)
+			d.handleMrZAPMessage(&mzMessage)
 		}
 	default:
 		rerr := fmt.Errorf("unhandled message type: %v", agentMessage.MessageType)

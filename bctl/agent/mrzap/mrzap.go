@@ -56,20 +56,20 @@ func New() (IMrZAP, error) {
 	}
 }
 
-func (k *MrZAP) GetHpointer() string {
-	return k.hPointer
+func (m *MrZAP) GetHpointer() string {
+	return m.hPointer
 }
 
-func (k *MrZAP) Validate(mzMessage *mzmsg.MrZAPMessage) error {
+func (m *MrZAP) Validate(mzMessage *mzmsg.MrZAPMessage) error {
 	switch mzMessage.Type {
 	case mzmsg.Syn:
 		synPayload := mzMessage.MrZAPPayload.(mzmsg.SynPayload)
 
 		// Verify the BZCert
-		if hash, exp, err := synPayload.BZCert.Verify(k.idpProvider, k.idpOrgId); err != nil {
+		if hash, exp, err := synPayload.BZCert.Verify(m.idpProvider, m.idpOrgId); err != nil {
 			return err
 		} else {
-			k.bzCerts[hash] = BZCertMetadata{
+			m.bzCerts[hash] = BZCertMetadata{
 				Cert: synPayload.BZCert,
 				Exp:  exp,
 			}
@@ -81,14 +81,14 @@ func (k *MrZAP) Validate(mzMessage *mzmsg.MrZAPMessage) error {
 		}
 
 		// Make sure targetId matches
-		// if synPayload.TargetId != k.publickey {
+		// if synPayload.TargetId != m.publickey {
 		// 	return fmt.Errorf("syn's TargetId did not match Target's actual ID")
 		// }
 	case mzmsg.Data:
 		dataPayload := mzMessage.MrZAPPayload.(mzmsg.DataPayload)
 
 		// Check BZCert matches one we have stored
-		if certMetadata, ok := k.bzCerts[dataPayload.BZCertHash]; !ok {
+		if certMetadata, ok := m.bzCerts[dataPayload.BZCertHash]; !ok {
 			return fmt.Errorf("could not match BZCert hash to one previously received")
 		} else {
 
@@ -99,12 +99,12 @@ func (k *MrZAP) Validate(mzMessage *mzmsg.MrZAPMessage) error {
 		}
 
 		// Verify received hash pointer matches expected
-		if dataPayload.HPointer != k.expectedHPointer {
+		if dataPayload.HPointer != m.expectedHPointer {
 			return fmt.Errorf("data's hash pointer did not match expected")
 		}
 
 		// Make sure targetId matches
-		// if dataPayload.TargetId != k.publickey {
+		// if dataPayload.TargetId != m.publickey {
 		// 	return fmt.Errorf("data's TargetId did not match Target's actual ID")
 		// }
 	default:
@@ -113,16 +113,16 @@ func (k *MrZAP) Validate(mzMessage *mzmsg.MrZAPMessage) error {
 	return nil
 }
 
-func (k *MrZAP) BuildResponse(mzMessage *mzmsg.MrZAPMessage, action string, actionPayload []byte) (mzmsg.MrZAPMessage, error) {
+func (m *MrZAP) BuildResponse(mzMessage *mzmsg.MrZAPMessage, action string, actionPayload []byte) (mzmsg.MrZAPMessage, error) {
 	var responseMessage mzmsg.MrZAPMessage
 
 	switch mzMessage.Type {
 	case mzmsg.Syn:
 		synPayload := mzMessage.MrZAPPayload.(mzmsg.SynPayload)
-		if synAckPayload, hash, err := synPayload.BuildResponsePayload(actionPayload, k.publickey); err != nil {
+		if synAckPayload, hash, err := synPayload.BuildResponsePayload(actionPayload, m.publickey); err != nil {
 			return mzmsg.MrZAPMessage{}, err
 		} else {
-			k.hPointer = hash
+			m.hPointer = hash
 			responseMessage = mzmsg.MrZAPMessage{
 				Type:         mzmsg.SynAck,
 				MrZAPPayload: synAckPayload,
@@ -130,10 +130,10 @@ func (k *MrZAP) BuildResponse(mzMessage *mzmsg.MrZAPMessage, action string, acti
 		}
 	case mzmsg.Data:
 		dataPayload := mzMessage.MrZAPPayload.(mzmsg.DataPayload)
-		if dataAckPayload, hash, err := dataPayload.BuildResponsePayload(actionPayload, k.publickey); err != nil {
+		if dataAckPayload, hash, err := dataPayload.BuildResponsePayload(actionPayload, m.publickey); err != nil {
 			return mzmsg.MrZAPMessage{}, err
 		} else {
-			k.hPointer = hash
+			m.hPointer = hash
 			responseMessage = mzmsg.MrZAPMessage{
 				Type:         mzmsg.DataAck,
 				MrZAPPayload: dataAckPayload,
@@ -142,10 +142,10 @@ func (k *MrZAP) BuildResponse(mzMessage *mzmsg.MrZAPMessage, action string, acti
 	}
 
 	hashBytes, _ := util.HashPayload(responseMessage.MrZAPPayload)
-	k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
+	m.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
 
 	// Sign it and send it
-	if err := responseMessage.Sign(k.privatekey); err != nil {
+	if err := responseMessage.Sign(m.privatekey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %v", err.Error())
 	} else {
 		return responseMessage, nil
