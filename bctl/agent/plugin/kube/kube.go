@@ -14,6 +14,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/restapi"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/stream"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 
@@ -38,11 +39,6 @@ type JustRequestId struct {
 	RequestId string `json:"requestId"`
 }
 
-type KubeActionParams struct {
-	TargetUser   string   `json:"targetUser"`
-	TargetGroups []string `json:"targetGroups"`
-}
-
 type KubePlugin struct {
 	tmb *tomb.Tomb // datachannel's tomb
 
@@ -64,7 +60,7 @@ func New(parentTmb *tomb.Tomb,
 	payload []byte) (*KubePlugin, error) {
 
 	// Unmarshal the Syn payload
-	var synPayload KubeActionParams
+	var synPayload bzkube.KubeActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
 		return &KubePlugin{}, fmt.Errorf("malformed Kube plugin SYN payload %v", string(payload))
 	}
