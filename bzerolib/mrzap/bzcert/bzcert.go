@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
+	"bastionzero.com/bctl/v1/bzerolib/mrzap/util"
 )
 
 type IBZCert interface {

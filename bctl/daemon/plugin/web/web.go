@@ -9,25 +9,19 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
-	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IWebDaemonAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
+	ReceiveMrZAP(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
 }
-
-type WebDaemonAction string
-
-const (
-	Dial WebDaemonAction = "dial"
-)
 
 type WebDaemonPlugin struct {
 	tmb    *tomb.Tomb
@@ -46,7 +40,7 @@ type WebDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.WebActionParams) (*WebDaemonPlugin, error) {
+func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActionParams) (*WebDaemonPlugin, error) {
 	plugin := WebDaemonPlugin{
 		tmb:             parentTmb,
 		logger:          logger,
@@ -59,7 +53,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.WebActio
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
-	// the keysplitting synchronous chain
+	// the mrzap synchronous chain
 	go func() {
 		for {
 			select {
@@ -91,9 +85,9 @@ func (k *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	return rerr
 }
 
-func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (k *WebDaemonPlugin) ReceiveMrZAP(action string, actionPayload []byte) (string, []byte, error) {
 	// First, process the incoming message
-	if err := k.processKeysplitting(action, actionPayload); err != nil {
+	if err := k.processMrZAP(action, actionPayload); err != nil {
 		return "", []byte{}, err
 	}
 
@@ -117,33 +111,38 @@ func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byt
 	}
 }
 
-func (k *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+func (k *WebDaemonPlugin) processMrZAP(action string, actionPayload []byte) error {
 	// if actionPayload is empty, then there's nothing we need to process
 	if len(actionPayload) == 0 {
 		return nil
 	}
 
-	// No keysplitting data comes from dial plugins on the agent
-	k.logger.Errorf("keysplitting message received. This should now happen")
+	// No mrzap data comes from dial plugins on the agent
+	k.logger.Errorf("mrzap message received. This should now happen")
 	return nil
 }
 
-func (k *WebDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
+func (k *WebDaemonPlugin) Feed(food interface{}) error {
+	// Make sure food matches what it says on the label
+	webFood, ok := food.(bzweb.WebFood)
+	if !ok {
+		return fmt.Errorf("we asked for an entremet not a sloppy joe") // couldn't think of a neater food that was less pretentious
+	}
 	// Always generate a requestId, each new web command is its own request
 	requestId := uuid.New().String()
 
 	// Create action logger
-	actLogger := k.logger.GetActionLogger(action)
+	actLogger := k.logger.GetActionLogger(string(webFood.Action))
 	actLogger.AddRequestId(requestId)
 
 	var act IWebDaemonAction
 	var actOutputChan chan plugin.ActionWrapper
 
-	switch agms.WebAction(action) {
-	case agms.Dial:
+	switch webFood.Action {
+	case bzweb.Dial:
 		act, actOutputChan = webdial.New(actLogger, requestId)
 	default:
-		rerr := fmt.Errorf("unrecognized web action: %v", string(action))
+		rerr := fmt.Errorf("unrecognized web action: %v", string(webFood.Action))
 		k.logger.Error(rerr)
 		return rerr
 	}
@@ -168,11 +167,11 @@ func (k *WebDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
 		}
 	}()
 
-	k.logger.Infof("Created %s action with requestId %v", string(action), requestId)
+	k.logger.Infof("Created %s action with requestId %v", string(webFood.Action), requestId)
 
 	// send local tcp connection to action
-	if err := act.Start(k.tmb, lconn); err != nil {
-		k.logger.Error(fmt.Errorf("%s error: %s", string(action), err))
+	if err := act.Start(k.tmb, webFood.Conn); err != nil {
+		k.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
 	}
 
 	return nil

@@ -26,7 +26,7 @@ type ExecAction struct {
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
+	mzInputChan     chan plugin.ActionWrapper
 }
 
 func New(logger *logger.Logger,
@@ -41,14 +41,14 @@ func New(logger *logger.Logger,
 		commandBeingRun: commandBeingRun,
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		ksInputChan:     make(chan plugin.ActionWrapper, 10),
+		mzInputChan:     make(chan plugin.ActionWrapper, 10),
 	}
 
 	return exec, exec.outputChan
 }
 
-func (e *ExecAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	e.ksInputChan <- wrappedAction
+func (e *ExecAction) ReceiveMrZAP(wrappedAction plugin.ActionWrapper) {
+	e.mzInputChan <- wrappedAction
 }
 
 func (e *ExecAction) ReceiveStream(stream smsg.StreamMessage) {

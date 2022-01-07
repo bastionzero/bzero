@@ -9,13 +9,13 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
-	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/actions/exec"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/actions/portforward"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/actions/restapi"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/actions/stream"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -23,18 +23,17 @@ type JustRequestId struct {
 	RequestId string `json:"requestId"`
 }
 
-type KubeDaemonAction string
-
-const (
-	Exec        KubeDaemonAction = "exec"
-	Stream      KubeDaemonAction = "stream"
-	RestApi     KubeDaemonAction = "restapi"
-	PortForward KubeDaemonAction = "portforward"
-)
+type KubeFood struct {
+	Action  bzkube.KubeAction
+	LogId   string
+	Command string
+	Writer  http.ResponseWriter
+	Reader  *http.Request
+}
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IKubeDaemonAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
+	ReceiveMrZAP(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error
 }
@@ -55,7 +54,7 @@ type KubeDaemonPlugin struct {
 	targetGroups []string
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.KubeActionParams) (*KubeDaemonPlugin, error) {
+func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzkube.KubeActionParams) (*KubeDaemonPlugin, error) {
 	plugin := KubeDaemonPlugin{
 		tmb:             parentTmb,
 		logger:          logger,
@@ -68,7 +67,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.KubeActi
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
-	// the keysplitting syncronous chain
+	// the mrzap syncronous chain
 	go func() {
 		for {
 			select {
@@ -99,9 +98,9 @@ func (k *KubeDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	return rerr
 }
 
-func (k *KubeDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (k *KubeDaemonPlugin) ReceiveMrZAP(action string, actionPayload []byte) (string, []byte, error) {
 	// First, process the incoming message
-	if err := k.processKeysplitting(action, actionPayload); err != nil {
+	if err := k.processMrZAP(action, actionPayload); err != nil {
 		return "", []byte{}, err
 	}
 
@@ -125,7 +124,7 @@ func (k *KubeDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []by
 	}
 }
 
-func (k *KubeDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+func (k *KubeDaemonPlugin) processMrZAP(action string, actionPayload []byte) error {
 	// if actionPayload is empty, then there's nothing we need to process
 	if len(actionPayload) == 0 {
 		return nil
@@ -140,13 +139,13 @@ func (k *KubeDaemonPlugin) processKeysplitting(action string, actionPayload []by
 		return rerr
 	} else {
 
-		// Lookup action in thread-safe map and push the keysplitting message to it
+		// Lookup action in thread-safe map and push the mrzap message to it
 		if act, ok := k.getActionsMap(d.RequestId); ok {
 			wrappedAction := plugin.ActionWrapper{
 				Action:        action,
 				ActionPayload: actionPayload,
 			}
-			act.ReceiveKeysplitting(wrappedAction)
+			act.ReceiveMrZAP(wrappedAction)
 
 			// If the action doesn't exist, then return an error
 		} else {
@@ -158,28 +157,34 @@ func (k *KubeDaemonPlugin) processKeysplitting(action string, actionPayload []by
 	return nil
 }
 
-func (k *KubeDaemonPlugin) Feed(action string, logId string, command string, w http.ResponseWriter, r *http.Request) error {
+func (k *KubeDaemonPlugin) Feed(food interface{}) error {
+	// Check food matches nutrition label
+	kubeFood, ok := food.(KubeFood)
+	if !ok {
+		return fmt.Errorf("food did not reach expected nutrition: %+v", food)
+	}
+
 	// Always generate a requestId, each new kube command is its own request
 	requestId := uuid.New().String()
 
 	// Create action logger
-	actLogger := k.logger.GetActionLogger(action)
+	actLogger := k.logger.GetActionLogger(string(kubeFood.Action))
 	actLogger.AddRequestId(requestId)
 
 	var act IKubeDaemonAction
 	var actOutputChan chan plugin.ActionWrapper
 
-	switch KubeDaemonAction(action) {
-	case Exec:
-		act, actOutputChan = exec.New(actLogger, requestId, logId, command)
-	case Stream:
-		act, actOutputChan = stream.New(actLogger, requestId, logId, command)
-	case RestApi:
-		act, actOutputChan = restapi.New(actLogger, requestId, logId, command)
-	case PortForward:
-		act, actOutputChan = portforward.New(actLogger, requestId, logId, command)
+	switch kubeFood.Action {
+	case bzkube.Exec:
+		act, actOutputChan = exec.New(actLogger, requestId, kubeFood.LogId, kubeFood.Command)
+	case bzkube.Stream:
+		act, actOutputChan = stream.New(actLogger, requestId, kubeFood.LogId, kubeFood.Command)
+	case bzkube.RestApi:
+		act, actOutputChan = restapi.New(actLogger, requestId, kubeFood.LogId, kubeFood.Command)
+	case bzkube.PortForward:
+		act, actOutputChan = portforward.New(actLogger, requestId, kubeFood.LogId, kubeFood.Command)
 	default:
-		rerr := fmt.Errorf("unrecognized kubectl action: %v", string(action))
+		rerr := fmt.Errorf("unrecognized kubectl action: %v", string(kubeFood.Action))
 		k.logger.Error(rerr)
 		return rerr
 	}
@@ -200,7 +205,7 @@ func (k *KubeDaemonPlugin) Feed(action string, logId string, command string, w h
 					k.deleteActionsMap(requestId)
 
 					// Don't kill rest api actions, we batch those
-					if KubeDaemonAction(action) != RestApi {
+					if kubeFood.Action != bzkube.RestApi {
 						k.tmb.Kill(nil)
 					}
 					return
@@ -209,11 +214,11 @@ func (k *KubeDaemonPlugin) Feed(action string, logId string, command string, w h
 		}
 	}()
 
-	k.logger.Infof("Created %s action with requestId %v", string(action), requestId)
+	k.logger.Infof("Created %s action with requestId %v", string(kubeFood.Action), requestId)
 
 	// send http handlers to action
-	if err := act.Start(k.tmb, w, r); err != nil {
-		k.logger.Error(fmt.Errorf("%s error: %s", string(action), err))
+	if err := act.Start(k.tmb, kubeFood.Writer, kubeFood.Reader); err != nil {
+		k.logger.Error(fmt.Errorf("%s error: %s", string(kubeFood.Action), err))
 	}
 	return nil
 }

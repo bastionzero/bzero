@@ -27,7 +27,7 @@ type WebAction struct {
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
+	mzInputChan     chan plugin.ActionWrapper
 
 	sequenceNumber  int
 	localConnection *net.TCPConn
@@ -43,7 +43,7 @@ func New(logger *logger.Logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		ksInputChan:     make(chan plugin.ActionWrapper, 10),
+		mzInputChan:     make(chan plugin.ActionWrapper, 10),
 
 		sequenceNumber: 0,
 	}
@@ -135,8 +135,8 @@ func (s *WebAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 	return nil
 }
 
-func (s *WebAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	s.ksInputChan <- wrappedAction
+func (s *WebAction) ReceiveMrZAP(wrappedAction plugin.ActionWrapper) {
+	s.mzInputChan <- wrappedAction
 }
 
 func (s *WebAction) ReceiveStream(smessage smsg.StreamMessage) {

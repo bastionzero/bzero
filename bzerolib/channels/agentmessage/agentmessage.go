@@ -1,7 +1,7 @@
 /*
 This package defines all of the messages that are used at the AgentMessage level.
 It defines the different types of messages (MessageType) and correlated payload
-structs: the 4 types of keysplitting messages and agent output streams.
+structs: the 4 types of mrzap messages and agent output streams.
 */
 package agentmessage
 
@@ -10,7 +10,7 @@ const (
 )
 
 type AgentMessage struct {
-	ChannelId      string `json:"channelId"` // acts like a session id to tie messages to a keysplitting hash chain
+	ChannelId      string `json:"channelId"` // acts like a session id to tie messages to a mrzap hash chain
 	MessageType    string `json:"messageType"`
 	SchemaVersion  string `json:"schemaVersion" default:"1.0"`
 	MessagePayload []byte `json:"messagePayload"`
@@ -20,8 +20,8 @@ type AgentMessage struct {
 type MessageType string
 
 const (
-	// All keysplittings messages: Syn, SynAck, Data, DataAck
-	Keysplitting MessageType = "keysplitting"
+	// All mrzaps messages: Syn, SynAck, Data, DataAck
+	MrZAP MessageType = "mrzap"
 
 	// Agent output stream message types
 	Stream MessageType = "stream"

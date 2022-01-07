@@ -12,7 +12,7 @@ type StreamMessage struct {
 
 // Type restriction on our different kinds of agent
 // output streams.  StdIn will come in the form of a
-// Keysplitting DataMessage
+// MrZAP DataMessage
 type StreamType string
 
 const (

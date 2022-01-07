@@ -1,4 +1,4 @@
-package dbdial
+package dial
 
 import (
 	"encoding/base64"
@@ -6,28 +6,22 @@ import (
 	"io"
 	"net"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/db/actions/dbdial"
+	"gopkg.in/tomb.v2"
+
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/db/action/dial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-
-	"gopkg.in/tomb.v2"
-)
-
-const (
-	startDial  = "db/dial/start"
-	dialDataIn = "db/dial/datain"
 )
 
 type DialAction struct {
-	logger *logger.Logger
-
+	logger    *logger.Logger
 	requestId string
 
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
+	mzInputChan     chan plugin.ActionWrapper
 
 	sequenceNumber  int
 	localConnection *net.TCPConn
@@ -37,13 +31,12 @@ func New(logger *logger.Logger,
 	requestId string) (*DialAction, chan plugin.ActionWrapper) {
 
 	stream := &DialAction{
-		logger: logger,
-
+		logger:    logger,
 		requestId: requestId,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		ksInputChan:     make(chan plugin.ActionWrapper, 10),
+		mzInputChan:     make(chan plugin.ActionWrapper, 10),
 
 		sequenceNumber: 0,
 	}
@@ -60,14 +53,14 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 	s.localConnection = lconn
 
 	// Build the action payload
-	payload := dbdial.DbDialActionPayload{
+	payload := dial.DialActionPayload{
 		RequestId: s.requestId,
 	}
 
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        startDial,
+		Action:        string(dial.DialStart),
 		ActionPayload: payloadBytes,
 	}
 
@@ -82,7 +75,7 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 					_, err := lconn.Write(contentBytes)
 					if err != nil {
-						s.logger.Errorf("Write failed '%s'\n", err)
+						s.logger.Errorf("write failed: %s", err)
 					}
 				case smsg.DbAgentClose:
 					// The agent has closed the connection, close the local connection as well
@@ -116,7 +109,7 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 		dataToSend := base64.StdEncoding.EncodeToString(buff)
 
 		// Build the action payload
-		payload := dbdial.DbDataInActionPayload{
+		payload := dial.DialInputActionPayload{
 			RequestId:      s.requestId,
 			SequenceNumber: s.sequenceNumber,
 			Data:           dataToSend,
@@ -125,18 +118,16 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 		// Send payload to plugin output queue
 		payloadBytes, _ := json.Marshal(payload)
 		s.outputChan <- plugin.ActionWrapper{
-			Action:        dialDataIn,
+			Action:        string(dial.DialInput),
 			ActionPayload: payloadBytes,
 		}
 
 		s.sequenceNumber += 1
 	}
-
-	return nil
 }
 
-func (s *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	s.ksInputChan <- wrappedAction
+func (s *DialAction) ReceiveMrZAP(wrappedAction plugin.ActionWrapper) {
+	s.mzInputChan <- wrappedAction
 }
 
 func (s *DialAction) ReceiveStream(smessage smsg.StreamMessage) {

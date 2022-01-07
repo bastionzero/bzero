@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/agent/mrzap"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin"
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
@@ -17,8 +17,8 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
-	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	mzmsg "bastionzero.com/bctl/v1/bzerolib/mrzap/message"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -37,8 +37,8 @@ type DataChannel struct {
 	tmb       tomb.Tomb
 	id        string
 
-	plugin       plugin.IPlugin
-	keysplitting keysplitting.IKeysplitting
+	plugin plugin.IPlugin
+	zapper mrzap.IMrZAP
 
 	// incoming and outgoing message channels
 	inputChan chan am.AgentMessage
@@ -50,18 +50,18 @@ func New(parentTmb *tomb.Tomb,
 	id string,
 	syn []byte) (*DataChannel, error) {
 
-	keysplitter, err := keysplitting.New()
+	zapper, err := mrzap.New()
 	if err != nil {
 		logger.Error(err)
 		return &DataChannel{}, err
 	}
 
 	datachannel := &DataChannel{
-		websocket:    websocket,
-		logger:       logger,
-		keysplitting: keysplitter,
-		inputChan:    make(chan am.AgentMessage, 50),
-		id:           id,
+		websocket: websocket,
+		logger:    logger,
+		zapper:    zapper,
+		inputChan: make(chan am.AgentMessage, 50),
+		id:        id,
 	}
 
 	// register with websocket so datachannel can send a receive messages
@@ -85,19 +85,19 @@ func New(parentTmb *tomb.Tomb,
 	})
 
 	// validate the Syn message
-	var synPayload ksmsg.KeysplittingMessage
+	var synPayload mzmsg.MrZAPMessage
 	if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
-		rerr := fmt.Errorf("malformed Keysplitting message")
+		rerr := fmt.Errorf("malformed MrZAP message")
 		logger.Error(rerr)
 		return &DataChannel{}, rerr
-	} else if synPayload.Type != ksmsg.Syn {
+	} else if synPayload.Type != mzmsg.Syn {
 		err := fmt.Errorf("datachannel must be started with a SYN message")
 		logger.Error(err)
 		return &DataChannel{}, err
 	}
 
 	// process our syn to startup the plugin
-	datachannel.handleKeysplittingMessage(&synPayload)
+	datachannel.handleMrZAPMessage(&synPayload)
 
 	return datachannel, nil
 }
@@ -121,14 +121,14 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 	d.websocket.Send(agentMessage)
 }
 
-func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
+func (d *DataChannel) sendMrZAP(mrzapMessage *mzmsg.MrZAPMessage, action string, payload []byte) error {
 	// Build and send response
-	if respKSMessage, err := d.keysplitting.BuildResponse(keysplittingMessage, action, payload); err != nil {
+	if respMZMessage, err := d.zapper.BuildResponse(mrzapMessage, action, payload); err != nil {
 		rerr := fmt.Errorf("could not build response message: %s", err)
 		d.logger.Error(rerr)
 		return rerr
 	} else {
-		d.send(am.Keysplitting, respKSMessage)
+		d.send(am.MrZAP, respMZMessage)
 		return nil
 	}
 }
@@ -138,7 +138,7 @@ func (d *DataChannel) sendError(errType rrr.ErrorType, err error) {
 	errMsg := rrr.ErrorMessage{
 		Type:     string(errType),
 		Message:  err.Error(),
-		HPointer: d.keysplitting.GetHpointer(),
+		HPointer: d.zapper.GetHpointer(),
 	}
 	d.send(am.Error, errMsg)
 }
@@ -151,13 +151,13 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 	d.logger.Info("received message type: " + agentMessage.MessageType)
 
 	switch am.MessageType(agentMessage.MessageType) {
-	case am.Keysplitting:
-		var ksMessage ksmsg.KeysplittingMessage
-		if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
-			rerr := fmt.Errorf("malformed Keysplitting message")
-			d.sendError(rrr.KeysplittingValidationError, rerr)
+	case am.MrZAP:
+		var mzMessage mzmsg.MrZAPMessage
+		if err := json.Unmarshal(agentMessage.MessagePayload, &mzMessage); err != nil {
+			rerr := fmt.Errorf("malformed MrZAP message")
+			d.sendError(rrr.MrZAPValidationError, rerr)
 		} else {
-			d.handleKeysplittingMessage(&ksMessage)
+			d.handleMrZAPMessage(&mzMessage)
 		}
 	default:
 		rerr := fmt.Errorf("unhandled message type: %v", agentMessage.MessageType)
@@ -165,20 +165,20 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 	}
 }
 
-func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.KeysplittingMessage) {
-	if err := d.keysplitting.Validate(keysplittingMessage); err != nil {
-		rerr := fmt.Errorf("invalid keysplitting message: %s", err)
-		d.sendError(rrr.KeysplittingValidationError, rerr)
+func (d *DataChannel) handleMrZAPMessage(mrzapMessage *mzmsg.MrZAPMessage) {
+	if err := d.zapper.Validate(mrzapMessage); err != nil {
+		rerr := fmt.Errorf("invalid mrzap message: %s", err)
+		d.sendError(rrr.MrZAPValidationError, rerr)
 		return
 	}
 
-	switch keysplittingMessage.Type {
-	case ksmsg.Syn:
-		synPayload := keysplittingMessage.KeysplittingPayload.(ksmsg.SynPayload)
+	switch mrzapMessage.Type {
+	case mzmsg.Syn:
+		synPayload := mrzapMessage.MrZAPPayload.(mzmsg.SynPayload)
 		// Grab user's action
 		if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
 			rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
-			d.sendError(rrr.KeysplittingExecutionError, rerr)
+			d.sendError(rrr.MrZAPExecutionError, rerr)
 			return
 		} else {
 			if d.plugin != nil { // Don't start plugin if there's already one started
@@ -191,23 +191,23 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 				d.sendError(rrr.ComponentStartupError, err)
 				return
 			}
-			d.sendKeysplitting(keysplittingMessage, "", []byte{}) // empty payload
+			d.sendMrZAP(mrzapMessage, "", []byte{}) // empty payload
 		}
-	case ksmsg.Data:
-		dataPayload := keysplittingMessage.KeysplittingPayload.(ksmsg.DataPayload)
+	case mzmsg.Data:
+		dataPayload := mrzapMessage.MrZAPPayload.(mzmsg.DataPayload)
 
 		// Send message to plugin and catch response action payload
 		if _, returnPayload, err := d.plugin.Receive(dataPayload.Action, dataPayload.ActionPayload); err == nil {
 
 			// Build and send response
-			d.sendKeysplitting(keysplittingMessage, dataPayload.Action, returnPayload)
+			d.sendMrZAP(mrzapMessage, dataPayload.Action, returnPayload)
 		} else {
-			rerr := fmt.Errorf("plugin error processing keysplitting message: %s", err)
-			d.sendError(rrr.KeysplittingExecutionError, rerr)
+			rerr := fmt.Errorf("plugin error processing mrzap message: %s", err)
+			d.sendError(rrr.MrZAPExecutionError, rerr)
 		}
 	default:
-		rerr := fmt.Errorf("invalid Keysplitting Payload")
-		d.sendError(rrr.KeysplittingExecutionError, rerr)
+		rerr := fmt.Errorf("invalid MrZAP Payload")
+		d.sendError(rrr.MrZAPExecutionError, rerr)
 	}
 }
 
@@ -230,28 +230,24 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
 
+	var plugin plugin.IPlugin
+	var err error
+
 	switch pluginName {
 	case Kube:
-		if plugin, err := kube.New(&d.tmb, subLogger, streamOutputChan, payload); err != nil {
-			return err
-		} else {
-			d.plugin = plugin
-		}
-
+		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
 	case Db:
-		if plugin, err := db.New(&d.tmb, subLogger, streamOutputChan, payload); err != nil {
-			return err
-		} else {
-			d.plugin = plugin
-		}
+		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, payload)
 	case Web:
-		if plugin, err := web.New(&d.tmb, subLogger, streamOutputChan, payload); err != nil {
-			return err
-		} else {
-			d.plugin = plugin
-		}
+		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, payload)
 	default:
 		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)
+	}
+
+	if err != nil {
+		return err
+	} else {
+		d.plugin = plugin
 	}
 
 	d.logger.Infof("%s plugin started!", pluginName)

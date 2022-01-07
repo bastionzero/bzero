@@ -29,7 +29,7 @@ type StreamAction struct {
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
+	mzInputChan     chan plugin.ActionWrapper
 
 	expectedSequenceNumber int
 	outOfOrderMessages     map[int]smsg.StreamMessage
@@ -50,7 +50,7 @@ func New(logger *logger.Logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		ksInputChan:     make(chan plugin.ActionWrapper, 10),
+		mzInputChan:     make(chan plugin.ActionWrapper, 10),
 
 		// Start at 1 since we wait for our headers message
 		expectedSequenceNumber: 1,
@@ -60,8 +60,8 @@ func New(logger *logger.Logger,
 	return stream, stream.outputChan
 }
 
-func (s *StreamAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	s.ksInputChan <- wrappedAction
+func (s *StreamAction) ReceiveMrZAP(wrappedAction plugin.ActionWrapper) {
+	s.mzInputChan <- wrappedAction
 }
 
 func (s *StreamAction) ReceiveStream(smessage smsg.StreamMessage) {

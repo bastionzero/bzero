@@ -140,7 +140,7 @@ func startKubeServer(logger *logger.Logger, headers map[string]string, params ma
 
 func targetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	switch am.MessageType(agentMessage.MessageType) {
-	case am.Keysplitting:
+	case am.MrZAP:
 		return "RequestDaemonToBastionV1", nil
 	case am.OpenDataChannel:
 		return "OpenDataChannelDaemonToBastionV1", nil

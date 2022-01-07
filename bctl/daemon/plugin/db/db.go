@@ -9,25 +9,19 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
-	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db/actions/dbdial"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db/actions/dial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IDbDaemonAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
+	ReceiveMrZAP(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
 }
-
-type DbDaemonAction string
-
-const (
-	Dial DbDaemonAction = "dial"
-)
 
 type DbDaemonPlugin struct {
 	tmb    *tomb.Tomb
@@ -46,20 +40,18 @@ type DbDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.DbActionParams) (*DbDaemonPlugin, error) {
+func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbActionParams) (*DbDaemonPlugin, error) {
 	plugin := DbDaemonPlugin{
 		tmb:             parentTmb,
 		logger:          logger,
 		streamInputChan: make(chan smsg.StreamMessage, 25),
-		sequenceNumber:  0,
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
 		actions:         make(map[string]IDbDaemonAction),
-		targetHost:      "",
-		targetPort:      "",
+		sequenceNumber:  0,
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
-	// the keysplitting synchronous chain
+	// the mrzap synchronous chain
 	go func() {
 		for {
 			select {
@@ -91,9 +83,9 @@ func (k *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	return rerr
 }
 
-func (k *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (k *DbDaemonPlugin) ReceiveMrZAP(action string, actionPayload []byte) (string, []byte, error) {
 	// First, process the incoming message
-	if err := k.processKeysplitting(action, actionPayload); err != nil {
+	if err := k.processMrZAP(action, actionPayload); err != nil {
 		return "", []byte{}, err
 	}
 
@@ -117,33 +109,39 @@ func (k *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte
 	}
 }
 
-func (k *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+func (k *DbDaemonPlugin) processMrZAP(action string, actionPayload []byte) error {
 	// if actionPayload is empty, then there's nothing we need to process
 	if len(actionPayload) == 0 {
 		return nil
 	}
 
-	// No keysplitting data comes from dial plugins on the agent
-	k.logger.Errorf("keysplitting message received. This should now happen")
+	// No mrzap data comes from dial plugins on the agent
+	k.logger.Errorf("mrzap message received. This should now happen")
 	return nil
 }
 
-func (k *DbDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
+func (k *DbDaemonPlugin) Feed(food interface{}) error {
+	// Make sure our food matches the nutrition label
+	dbFood, ok := food.(bzdb.DbFood)
+	if !ok {
+		return fmt.Errorf("db food did not match nutrition label: %+v", food)
+	}
+
 	// Always generate a requestId, each new db command is its own request
 	requestId := uuid.New().String()
 
 	// Create action logger
-	actLogger := k.logger.GetActionLogger(action)
+	actLogger := k.logger.GetActionLogger(string(dbFood.Action))
 	actLogger.AddRequestId(requestId)
 
 	var act IDbDaemonAction
 	var actOutputChan chan plugin.ActionWrapper
 
-	switch agms.DbAction(action) {
-	case agms.Dial:
-		act, actOutputChan = dbdial.New(actLogger, requestId)
+	switch bzdb.DbAction(dbFood.Action) {
+	case bzdb.Dial:
+		act, actOutputChan = dial.New(actLogger, requestId)
 	default:
-		rerr := fmt.Errorf("unrecognized db action: %v", string(action))
+		rerr := fmt.Errorf("unrecognized db action: %v", string(dbFood.Action))
 		k.logger.Error(rerr)
 		return rerr
 	}
@@ -168,11 +166,11 @@ func (k *DbDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
 		}
 	}()
 
-	k.logger.Infof("Created %s action with requestId %v", string(action), requestId)
+	k.logger.Infof("Created %s action with requestId %v", string(dbFood.Action), requestId)
 
 	// send local tcp connection to action
-	if err := act.Start(k.tmb, lconn); err != nil {
-		k.logger.Error(fmt.Errorf("%s error: %s", string(action), err))
+	if err := act.Start(k.tmb, dbFood.Conn); err != nil {
+		k.logger.Error(fmt.Errorf("%s error: %s", string(dbFood.Action), err))
 	}
 
 	return nil

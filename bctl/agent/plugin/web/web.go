@@ -10,23 +10,10 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
-
-type WebAction string
-
-const (
-	Dial WebAction = "dial"
-	// Start  DbAction = "start"
-	// DataIn DbAction = "datain"
-)
-
-type WebActionParams struct {
-	TargetPort     int
-	TargetHost     string
-	TargetHostName string
-}
 
 type JustRequestId struct {
 	RequestId string `json:"requestId"`
@@ -38,8 +25,7 @@ type IWebAction interface {
 }
 
 type WebPlugin struct {
-	tmb *tomb.Tomb // datachannel's tomb
-
+	tmb    *tomb.Tomb // datachannel's tomb
 	logger *logger.Logger
 
 	streamOutputChan chan smsg.StreamMessage
@@ -64,7 +50,7 @@ func New(parentTmb *tomb.Tomb,
 	payload []byte) (*WebPlugin, error) {
 
 	// Unmarshal the Syn payload
-	var synPayload WebActionParams
+	var synPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
 		return &WebPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
@@ -143,8 +129,8 @@ func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte
 	} else {
 		subLogger := k.logger.GetActionLogger(action)
 		subLogger.AddRequestId(rid)
-		switch WebAction(webAction) {
-		case Dial:
+		switch bzweb.WebAction(webAction) {
+		case bzweb.Dial:
 			// Create a new dbdial action
 			a, err := webdial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
 			k.updateActionsMap(a, rid) // save action for later input

@@ -265,31 +265,44 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 		logId = tokensSplit[2]
 	}
 
+	// Determine the action
+	action := getAction(r)
+
+	// Make food
+	food := kube.KubeFood{
+		Action:  string(action),
+		LogId:   logId,
+		Command: command,
+		Writer:  w,
+		Reader:  r,
+	}
+
+	// feed our restapi datachannel
+	if action == kube.RestApi {
+		h.restApiDatachannel.Feed(food)
+
+		// create new datachannel and feed it kubectl handlers
+	} else if datachannel, err := h.newDataChannel(string(action), h.websocket); err == nil {
+		datachannel.Feed(food)
+	}
+}
+
+func getAction(req *http.Request) kube.KubeDaemonAction {
 	// parse action from incoming request
 	switch {
 	// interactive commands that require both stdin and stdout
-	case isExecRequest(r):
-		// create new datachannel and feed it kubectl handlers
-		if datachannel, err := h.newDataChannel(string(kube.Exec), h.websocket); err == nil {
-			datachannel.FeedHttp(string(kube.Exec), logId, command, w, r)
-		}
-	// Similar to exec it's interactive but instead has a input and error stream
-	case isPortForwardRequest(r):
-		// create new datachannel and feed it kubectl handlers
-		if datachannel, err := h.newDataChannel(string(kube.Stream), h.websocket); err == nil {
-			datachannel.FeedHttp(string(kube.PortForward), logId, command, w, r)
-		}
-	// persistent, yet not interactive commands that serve continual output but only listen for a single, request-cancelling input
-	case isStreamRequest(r):
-		// create new datachannel and feed it kubectl handlers
-		if datachannel, err := h.newDataChannel(string(kube.Stream), h.websocket); err == nil {
-			datachannel.FeedHttp(string(kube.Stream), logId, command, w, r)
-		}
+	case isExecRequest(req):
+		return kube.Exec
+
+	// Persistent, yet not interactive commands that serve continual output but only listen for a single, request-cancelling input
+	case isPortForwardRequest(req):
+		return kube.Stream
+	case isStreamRequest(req):
+		return kube.Stream
 
 	// simple call and response aka restapi requests
 	default:
-		// grab our existing rest api datachannel and feed it new handlers
-		h.restApiDatachannel.FeedHttp(string(kube.RestApi), logId, command, w, r)
+		return kube.RestApi
 	}
 }
 
