@@ -46,7 +46,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 
 	var apiRequest KubeRestApiActionPayload
 	if err := json.Unmarshal(actionPayload, &apiRequest); err != nil {
-		rerr := fmt.Errorf("malformed Keysplitting Action payload %v", actionPayload)
+		rerr := fmt.Errorf("malformed MrZAP Action payload %v", actionPayload)
 		r.logger.Error(rerr)
 		return action, []byte{}, rerr
 	}

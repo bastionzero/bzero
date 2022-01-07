@@ -6,11 +6,11 @@ const (
 	// this is any error with the validation of the message itself
 	// e.g. invalid signature, expired bzcert, wrong hpointer, etc.
 	// The responding actions of any given error type should be the same
-	KeysplittingValidationError ErrorType = "KeysplittingValidationError"
+	MrZAPValidationError ErrorType = "MrZAPValidationError"
 
 	// This error is essentially any error that comes from executing an
 	// action aka if a file isn't found calling FUD, that error goes here.
-	KeysplittingExecutionError ErrorType = "KeysplittingExecutionError"
+	MrZAPExecutionError ErrorType = "MrZAPExecutionError"
 
 	// Components such as datachannel, plugin, actions report their actions here.
 	// Theoretically, there should be two kinds: any errors that come from

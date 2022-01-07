@@ -1,4 +1,4 @@
-package keysplitting
+package mrzap
 
 import (
 	ed "crypto/ed25519"
@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
-	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
-	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
+	bzcrt "bastionzero.com/bctl/v1/bzerolib/mrzap/bzcert"
+	mzmsg "bastionzero.com/bctl/v1/bzerolib/mrzap/message"
+	"bastionzero.com/bctl/v1/bzerolib/mrzap/util"
 )
 
 type BZCertMetadata struct {
@@ -17,13 +17,13 @@ type BZCertMetadata struct {
 	Exp  time.Time
 }
 
-type IKeysplitting interface {
+type IMrZAP interface {
 	GetHpointer() string
-	Validate(ksMessage *ksmsg.KeysplittingMessage) error
-	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+	Validate(mzMessage *mzmsg.MrZAPMessage) error
+	BuildResponse(mzMessage *mzmsg.MrZAPMessage, action string, actionPayload []byte) (mzmsg.MrZAPMessage, error)
 }
 
-type Keysplitting struct {
+type MrZAP struct {
 	hPointer         string
 	expectedHPointer string
 	bzCerts          map[string]BZCertMetadata // only for agent
@@ -34,10 +34,10 @@ type Keysplitting struct {
 	orgId            string
 }
 
-func New() (IKeysplitting, error) {
+func New() (IMrZAP, error) {
 	// Generate public private key pair along ed25519 curve
 	if publicKey, privateKey, err := ed.GenerateKey(nil); err != nil {
-		return &Keysplitting{}, fmt.Errorf("error generating key pair: %v", err.Error())
+		return &MrZAP{}, fmt.Errorf("error generating key pair: %v", err.Error())
 	} else {
 		pubkeyString := base64.StdEncoding.EncodeToString([]byte(publicKey))
 		privkeyString := base64.StdEncoding.EncodeToString([]byte(privateKey))
@@ -45,27 +45,25 @@ func New() (IKeysplitting, error) {
 		// Load in our idp infomation from the vault as well
 		config, _ := vault.LoadVault()
 
-		return &Keysplitting{
-			hPointer:         "",
-			expectedHPointer: "",
-			bzCerts:          make(map[string]BZCertMetadata),
-			publickey:        pubkeyString,
-			privatekey:       privkeyString,
-			idpProvider:      config.Data.IdpProvider,
-			idpOrgId:         config.Data.IdpOrgId,
-			orgId:            config.Data.OrgId,
+		return &MrZAP{
+			bzCerts:     make(map[string]BZCertMetadata),
+			publickey:   pubkeyString,
+			privatekey:  privkeyString,
+			idpProvider: config.Data.IdpProvider,
+			idpOrgId:    config.Data.IdpOrgId,
+			orgId:       config.Data.OrgId,
 		}, nil
 	}
 }
 
-func (k *Keysplitting) GetHpointer() string {
+func (k *MrZAP) GetHpointer() string {
 	return k.hPointer
 }
 
-func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
-	switch ksMessage.Type {
-	case ksmsg.Syn:
-		synPayload := ksMessage.KeysplittingPayload.(ksmsg.SynPayload)
+func (k *MrZAP) Validate(mzMessage *mzmsg.MrZAPMessage) error {
+	switch mzMessage.Type {
+	case mzmsg.Syn:
+		synPayload := mzMessage.MrZAPPayload.(mzmsg.SynPayload)
 
 		// Verify the BZCert
 		if hash, exp, err := synPayload.BZCert.Verify(k.idpProvider, k.idpOrgId); err != nil {
@@ -78,7 +76,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		}
 
 		// Verify the Signature
-		if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
+		if err := mzMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
 			return err
 		}
 
@@ -86,8 +84,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		// if synPayload.TargetId != k.publickey {
 		// 	return fmt.Errorf("syn's TargetId did not match Target's actual ID")
 		// }
-	case ksmsg.Data:
-		dataPayload := ksMessage.KeysplittingPayload.(ksmsg.DataPayload)
+	case mzmsg.Data:
+		dataPayload := mzMessage.MrZAPPayload.(mzmsg.DataPayload)
 
 		// Check BZCert matches one we have stored
 		if certMetadata, ok := k.bzCerts[dataPayload.BZCertHash]; !ok {
@@ -95,7 +93,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		} else {
 
 			// Verify the Signature
-			if err := ksMessage.VerifySignature(certMetadata.Cert.ClientPublicKey); err != nil {
+			if err := mzMessage.VerifySignature(certMetadata.Cert.ClientPublicKey); err != nil {
 				return err
 			}
 		}
@@ -110,40 +108,40 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		// 	return fmt.Errorf("data's TargetId did not match Target's actual ID")
 		// }
 	default:
-		return fmt.Errorf("error validating unhandled Keysplitting type")
+		return fmt.Errorf("error validating unhandled MrZAP type")
 	}
 	return nil
 }
 
-func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
-	var responseMessage ksmsg.KeysplittingMessage
+func (k *MrZAP) BuildResponse(mzMessage *mzmsg.MrZAPMessage, action string, actionPayload []byte) (mzmsg.MrZAPMessage, error) {
+	var responseMessage mzmsg.MrZAPMessage
 
-	switch ksMessage.Type {
-	case ksmsg.Syn:
-		synPayload := ksMessage.KeysplittingPayload.(ksmsg.SynPayload)
+	switch mzMessage.Type {
+	case mzmsg.Syn:
+		synPayload := mzMessage.MrZAPPayload.(mzmsg.SynPayload)
 		if synAckPayload, hash, err := synPayload.BuildResponsePayload(actionPayload, k.publickey); err != nil {
-			return ksmsg.KeysplittingMessage{}, err
+			return mzmsg.MrZAPMessage{}, err
 		} else {
 			k.hPointer = hash
-			responseMessage = ksmsg.KeysplittingMessage{
-				Type:                ksmsg.SynAck,
-				KeysplittingPayload: synAckPayload,
+			responseMessage = mzmsg.MrZAPMessage{
+				Type:         mzmsg.SynAck,
+				MrZAPPayload: synAckPayload,
 			}
 		}
-	case ksmsg.Data:
-		dataPayload := ksMessage.KeysplittingPayload.(ksmsg.DataPayload)
+	case mzmsg.Data:
+		dataPayload := mzMessage.MrZAPPayload.(mzmsg.DataPayload)
 		if dataAckPayload, hash, err := dataPayload.BuildResponsePayload(actionPayload, k.publickey); err != nil {
-			return ksmsg.KeysplittingMessage{}, err
+			return mzmsg.MrZAPMessage{}, err
 		} else {
 			k.hPointer = hash
-			responseMessage = ksmsg.KeysplittingMessage{
-				Type:                ksmsg.DataAck,
-				KeysplittingPayload: dataAckPayload,
+			responseMessage = mzmsg.MrZAPMessage{
+				Type:         mzmsg.DataAck,
+				MrZAPPayload: dataAckPayload,
 			}
 		}
 	}
 
-	hashBytes, _ := util.HashPayload(responseMessage.KeysplittingPayload)
+	hashBytes, _ := util.HashPayload(responseMessage.MrZAPPayload)
 	k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
 
 	// Sign it and send it

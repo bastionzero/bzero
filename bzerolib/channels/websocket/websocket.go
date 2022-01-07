@@ -19,8 +19,8 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/controllers/agentcontroller"
 	"bastionzero.com/bctl/v1/bzerolib/controllers/connectionnodecontroller"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/mrzap/util"
 )
 
 const (

@@ -114,7 +114,7 @@ func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 		return "DataChannelReadyV1", nil
 	case am.CloseDaemonWebsocket:
 		return "CloseDaemonWebsocketV1", nil
-	case am.Keysplitting:
+	case am.MrZAP:
 		return "ResponseClusterToBastionV1", nil
 	case am.Stream:
 		return "ResponseClusterToBastionV1", nil

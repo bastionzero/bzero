@@ -33,7 +33,7 @@ type KubeFood struct {
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IKubeDaemonAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
+	ReceiveMrZAP(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error
 }
@@ -67,7 +67,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzkube.KubeAc
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
-	// the keysplitting syncronous chain
+	// the mrzap syncronous chain
 	go func() {
 		for {
 			select {
@@ -98,9 +98,9 @@ func (k *KubeDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	return rerr
 }
 
-func (k *KubeDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (k *KubeDaemonPlugin) ReceiveMrZAP(action string, actionPayload []byte) (string, []byte, error) {
 	// First, process the incoming message
-	if err := k.processKeysplitting(action, actionPayload); err != nil {
+	if err := k.processMrZAP(action, actionPayload); err != nil {
 		return "", []byte{}, err
 	}
 
@@ -124,7 +124,7 @@ func (k *KubeDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []by
 	}
 }
 
-func (k *KubeDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+func (k *KubeDaemonPlugin) processMrZAP(action string, actionPayload []byte) error {
 	// if actionPayload is empty, then there's nothing we need to process
 	if len(actionPayload) == 0 {
 		return nil
@@ -139,13 +139,13 @@ func (k *KubeDaemonPlugin) processKeysplitting(action string, actionPayload []by
 		return rerr
 	} else {
 
-		// Lookup action in thread-safe map and push the keysplitting message to it
+		// Lookup action in thread-safe map and push the mrzap message to it
 		if act, ok := k.getActionsMap(d.RequestId); ok {
 			wrappedAction := plugin.ActionWrapper{
 				Action:        action,
 				ActionPayload: actionPayload,
 			}
-			act.ReceiveKeysplitting(wrappedAction)
+			act.ReceiveMrZAP(wrappedAction)
 
 			// If the action doesn't exist, then return an error
 		} else {

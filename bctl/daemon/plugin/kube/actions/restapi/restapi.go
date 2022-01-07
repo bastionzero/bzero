@@ -43,7 +43,7 @@ func New(logger *logger.Logger,
 	return restapi, restapi.outputChan
 }
 
-func (r *RestApiAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
+func (r *RestApiAction) ReceiveMrZAP(wrappedAction plugin.ActionWrapper) {
 	r.inputChan <- wrappedAction
 }
 

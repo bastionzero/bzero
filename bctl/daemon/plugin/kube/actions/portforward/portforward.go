@@ -37,7 +37,7 @@ type PortForwardAction struct {
 
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
+	mzInputChan     chan plugin.ActionWrapper
 
 	streamPairsLock       sync.RWMutex
 	streamPairs           map[string]*httpStreamPair
@@ -71,7 +71,7 @@ func New(logger *logger.Logger,
 		commandBeingRun:       command,
 		outputChan:            make(chan plugin.ActionWrapper, 10),
 		streamInputChan:       make(chan smsg.StreamMessage, 10),
-		ksInputChan:           make(chan plugin.ActionWrapper, 10),
+		mzInputChan:           make(chan plugin.ActionWrapper, 10),
 		streamPairs:           make(map[string]*httpStreamPair),
 		streamCreationTimeout: kubeutils.DefaultStreamCreationTimeout,
 		requestMap:            make(map[string]chan RequestMapStruct),
@@ -80,8 +80,8 @@ func New(logger *logger.Logger,
 	return portForward, portForward.outputChan
 }
 
-func (p *PortForwardAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	p.ksInputChan <- wrappedAction
+func (p *PortForwardAction) ReceiveMrZAP(wrappedAction plugin.ActionWrapper) {
+	p.mzInputChan <- wrappedAction
 }
 
 func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {

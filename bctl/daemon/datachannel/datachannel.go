@@ -9,7 +9,7 @@ import (
 
 	tomb "gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/agent/mrzap"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
@@ -17,8 +17,8 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
-	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	mzmsg "bastionzero.com/bctl/v1/bzerolib/mrzap/message"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
@@ -46,21 +46,21 @@ type OpenDataChannelPayload struct {
 }
 
 type DataChannel struct {
-	logger       *logger.Logger
-	tmb          tomb.Tomb
-	websocket    *websocket.Websocket
-	id           string // DataChannel's ID
-	ready        bool
-	plugin       plugin.IPlugin
-	keysplitting keysplitting.IKeysplitting
-	handshook    bool // aka whether we need to send a syn
+	logger    *logger.Logger
+	tmb       tomb.Tomb
+	websocket *websocket.Websocket
+	id        string // DataChannel's ID
+	ready     bool
+	plugin    plugin.IPlugin
+	zapper    mrzap.IMrZAP
+	handshook bool // aka whether we need to send a syn
 
 	// channels for incoming and outgoing messages
 	inputChan chan am.AgentMessage
 
-	// input channel for keysplitting messages only.  This allows for keysplitting messages to be
+	// input channel for mrzap messages only.  This allows for mrzap messages to be
 	// received in series without blocking stream messaages from being processed
-	ksInputChan chan am.AgentMessage
+	mzInputChan chan am.AgentMessage
 
 	// If we need to send a SYN, then we need a way to keep
 	// track of whatever message that triggered the send SYN
@@ -78,7 +78,7 @@ func New(logger *logger.Logger,
 	action string,
 	actionParams []byte) (*DataChannel, *tomb.Tomb, error) {
 
-	keysplitter, err := keysplitting.New("", configPath, refreshTokenCommand)
+	zapper, err := mrzap.New("", configPath, refreshTokenCommand)
 	if err != nil {
 		logger.Error(err)
 		return &DataChannel{}, &tomb.Tomb{}, err
@@ -90,11 +90,11 @@ func New(logger *logger.Logger,
 		id:        id,
 		ready:     false,
 
-		keysplitting: keysplitter,
-		handshook:    false,
+		zapper:    zapper,
+		handshook: false,
 
 		inputChan:   make(chan am.AgentMessage, 25),
-		ksInputChan: make(chan am.AgentMessage, 25),
+		mzInputChan: make(chan am.AgentMessage, 25),
 
 		onDeck: bzplugin.ActionWrapper{},
 		retry:  0,
@@ -126,7 +126,7 @@ func New(logger *logger.Logger,
 				time.Sleep(30 * time.Second) // give datachannel time to close correctly
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
-				// Keysplitting needs to be its own routine because the function will get stuck waiting for user input after a DATA/ACK,
+				// MrZAP needs to be its own routine because the function will get stuck waiting for user input after a DATA/ACK,
 				// but still need to receive streams
 				if err := dc.processInput(agentMessage); err != nil {
 					dc.logger.Error(err)
@@ -135,14 +135,14 @@ func New(logger *logger.Logger,
 		}
 	})
 
-	// listen and process keysplitting messages in series
+	// listen and process mrzap messages in series
 	go func() {
 		for {
 			select {
 			case <-dc.tmb.Dying():
 				return
-			case ksMessage := <-dc.ksInputChan:
-				if err := dc.handleKeysplitting(ksMessage); err != nil {
+			case mzMessage := <-dc.mzInputChan:
+				if err := dc.handleMrZAP(mzMessage); err != nil {
 					dc.logger.Error(err)
 				}
 			}
@@ -162,7 +162,7 @@ func (d *DataChannel) Close(reason error) {
 }
 
 func (d *DataChannel) openDataChannel(action string, actionParams []byte) error {
-	synMessage, err := d.keysplitting.BuildSyn(action, actionParams)
+	synMessage, err := d.zapper.BuildSyn(action, actionParams)
 	if err != nil {
 		return fmt.Errorf("error building syn: %s", err)
 	}
@@ -301,12 +301,12 @@ func (d *DataChannel) sendSyn(action string) error {
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
-	if synMessage, err := d.keysplitting.BuildSyn(action, payloadBytes); err != nil {
+	if synMessage, err := d.zapper.BuildSyn(action, payloadBytes); err != nil {
 		rerr := fmt.Errorf("error building Syn: %s", err)
 		d.logger.Error(rerr)
 		return rerr
 	} else {
-		d.send(am.Keysplitting, synMessage)
+		d.send(am.MrZAP, synMessage)
 		return nil
 	}
 }
@@ -320,8 +320,8 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) error {
 
 	var err error
 	switch am.MessageType(agentMessage.MessageType) {
-	case am.Keysplitting:
-		d.ksInputChan <- agentMessage
+	case am.MrZAP:
+		d.mzInputChan <- agentMessage
 	case am.Stream:
 		err = d.handleStream(agentMessage)
 	case am.Error:
@@ -339,16 +339,16 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 	} else {
 		rerr := fmt.Errorf("received error from agent: %s", errMessage.Message)
 
-		// Keysplitting validation errors are probably going to be mostly bzcert renewals and
+		// MrZAP validation errors are probably going to be mostly bzcert renewals and
 		// we don't want to break every time that happens so we need to get back on the ks train
 		// executive decision: we don't retry if we get an error on a syn aka d.handshook == false
 		if d.retry > maxRetries {
 			rerr = fmt.Errorf("goodbye. retried too many times to fix error: %s", errMessage.Message)
-		} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError && d.handshook {
+		} else if rrr.ErrorType(errMessage.Type) == rrr.MrZAPValidationError && d.handshook {
 			d.retry++
 			d.onDeck = d.lastMessage
 
-			// In order to get back on the keysplitting train, we need to resend the syn, get the synack
+			// In order to get back on the mrzap train, we need to resend the syn, get the synack
 			// so that our input message handler is pointing to the right thing.
 			if err := d.sendSyn(d.onDeck.Action); err != nil {
 				return err
@@ -376,61 +376,61 @@ func (d *DataChannel) handleStream(agentMessage am.AgentMessage) error {
 	return nil
 }
 
-// TODO: simplify this and have them both deserialize into a "common keysplitting" message
-func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
-	// unmarshal the keysplitting message
-	var ksMessage ksmsg.KeysplittingMessage
-	if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
-		return fmt.Errorf("malformed Keysplitting message")
+// TODO: simplify this and have them both deserialize into a "common mrzap" message
+func (d *DataChannel) handleMrZAP(agentMessage am.AgentMessage) error {
+	// unmarshal the mrzap message
+	var mzMessage mzmsg.MrZAPMessage
+	if err := json.Unmarshal(agentMessage.MessagePayload, &mzMessage); err != nil {
+		return fmt.Errorf("malformed MrZAP message")
 	}
 
-	// validate keysplitting message
-	if err := d.keysplitting.Validate(&ksMessage); err != nil {
-		return fmt.Errorf("invalid keysplitting message: %s", err)
+	// validate mrzap message
+	if err := d.zapper.Validate(&mzMessage); err != nil {
+		return fmt.Errorf("invalid mrzap message: %s", err)
 	}
 
 	// processInput message
 	var action string
 	var actionResponsePayload []byte
 
-	switch ksMessage.Type {
-	case ksmsg.SynAck:
-		synAckPayload := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
+	switch mzMessage.Type {
+	case mzmsg.SynAck:
+		synAckPayload := mzMessage.MrZAPPayload.(mzmsg.SynAckPayload)
 		action = synAckPayload.Action
 		actionResponsePayload = synAckPayload.ActionResponsePayload
 
 		d.handshook = true
 		d.ready = true
 
-		// If there is a message that wasn't sent because we got a keysplitting validation error on it, send it now
+		// If there is a message that wasn't sent because we got a mrzap validation error on it, send it now
 		if d.onDeck.Action != "" {
-			return d.sendKeysplitting(&ksMessage, d.onDeck.Action, d.onDeck.ActionPayload)
+			return d.sendMrZAP(&mzMessage, d.onDeck.Action, d.onDeck.ActionPayload)
 		}
-	case ksmsg.DataAck:
+	case mzmsg.DataAck:
 		// If we had something on deck, then this was the ack for it and we can remove it
 		d.onDeck = bzplugin.ActionWrapper{}
 
 		// If we're here, it means that the previous data message that caused the error was accepted
 		d.retry = 0
 
-		dataAckPayload := ksMessage.KeysplittingPayload.(ksmsg.DataAckPayload)
+		dataAckPayload := mzMessage.MrZAPPayload.(mzmsg.DataAckPayload)
 		action = dataAckPayload.Action
 		actionResponsePayload = dataAckPayload.ActionResponsePayload
 	default:
-		return fmt.Errorf("unhandled Keysplitting type")
+		return fmt.Errorf("unhandled MrZAP type")
 	}
 
 	// Send message to plugin's input message handler
 	if d.plugin != nil {
-		if action, returnPayload, err := d.plugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
+		if action, returnPayload, err := d.plugin.ReceiveMrZAP(action, actionResponsePayload); err == nil {
 
-			// We need to know the last message for invisible response to keysplitting validation errors
+			// We need to know the last message for invisible response to mrzap validation errors
 			d.lastMessage = bzplugin.ActionWrapper{
 				Action:        action,
 				ActionPayload: returnPayload,
 			}
 
-			return d.sendKeysplitting(&ksMessage, action, returnPayload)
+			return d.sendMrZAP(&mzMessage, action, returnPayload)
 
 		} else {
 			return err
@@ -440,14 +440,14 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 	}
 }
 
-func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
+func (d *DataChannel) sendMrZAP(mrzapMessage *mzmsg.MrZAPMessage, action string, payload []byte) error {
 	// Build and send response
-	if respKSMessage, err := d.keysplitting.BuildResponse(keysplittingMessage, action, payload); err != nil {
+	if respmzMessage, err := d.zapper.BuildResponse(mrzapMessage, action, payload); err != nil {
 		rerr := fmt.Errorf("could not build response message: %s", err)
 		d.logger.Error(rerr)
 		return rerr
 	} else {
-		d.send(am.Keysplitting, respKSMessage)
+		d.send(am.MrZAP, respmzMessage)
 		return nil
 	}
 }

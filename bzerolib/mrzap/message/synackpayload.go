@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
+	"bastionzero.com/bctl/v1/bzerolib/mrzap/util"
 )
 
-// Repetition in Keysplitting messages is requires to maintain flat
+// Repetition in MrZAP messages is requires to maintain flat
 // structure which is important for hashing
 type SynAckPayload struct {
 	Timestamp             string `json:"timestamp"` // Unix time

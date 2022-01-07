@@ -18,7 +18,7 @@ import (
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IWebDaemonAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
+	ReceiveMrZAP(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
 }
@@ -53,7 +53,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActi
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
-	// the keysplitting synchronous chain
+	// the mrzap synchronous chain
 	go func() {
 		for {
 			select {
@@ -85,9 +85,9 @@ func (k *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	return rerr
 }
 
-func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (k *WebDaemonPlugin) ReceiveMrZAP(action string, actionPayload []byte) (string, []byte, error) {
 	// First, process the incoming message
-	if err := k.processKeysplitting(action, actionPayload); err != nil {
+	if err := k.processMrZAP(action, actionPayload); err != nil {
 		return "", []byte{}, err
 	}
 
@@ -111,14 +111,14 @@ func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byt
 	}
 }
 
-func (k *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+func (k *WebDaemonPlugin) processMrZAP(action string, actionPayload []byte) error {
 	// if actionPayload is empty, then there's nothing we need to process
 	if len(actionPayload) == 0 {
 		return nil
 	}
 
-	// No keysplitting data comes from dial plugins on the agent
-	k.logger.Errorf("keysplitting message received. This should now happen")
+	// No mrzap data comes from dial plugins on the agent
+	k.logger.Errorf("mrzap message received. This should now happen")
 	return nil
 }
 
