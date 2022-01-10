@@ -35,9 +35,8 @@ type WebServer struct {
 
 	// Web specific vars
 	// Either user the full dns (i.e. targetHostName) or the host:port
-	targetHostName string
-	targetPort     int
-	targetHost     string
+	targetPort int
+	targetHost string
 
 	// fields for new datachannels
 	daemonport          string
@@ -50,7 +49,6 @@ type WebServer struct {
 
 func StartWebServer(logger *logger.Logger,
 	daemonPort string,
-	targetHostName string,
 	targetPort int,
 	targetHost string,
 	refreshTokenCommand string,
@@ -69,7 +67,6 @@ func StartWebServer(logger *logger.Logger,
 		configPath:          configPath,
 		refreshTokenCommand: refreshTokenCommand,
 		daemonport:          daemonPort,
-		targetHostName:      targetHostName,
 		targetHost:          targetHost,
 		targetPort:          targetPort,
 	}
@@ -149,9 +146,8 @@ func (h *WebServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	// Build the actionParams to send to the datachannel to start the plugin
 	actionParams := agms.WebActionParams{
-		TargetPort:     h.targetPort,
-		TargetHost:     h.targetHost,
-		TargetHostName: h.targetHostName,
+		RemotePort: h.targetPort,
+		RemoteHost: h.targetHost,
 	}
 
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)

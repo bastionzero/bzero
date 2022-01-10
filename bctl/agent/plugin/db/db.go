@@ -23,15 +23,13 @@ const (
 )
 
 type DbActionParams struct {
-	TargetPort     int    `json:"targetPort"`
-	TargetHost     string `json:"targetHost"`
-	TargetHostName string `json:"targetHostName"`
+	RemotePort int    `json:"remotePort"`
+	RemoteHost string `json:"remoteHost"`
 }
 
 type WebActionParams struct {
-	TargetPort     int    `json:"targetPort"`
-	TargetHost     string `json:"targetHost"`
-	TargetHostName string `json:"targetHostName"`
+	RemotePort int    `json:"remotePort"`
+	RemoteHost string `json:"remoteHost"`
 }
 
 type JustRequestId struct {
@@ -75,11 +73,8 @@ func New(parentTmb *tomb.Tomb,
 		return &DbPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
-	// Determine if we are using target hostname or host:port
-	address := synPayload.TargetHostName
-	if address == "" {
-		address = synPayload.TargetHost + ":" + fmt.Sprint(synPayload.TargetPort)
-	}
+	// Build our address
+	address := synPayload.RemoteHost + ":" + fmt.Sprint(synPayload.RemotePort)
 
 	// Open up a connection to the TCP addr we are trying to connect to
 	raddr, err := net.ResolveTCPAddr("tcp", address)
@@ -89,9 +84,8 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	plugin := &DbPlugin{
-		targetPort:       synPayload.TargetPort,
-		targetHost:       synPayload.TargetHost,
-		targetHostName:   synPayload.TargetHostName,
+		targetPort:       synPayload.RemotePort,
+		targetHost:       synPayload.RemoteHost,
 		logger:           logger,
 		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,
