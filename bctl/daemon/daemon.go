@@ -23,9 +23,9 @@ var (
 	localhostToken, configPath                     string
 	targetGroups                                   []string
 
-	// Db specifc values
-	targetHostName, targetHost string
-	targetPort                 int
+	// Db and web specifc values
+	remoteHost string
+	remotePort int
 )
 
 const (
@@ -91,9 +91,8 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 
 	return webserver.StartWebServer(subLogger,
 		daemonPort,
-		targetHostName,
-		targetPort,
-		targetHost,
+		remotePort,
+		remoteHost,
 		refreshTokenCommand,
 		configPath,
 		serviceUrl,
@@ -109,9 +108,8 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 
 	return dbserver.StartDbServer(subLogger,
 		daemonPort,
-		targetHostName,
-		targetPort,
-		targetHost,
+		remotePort,
+		remoteHost,
 		refreshTokenCommand,
 		configPath,
 		serviceUrl,
@@ -122,6 +120,11 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 
 func startKubeServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	subLogger := logger.GetComponentLogger("kubeserver")
+
+	// Set our param value for target_user and target_group
+	params["target_id"] = targetId
+	params["target_user"] = targetUser
+	params["target_groups"] = targetGroupsRaw
 
 	return kubeserver.StartKubeServer(subLogger,
 		daemonPort,
@@ -171,10 +174,9 @@ func parseFlags() error {
 	flag.StringVar(&logPath, "logPath", "", "Path to log file for daemon")
 	flag.StringVar(&refreshTokenCommand, "refreshTokenCommand", "", "zli constructed command for refreshing id tokens")
 
-	// Db plugin variables
-	flag.IntVar(&targetPort, "targetPort", -1, "Remote target port to connect to (if -targetHostName not provided)")
-	flag.StringVar(&targetHost, "targetHost", "", "Remote target host to connect to (if -targetHostName not provided)")
-	flag.StringVar(&targetHostName, "targetHostName", "", "Remote target HostName to connect to (if -targetPort and -targetHost not provided)")
+	// Db/Web plugin variables
+	flag.IntVar(&remotePort, "remotePort", -1, "Remote target port to connect to")
+	flag.StringVar(&remoteHost, "remoteHost", "", "Remote target host to connect to")
 
 	// Check we have all required flags
 	flag.Parse()
@@ -186,24 +188,25 @@ func parseFlags() error {
 	// Depending on the plugin ensure we have the correct values
 	switch plugin {
 	case "kube":
-		if targetUser == "" || targetGroupsRaw == "" || targetId == "" ||
+		if targetUser == "" || targetId == "" ||
 			localhostToken == "" || certPath == "" || keyPath == "" {
 			return fmt.Errorf("missing kube plugin flags")
 		}
 	case "db":
 	case "web":
-		// We need targetHostName OR targetPort AND targetHost
-		if targetHostName == "" {
-			if targetPort == -1 && targetHost == "" {
-				return fmt.Errorf("missing db plugin flags")
-			}
+		// We need remotePort AND remoteHost
+		if remotePort == -1 && remoteHost == "" {
+			return fmt.Errorf("missing db/web plugin flags")
 		}
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}
 
 	// Parse target groups
-	targetGroups = strings.Split(targetGroupsRaw, ",")
+	targetGroups = []string{}
+	if targetGroupsRaw != "" {
+		targetGroups = strings.Split(targetGroupsRaw, ",")
+	}
 
 	return nil
 }
