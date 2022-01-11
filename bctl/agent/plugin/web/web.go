@@ -18,14 +18,13 @@ type WebAction string
 
 const (
 	Dial WebAction = "dial"
-	// Start  DbAction = "start"
+	// Start  DbAction = "start"``
 	// DataIn DbAction = "datain"
 )
 
 type WebActionParams struct {
-	TargetPort     int
-	TargetHost     string
-	TargetHostName string
+	RemotePort int
+	RemoteHost string
 }
 
 type JustRequestId struct {
@@ -44,12 +43,9 @@ type WebPlugin struct {
 
 	streamOutputChan chan smsg.StreamMessage
 
-	// Either use the host:port
-	targetPort int
-	targetHost string
-
-	// Or the full host name (i.e. DNS entry)
-	targetHostName string
+	// remote host:port
+	remotePort int
+	remoteHost string
 
 	remoteAddress *net.TCPAddr
 
@@ -70,10 +66,7 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	// Determine if we are using target hostname or host:port
-	address := synPayload.TargetHostName
-	if address == "" {
-		address = synPayload.TargetHost + ":" + fmt.Sprint(synPayload.TargetPort)
-	}
+	address := synPayload.RemoteHost + ":" + fmt.Sprint(synPayload.RemotePort)
 
 	// Open up a connection to the TCP addr we are trying to connect to
 	raddr, err := net.ResolveTCPAddr("tcp", address)
@@ -83,9 +76,8 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	plugin := &WebPlugin{
-		targetPort:       synPayload.TargetPort,
-		targetHost:       synPayload.TargetHost,
-		targetHostName:   synPayload.TargetHostName,
+		remotePort:       synPayload.RemotePort,
+		remoteHost:       synPayload.RemoteHost,
 		logger:           logger,
 		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,

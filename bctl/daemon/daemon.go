@@ -24,8 +24,8 @@ var (
 	targetGroups                                   []string
 
 	// Db and web specifc values
-	targetHost string
-	targetPort int
+	remoteHost string
+	remotePort int
 )
 
 const (
@@ -91,8 +91,8 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 
 	return webserver.StartWebServer(subLogger,
 		daemonPort,
-		targetPort,
-		targetHost,
+		remotePort,
+		remoteHost,
 		refreshTokenCommand,
 		configPath,
 		serviceUrl,
@@ -108,8 +108,8 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 
 	return dbserver.StartDbServer(subLogger,
 		daemonPort,
-		targetPort,
-		targetHost,
+		remotePort,
+		remoteHost,
 		refreshTokenCommand,
 		configPath,
 		serviceUrl,
@@ -174,9 +174,9 @@ func parseFlags() error {
 	flag.StringVar(&logPath, "logPath", "", "Path to log file for daemon")
 	flag.StringVar(&refreshTokenCommand, "refreshTokenCommand", "", "zli constructed command for refreshing id tokens")
 
-	// Db plugin variables
-	flag.IntVar(&targetPort, "targetPort", -1, "Remote target port to connect to (if -targetHostName not provided)")
-	flag.StringVar(&targetHost, "targetHost", "", "Remote target host to connect to (if -targetHostName not provided)")
+	// Db/Web plugin variables
+	flag.IntVar(&remotePort, "remotePort", -1, "Remote target port to connect to")
+	flag.StringVar(&remoteHost, "remoteHost", "", "Remote target host to connect to")
 
 	// Check we have all required flags
 	flag.Parse()
@@ -194,9 +194,9 @@ func parseFlags() error {
 		}
 	case "db":
 	case "web":
-		// We need targetPort AND targetHost
-		if targetPort == -1 && targetHost == "" {
-			return fmt.Errorf("missing db plugin flags")
+		// We need remotePort AND remoteHost
+		if remotePort == -1 && remoteHost == "" {
+			return fmt.Errorf("missing db/web plugin flags")
 		}
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
