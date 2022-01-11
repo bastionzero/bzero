@@ -1,4 +1,4 @@
-package dbdial
+package dial
 
 import (
 	"encoding/base64"
@@ -7,20 +7,14 @@ import (
 	"io"
 	"net"
 
-	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/db/actions/dial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
-type DbDialSubAction string
-
-const (
-	DbDialStart  DbDialSubAction = "db/dial/start"
-	DbDialDataIn DbDialSubAction = "db/dial/datain"
-)
-
-type DbDial struct {
+type Dial struct {
 	logger *logger.Logger
 	tmb    *tomb.Tomb
 	closed bool
@@ -37,9 +31,9 @@ type DbDial struct {
 func New(logger *logger.Logger,
 	pluginTmb *tomb.Tomb,
 	ch chan smsg.StreamMessage,
-	raddr *net.TCPAddr) (*DbDial, error) {
+	raddr *net.TCPAddr) (*Dial, error) {
 
-	return &DbDial{
+	return &Dial{
 		logger:           logger,
 		tmb:              pluginTmb,
 		closed:           false,
@@ -48,62 +42,62 @@ func New(logger *logger.Logger,
 	}, nil
 }
 
-func (s *DbDial) Closed() bool {
-	return s.closed
+func (d *Dial) Closed() bool {
+	return d.closed
 }
 
-func (e *DbDial) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch DbDialSubAction(action) {
-	case DbDialStart:
-		var dbDialActionRequest DbDialActionPayload
-		if err := json.Unmarshal(actionPayload, &dbDialActionRequest); err != nil {
-			rerr := fmt.Errorf("malformed db dial Action payload %v", actionPayload)
-			e.logger.Error(rerr)
-			return action, []byte{}, rerr
+func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	var err error
+
+	switch dial.DialSubAction(action) {
+	case dial.DialStart:
+		var dialActionRequest dial.DialActionPayload
+		if err := json.Unmarshal(actionPayload, &dialActionRequest); err != nil {
+			err = fmt.Errorf("malformed dial action payload %v", actionPayload)
+			break
 		}
 
-		return e.StartDial(dbDialActionRequest, action)
-	case DbDialDataIn:
+		return d.StartDial(dialActionRequest, action)
+	case dial.DialInput:
 		// Deserialize the action payload, the only action passed is DataIn
-		var dataIn DbDataInActionPayload
+		var dataIn dial.DialInputActionPayload
 		if err := json.Unmarshal(actionPayload, &dataIn); err != nil {
-			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
-			e.logger.Error(rerr)
-			return "", []byte{}, rerr
+			err = fmt.Errorf("unable to unmarshal dial input message: %s", err)
+			break
 		}
 
 		// First validate the requestId
-		if err := e.validateRequestId(dataIn.RequestId); err != nil {
-			return "", []byte{}, err
+		if err = d.validateRequestId(dataIn.RequestId); err != nil {
+			break
 		}
 
 		// Then send the data to our remote connection, decode the data first
-		dataToWrite, _ := base64.StdEncoding.DecodeString(dataIn.Data)
-
-		// Send this data to our remote connection
-		e.logger.Info("Received data from bastion, forwarding to remote tcp connection")
-		_, err := e.remoteConnection.Write(dataToWrite)
+		dataToWrite, err := base64.StdEncoding.DecodeString(dataIn.Data)
 		if err != nil {
-			e.logger.Errorf("error writing to to remote connection: %v", err)
-			return "", []byte{}, err
+			break
 		}
 
-		return "", []byte{}, nil
+		// Send this data to our remote connection
+		d.logger.Info("Received data from bastion, forwarding to remote tcp connection")
+		_, err = d.remoteConnection.Write(dataToWrite)
 	default:
-		rerr := fmt.Errorf("unhandled stream action: %v", action)
-		e.logger.Error(rerr)
-		return "", []byte{}, rerr
+		err = fmt.Errorf("unhandled stream action: %v", action)
 	}
+
+	if err != nil {
+		d.logger.Error(err)
+	}
+	return "", []byte{}, err
 }
 
-func (e *DbDial) StartDial(dialActionRequest DbDialActionPayload, action string) (string, []byte, error) {
+func (d *Dial) StartDial(dialActionRequest dial.DialActionPayload, action string) (string, []byte, error) {
 	// Set our requestId
-	e.requestId = dialActionRequest.RequestId
+	d.requestId = dialActionRequest.RequestId
 
 	// For each start, call the dial the TCP address
-	remoteConnection, err := net.DialTCP("tcp", nil, e.remoteAddress)
+	remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress)
 	if err != nil {
-		e.logger.Errorf("Failed to dial remote address: %s", err)
+		d.logger.Errorf("Failed to dial remote address: %s", err)
 		// Let the agent know that there was an error
 		return action, []byte{}, err
 	}
@@ -118,52 +112,52 @@ func (e *DbDial) StartDial(dialActionRequest DbDialActionPayload, action string)
 			n, err := remoteConnection.Read(buff)
 			if err != nil {
 				if err != io.EOF {
-					e.logger.Errorf("Read failed '%s'\n", err)
+					d.logger.Errorf("Read failed '%s'\n", err)
 				}
 
 				// Let our daemon know that we have got the error and we need to close the connection
 				message := smsg.StreamMessage{
 					Type:           string(smsg.DbAgentClose),
-					RequestId:      e.requestId,
+					RequestId:      d.requestId,
 					SequenceNumber: sequenceNumber,
 					Content:        "", // No content for dbAgent Close
 					LogId:          "", // No log id for db messages
 				}
-				e.streamOutputChan <- message
+				d.streamOutputChan <- message
 
 				// Ensure that we close the dial action
-				e.closed = true
+				d.closed = true
 				return
 			}
 
 			tcpBytesBuffer := buff[:n]
 
-			e.logger.Infof("Received %d bytes from local tcp connection, sending to bastion", n)
+			d.logger.Infof("Received %d bytes from local tcp connection, sending to bastion", n)
 
 			// Now send this to bastion
 			str := base64.StdEncoding.EncodeToString(tcpBytesBuffer)
 			message := smsg.StreamMessage{
 				Type:           string(smsg.DbOut),
-				RequestId:      e.requestId,
+				RequestId:      d.requestId,
 				SequenceNumber: sequenceNumber,
 				Content:        str,
 				LogId:          "", // No log id for db messages
 			}
-			e.streamOutputChan <- message
+			d.streamOutputChan <- message
 
 			sequenceNumber += 1
 		}
 	}()
 
 	// Update our remote connection
-	e.remoteConnection = remoteConnection
+	d.remoteConnection = remoteConnection
 	return action, []byte{}, nil
 }
 
-func (e *DbDial) validateRequestId(requestId string) error {
-	if requestId != e.requestId {
+func (d *Dial) validateRequestId(requestId string) error {
+	if requestId != d.requestId {
 		rerr := fmt.Errorf("invalid request ID passed")
-		e.logger.Error(rerr)
+		d.logger.Error(rerr)
 		return rerr
 	}
 	return nil

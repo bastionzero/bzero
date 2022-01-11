@@ -8,29 +8,12 @@ import (
 	"strings"
 	"sync"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/db/actions/dbdial"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/db/actions/dial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
-
-type DbAction string
-
-const (
-	Dial DbAction = "dial"
-	// Start  DbAction = "start"
-	// DataIn DbAction = "datain"
-)
-
-type DbActionParams struct {
-	RemotePort int    `json:"remotePort"`
-	RemoteHost string `json:"remoteHost"`
-}
-
-type WebActionParams struct {
-	RemotePort int    `json:"remotePort"`
-	RemoteHost string `json:"remoteHost"`
-}
 
 type JustRequestId struct {
 	RequestId string `json:"requestId"`
@@ -42,18 +25,14 @@ type IDbAction interface {
 }
 
 type DbPlugin struct {
-	tmb *tomb.Tomb // datachannel's tomb
-
 	logger *logger.Logger
+	tmb    *tomb.Tomb // datachannel's tomb
 
 	streamOutputChan chan smsg.StreamMessage
 
 	// Either use the host:port
 	targetPort int
 	targetHost string
-
-	// Or the full host name (i.e. DNS entry)
-	targetHostName string
 
 	remoteAddress *net.TCPAddr
 
@@ -68,7 +47,7 @@ func New(parentTmb *tomb.Tomb,
 	payload []byte) (*DbPlugin, error) {
 
 	// Unmarshal the Syn payload
-	var synPayload DbActionParams
+	var synPayload db.DbActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
 		return &DbPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
@@ -143,10 +122,10 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 	} else {
 		subLogger := k.logger.GetActionLogger(action)
 		subLogger.AddRequestId(rid)
-		switch DbAction(dbAction) {
-		case Dial:
+		switch db.DbAction(dbAction) {
+		case db.Dial:
 			// Create a new dbdial action
-			a, err := dbdial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
+			a, err := dial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
 			k.updateActionsMap(a, rid) // save action for later input
 
 			if err != nil {
@@ -164,7 +143,6 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 			return "", []byte{}, rerr
 		}
 	}
-
 }
 
 // Helper function so we avoid writing to this map at the same time

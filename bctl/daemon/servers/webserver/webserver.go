@@ -7,11 +7,11 @@ import (
 	"net"
 	"os"
 
-	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzweb "bastionzero.com/bctl/v1/bzerolib/plugins/web"
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 )
@@ -78,7 +78,7 @@ func StartWebServer(logger *logger.Logger,
 	}
 
 	// Create a single datachannel for all of our db calls
-	if datachannel, err := listener.newDataChannel(string(agms.Dial), listener.websocket); err == nil {
+	if datachannel, err := listener.newDataChannel(string(bzweb.Dial), listener.websocket); err == nil {
 		listener.datachannel = datachannel
 	} else {
 		return err
@@ -121,8 +121,12 @@ func StartWebServer(logger *logger.Logger,
 }
 
 func (h *WebServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, requestId string) {
+	food := bzweb.WebFood{
+		Action: bzweb.Dial,
+		Conn:   lconn,
+	}
 	// Start the dial plugin
-	h.datachannel.FeedTcp(string(agms.Dial), lconn)
+	h.datachannel.Feed(food)
 }
 
 // for creating new websockets
@@ -145,7 +149,7 @@ func (h *WebServer) newDataChannel(action string, websocket *websocket.Websocket
 	h.logger.Infof("Creating new datachannel id: %v", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := agms.WebActionParams{
+	actionParams := bzweb.WebActionParams{
 		RemotePort: h.targetPort,
 		RemoteHost: h.targetHost,
 	}
