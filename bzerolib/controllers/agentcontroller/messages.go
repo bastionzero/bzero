@@ -3,7 +3,7 @@ package agentcontroller
 type RegisterAgentMessage struct {
 	PublicKey       string `json:"publicKey"`
 	ActivationCode  string `json:"activationCode"`
-	AgentVersion    string `json:"agentVersion"`
+	Version         string `json:"version"`
 	OrgId           string `json:"orgId"`
 	EnvironmentId   string `json:"environmentId"`
 	EnvironmentName string `json:"environmentName"`

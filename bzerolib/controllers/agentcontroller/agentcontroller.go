@@ -48,12 +48,12 @@ func New(logger *logger.Logger,
 	}
 }
 
-func (c *AgentController) RegisterAgent(publicKey string, activationToken string, agentVersion string, orgId string, environmentId string, targetName string, targetId string, targetType string) error {
+func (c *AgentController) RegisterAgent(publicKey string, activationToken string, version string, orgId string, environmentId string, targetName string, targetId string, targetType string) error {
 	// Create our request
 	registerAgentMessage := RegisterAgentMessage{
 		PublicKey:       publicKey,
 		ActivationCode:  activationToken,
-		AgentVersion:    agentVersion,
+		Version:         version,
 		OrgId:           orgId,
 		EnvironmentId:   environmentId,
 		EnvironmentName: "",
