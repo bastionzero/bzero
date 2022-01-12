@@ -11,7 +11,7 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	bzweb "bastionzero.com/bctl/v1/bzerolib/plugins/web"
+	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 )
