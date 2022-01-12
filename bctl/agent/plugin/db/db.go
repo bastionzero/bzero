@@ -31,8 +31,8 @@ type DbPlugin struct {
 	streamOutputChan chan smsg.StreamMessage
 
 	// Either use the host:port
-	targetPort int
-	targetHost string
+	remotePort int
+	remoteHost string
 
 	remoteAddress *net.TCPAddr
 
@@ -63,8 +63,8 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	plugin := &DbPlugin{
-		targetPort:       synPayload.RemotePort,
-		targetHost:       synPayload.RemoteHost,
+		remotePort:       synPayload.RemotePort,
+		remoteHost:       synPayload.RemoteHost,
 		logger:           logger,
 		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,

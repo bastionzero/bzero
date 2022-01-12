@@ -10,13 +10,13 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
-	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 )
 
 const (
@@ -95,7 +95,7 @@ func StartKubeServer(logger *logger.Logger,
 	}
 
 	// Create a single datachannel for all of our rest api calls to reduce overhead
-	if datachannel, err := listener.newDataChannel(string(kube.RestApi), listener.websocket); err == nil {
+	if datachannel, err := listener.newDataChannel(string(bzkube.RestApi), listener.websocket); err == nil {
 		listener.restApiDatachannel = datachannel
 	} else {
 		return err
@@ -171,7 +171,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 	h.logger.Infof("Creating new datachannel id: %v", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := agms.KubeActionParams{
+	actionParams := bzkube.KubeActionParams{
 		TargetUser:   h.targetUser,
 		TargetGroups: h.targetGroups,
 	}
@@ -213,7 +213,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 					h.websocket.Send(cdMessage)
 
 					// close our websocket if the datachannel we closed was the last and it's not rest api
-					if kube.KubeDaemonAction(action) != kube.RestApi && h.websocket.SubscriberCount() == 0 {
+					if bzkube.KubeAction(action) != bzkube.RestApi && h.websocket.SubscriberCount() == 0 {
 						h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
 					}
 					return
@@ -270,7 +270,7 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 
 	// Make food
 	food := kube.KubeFood{
-		Action:  string(action),
+		Action:  action,
 		LogId:   logId,
 		Command: command,
 		Writer:  w,
@@ -278,7 +278,7 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 	}
 
 	// feed our restapi datachannel
-	if action == kube.RestApi {
+	if action == bzkube.RestApi {
 		h.restApiDatachannel.Feed(food)
 
 		// create new datachannel and feed it kubectl handlers
@@ -287,22 +287,22 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 	}
 }
 
-func getAction(req *http.Request) kube.KubeDaemonAction {
+func getAction(req *http.Request) bzkube.KubeAction {
 	// parse action from incoming request
 	switch {
 	// interactive commands that require both stdin and stdout
 	case isExecRequest(req):
-		return kube.Exec
+		return bzkube.Exec
 
 	// Persistent, yet not interactive commands that serve continual output but only listen for a single, request-cancelling input
 	case isPortForwardRequest(req):
-		return kube.Stream
+		return bzkube.Stream
 	case isStreamRequest(req):
-		return kube.Stream
+		return bzkube.Stream
 
 	// simple call and response aka restapi requests
 	default:
-		return kube.RestApi
+		return bzkube.RestApi
 	}
 }
 
