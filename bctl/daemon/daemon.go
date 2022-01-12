@@ -53,6 +53,7 @@ func main() {
 
 	params := make(map[string]string)
 	params["session_id"] = sessionId
+	params["version"] = version
 
 	logger.Infof("Opening websocket to Bastion: %s for plugin %s", serviceUrl, plugin)
 

@@ -8,6 +8,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 type ConnectionNodeController struct {
@@ -29,7 +30,7 @@ const (
 	createWebConnectionEndpoint = "/api/v2/connections/web"
 
 	// General endpoints
-	getAuthDetailsEndpoint = "/api/v2/connections/$TYPE/$ID/connection-auth-details"
+	getAuthDetailsEndpoint = "/api/v2/connections/$TYPE/$ID/$VERSION/connection-auth-details"
 )
 
 func New(logger *logger.Logger,
@@ -56,7 +57,11 @@ func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targe
 	}
 
 	// Build the endpoint we want to hit
-	createConnectionEndpoint := c.bastionUrl + createKubeConnectionEndpoint
+	createConnectionEndpoint, err := utils.JoinUrls(c.bastionUrl, createKubeConnectionEndpoint)
+	if err != nil {
+		c.logger.Error(fmt.Errorf("error building url"))
+		panic(err)
+	}
 
 	// Marshall the request
 	msgBytes, errMarshal := json.Marshal(createKubeConnectionRequest)
@@ -97,7 +102,11 @@ func (c *ConnectionNodeController) CreateDbConnection(targetId string) Connectio
 	}
 
 	// Build the endpoint we want to hit
-	createConnectionEndpoint := c.bastionUrl + createDbConnectionEndpoint
+	createConnectionEndpoint, err := utils.JoinUrls(c.bastionUrl, createDbConnectionEndpoint)
+	if err != nil {
+		c.logger.Error(fmt.Errorf("error building url"))
+		panic(err)
+	}
 
 	// Marshall the request
 	msgBytes, errMarshal := json.Marshal(createDbConnectionRequest)
@@ -138,7 +147,11 @@ func (c *ConnectionNodeController) CreateWebConnection(targetId string) Connecti
 	}
 
 	// Build the endpoint we want to hit
-	createConnectionEndpoint := c.bastionUrl + createWebConnectionEndpoint
+	createConnectionEndpoint, err := utils.JoinUrls(c.bastionUrl, createWebConnectionEndpoint)
+	if err != nil {
+		c.logger.Error(fmt.Errorf("error building url"))
+		panic(err)
+	}
 
 	// Marshall the request
 	msgBytes, errMarshal := json.Marshal(createDbConnectionRequest)
@@ -175,9 +188,17 @@ func (c *ConnectionNodeController) CreateWebConnection(targetId string) Connecti
 func (c *ConnectionNodeController) createCnConnection(connectionId string, typeOfConnection string) ConnectionDetailsResponse {
 	// Now use the connectionId to get the connectionNodeId and AuthToken
 
-	// Add our ID and type
-	getAuthDetailsEndpoint := c.bastionUrl + strings.Replace(getAuthDetailsEndpoint, "$ID", connectionId, -1)
-	getAuthDetailsEndpoint = strings.Replace(getAuthDetailsEndpoint, "$TYPE", typeOfConnection, -1)
+	// Add our ID and type and version
+	getAuthDetailsEndpointFormatted := strings.Replace(getAuthDetailsEndpoint, "$ID", connectionId, -1)
+	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpoint, "$TYPE", typeOfConnection, -1)
+	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpoint, "$VERSION", c.params["version"], -1)
+
+	// Build our endpoint
+	getAuthDetailsEndpoint, err := utils.JoinUrls(c.bastionUrl, getAuthDetailsEndpointFormatted)
+	if err != nil {
+		c.logger.Error(fmt.Errorf("error building url"))
+		panic(err)
+	}
 
 	httpGetAuthDetailsResponse, errPost := bzhttp.Get(c.logger, getAuthDetailsEndpoint, c.headers, c.params)
 	if errPost != nil {

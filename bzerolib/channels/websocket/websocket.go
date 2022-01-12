@@ -306,7 +306,7 @@ func (w *Websocket) Connect() {
 		agentController := agentcontroller.New(w.logger, w.serviceUrl, map[string]string{}, map[string]string{}, w.params["target_type"])
 
 		// If we have a private key, we must solve the challenge
-		if solvedChallenge, err := agentController.GetChallenge(w.params["org_id"], w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["target_type"]); err != nil {
+		if solvedChallenge, err := agentController.GetChallenge(w.params["org_id"], w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["target_type"], w.params["version"]); err != nil {
 			w.logger.Error(fmt.Errorf("error getting challenge: %s", err))
 			return
 		} else {
@@ -314,7 +314,7 @@ func (w *Websocket) Connect() {
 		}
 
 		// And sign our agent version
-		if signedAgentVersion, err := agentcontroller.SignString(config.Data.PrivateKey, w.params["agent_version"]); err != nil {
+		if signedAgentVersion, err := agentcontroller.SignString(config.Data.PrivateKey, w.params["version"]); err != nil {
 			w.logger.Error(fmt.Errorf("error signing agent version: %s", err))
 			return
 		} else {

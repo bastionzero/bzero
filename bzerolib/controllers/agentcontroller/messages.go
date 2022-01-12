@@ -18,6 +18,7 @@ type GetChallengeMessage struct {
 	TargetId   string `json:"targetId"`
 	TargetName string `json:"targetName"`
 	TargetType string `json:"targetType"`
+	Version    string `json:"version"`
 }
 
 type GetChallengeResponse struct {

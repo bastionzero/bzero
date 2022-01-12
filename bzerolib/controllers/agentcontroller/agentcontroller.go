@@ -8,6 +8,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/utils"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -31,9 +32,16 @@ func New(logger *logger.Logger,
 	params map[string]string,
 	targetType string) *AgentController {
 
+	// Build the endpoint we want to hit
+	bastionUrlFormatted, err := utils.JoinUrls("https://", bastionUrl)
+	if err != nil {
+		logger.Error(fmt.Errorf("error building url"))
+		panic(err)
+	}
+
 	return &AgentController{
 		logger:     logger,
-		bastionUrl: "https://" + bastionUrl,
+		bastionUrl: bastionUrlFormatted,
 		headers:    headers,
 		params:     params,
 		targetType: targetType,
@@ -55,7 +63,11 @@ func (c *AgentController) RegisterAgent(publicKey string, activationToken string
 	}
 
 	// Build the endpoint we want to hit
-	registerAgentEndpoint := c.bastionUrl + registerEndpoint
+	registerAgentEndpoint, err := utils.JoinUrls(c.bastionUrl, registerEndpoint)
+	if err != nil {
+		c.logger.Error(fmt.Errorf("error building url"))
+		panic(err)
+	}
 
 	// Marshall the request
 	msgBytes, errMarshal := json.Marshal(registerAgentMessage)
@@ -74,13 +86,14 @@ func (c *AgentController) RegisterAgent(publicKey string, activationToken string
 	return nil
 }
 
-func (c *AgentController) GetChallenge(orgId string, targetId string, targetName string, privateKey string, targetType string) (string, error) {
+func (c *AgentController) GetChallenge(orgId string, targetId string, targetName string, privateKey string, targetType string, version string) (string, error) {
 	// Get challenge
 	challengeRequest := GetChallengeMessage{
 		OrgId:      orgId,
 		TargetId:   targetId,
 		TargetName: targetName,
 		TargetType: targetType,
+		Version:    version,
 	}
 
 	challengeJson, err := json.Marshal(challengeRequest)
@@ -88,8 +101,15 @@ func (c *AgentController) GetChallenge(orgId string, targetId string, targetName
 		return "", fmt.Errorf("error marshalling register data: %s", err)
 	}
 
+	// Build the endpoint we want to hit
+	challengeEndpointFormatted, err := utils.JoinUrls(c.bastionUrl, challengeEndpoint)
+	if err != nil {
+		c.logger.Error(fmt.Errorf("error building url"))
+		panic(err)
+	}
+
 	// Make our POST request
-	response, err := bzhttp.PostContent(c.logger, c.bastionUrl+challengeEndpoint, "application/json", challengeJson)
+	response, err := bzhttp.PostContent(c.logger, challengeEndpointFormatted, "application/json", challengeJson)
 	if err != nil {
 		return "", fmt.Errorf("error making post request to challenge agent. Error: %s. Response: %+v", err, response)
 	}
