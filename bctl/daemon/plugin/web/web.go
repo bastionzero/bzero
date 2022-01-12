@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
-	agms "bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -22,12 +22,6 @@ type IWebDaemonAction interface {
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
 }
-
-type WebDaemonAction string
-
-const (
-	Dial WebDaemonAction = "dial"
-)
 
 type WebDaemonPlugin struct {
 	tmb    *tomb.Tomb
@@ -46,7 +40,7 @@ type WebDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams agms.WebActionParams) (*WebDaemonPlugin, error) {
+func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActionParams) (*WebDaemonPlugin, error) {
 	plugin := WebDaemonPlugin{
 		tmb:             parentTmb,
 		logger:          logger,
@@ -128,22 +122,27 @@ func (k *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byt
 	return nil
 }
 
-func (k *WebDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
+func (k *WebDaemonPlugin) Feed(food interface{}) error {
+	// Make sure food matches what it says on the label
+	webFood, ok := food.(bzweb.WebFood)
+	if !ok {
+		return fmt.Errorf("we asked for an entremet not a sloppy joe") // couldn't think of a neater food that was less pretentious
+	}
 	// Always generate a requestId, each new web command is its own request
 	requestId := uuid.New().String()
 
 	// Create action logger
-	actLogger := k.logger.GetActionLogger(action)
+	actLogger := k.logger.GetActionLogger(string(webFood.Action))
 	actLogger.AddRequestId(requestId)
 
 	var act IWebDaemonAction
 	var actOutputChan chan plugin.ActionWrapper
 
-	switch agms.WebAction(action) {
-	case agms.Dial:
+	switch webFood.Action {
+	case bzweb.Dial:
 		act, actOutputChan = webdial.New(actLogger, requestId)
 	default:
-		rerr := fmt.Errorf("unrecognized web action: %v", string(action))
+		rerr := fmt.Errorf("unrecognized web action: %v", string(webFood.Action))
 		k.logger.Error(rerr)
 		return rerr
 	}
@@ -168,11 +167,11 @@ func (k *WebDaemonPlugin) Feed(action string, lconn *net.TCPConn) error {
 		}
 	}()
 
-	k.logger.Infof("Created %s action with requestId %v", string(action), requestId)
+	k.logger.Infof("Created %s action with requestId %v", string(webFood.Action), requestId)
 
 	// send local tcp connection to action
-	if err := act.Start(k.tmb, lconn); err != nil {
-		k.logger.Error(fmt.Errorf("%s error: %s", string(action), err))
+	if err := act.Start(k.tmb, webFood.Conn); err != nil {
+		k.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
 	}
 
 	return nil

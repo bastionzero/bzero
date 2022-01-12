@@ -3,7 +3,7 @@ package agentcontroller
 type RegisterAgentMessage struct {
 	PublicKey       string `json:"publicKey"`
 	ActivationCode  string `json:"activationCode"`
-	AgentVersion    string `json:"agentVersion"`
+	Version         string `json:"version"`
 	OrgId           string `json:"orgId"`
 	EnvironmentId   string `json:"environmentId"`
 	EnvironmentName string `json:"environmentName"`
@@ -18,6 +18,7 @@ type GetChallengeMessage struct {
 	TargetId   string `json:"targetId"`
 	TargetName string `json:"targetName"`
 	TargetType string `json:"targetType"`
+	Version    string `json:"version"`
 }
 
 type GetChallengeResponse struct {

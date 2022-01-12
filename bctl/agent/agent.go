@@ -74,12 +74,12 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 
 	// Make and add our params
 	params := map[string]string{
-		"public_key":    config.Data.PublicKey,
-		"agent_version": agentVersion,
-		"org_id":        orgId,
-		"target_id":     targetId,
-		"target_name":   targetName,
-		"target_type":   targetType,
+		"public_key":  config.Data.PublicKey,
+		"version":     agentVersion,
+		"org_id":      orgId,
+		"target_id":   targetId,
+		"target_name": targetName,
+		"target_type": targetType,
 	}
 
 	// create a websocket
