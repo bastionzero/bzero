@@ -6,8 +6,6 @@ type WebAction string
 
 const (
 	Dial WebAction = "dial"
-	// Start  WebAction = "start"
-	// DataIn WebAction = "input"
 )
 
 type WebActionParams struct {

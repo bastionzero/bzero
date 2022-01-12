@@ -6,8 +6,6 @@ type DbAction string
 
 const (
 	Dial DbAction = "dial"
-	// Start  DbAction = "start"
-	// DataIn DbAction = "datain"
 )
 
 type DbActionParams struct {
