@@ -54,7 +54,7 @@ func LoadVault() (*Vault, error) {
 }
 
 func InCluster() bool {
-	if val := os.Getenv(inClusterEnvVar); val == "1" {
+	if val := os.Getenv(inClusterEnvVar); val == "bzero" {
 		return true
 	} else {
 		return false

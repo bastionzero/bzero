@@ -44,4 +44,7 @@ RUN if [[ "$PROD_TRUE" == "true" ]] ; then \
     rm -rf /bctl-agent-files; \
     else echo  "Not removing go source code"; fi
 
+# Set our env var
+ENV BASTIONZERO_IN_CLUSTER=bzero
+
 ENTRYPOINT [ "/bctl-agent/start.sh" ]
