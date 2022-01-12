@@ -200,8 +200,6 @@ func (c *ConnectionNodeController) createCnConnection(connectionId string, typeO
 		panic(err)
 	}
 
-	c.logger.Infof("HERE: %s", getAuthDetailsEndpoint)
-
 	httpGetAuthDetailsResponse, errPost := bzhttp.Get(c.logger, getAuthDetailsEndpoint, c.headers, c.params)
 	if errPost != nil {
 		c.logger.Error(fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpGetAuthDetailsResponse))
