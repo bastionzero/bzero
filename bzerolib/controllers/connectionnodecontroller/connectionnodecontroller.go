@@ -190,8 +190,8 @@ func (c *ConnectionNodeController) createCnConnection(connectionId string, typeO
 
 	// Add our ID and type and version
 	getAuthDetailsEndpointFormatted := strings.Replace(getAuthDetailsEndpoint, "$ID", connectionId, -1)
-	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpoint, "$TYPE", typeOfConnection, -1)
-	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpoint, "$VERSION", c.params["version"], -1)
+	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpointFormatted, "$TYPE", typeOfConnection, -1)
+	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpointFormatted, "$VERSION", c.params["version"], -1)
 
 	// Build our endpoint
 	getAuthDetailsEndpoint, err := utils.JoinUrls(c.bastionUrl, getAuthDetailsEndpointFormatted)
@@ -199,6 +199,8 @@ func (c *ConnectionNodeController) createCnConnection(connectionId string, typeO
 		c.logger.Error(fmt.Errorf("error building url"))
 		panic(err)
 	}
+
+	c.logger.Infof("HERE: %s", getAuthDetailsEndpoint)
 
 	httpGetAuthDetailsResponse, errPost := bzhttp.Get(c.logger, getAuthDetailsEndpoint, c.headers, c.params)
 	if errPost != nil {
