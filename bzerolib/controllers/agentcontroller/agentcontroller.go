@@ -23,7 +23,6 @@ type AgentController struct {
 }
 
 const (
-	registerEndpoint  = "/api/v2/agent/register-agent"
 	challengeEndpoint = "/api/v2/agent/challenge"
 )
 
