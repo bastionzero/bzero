@@ -9,7 +9,6 @@ type RegisterAgentMessage struct {
 	EnvironmentName string `json:"environmentName"`
 	TargetName      string `json:"targetName"`
 	TargetId        string `json:"targetId"`
-	TargetType      string `json:"targetType"`
 }
 
 // Message definitions for challenge request/response
@@ -17,7 +16,7 @@ type GetChallengeMessage struct {
 	OrgId      string `json:"orgId"`
 	TargetId   string `json:"targetId"`
 	TargetName string `json:"targetName"`
-	TargetType string `json:"targetType"`
+	AgentType  int    `json:"agentType"`
 	Version    string `json:"version"`
 }
 
