@@ -143,6 +143,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	params["connection_node_id"] = message.ConnectionNodeId
 	params["token"] = message.Token
 	params["connectionType"] = fmt.Sprint(message.Type)
+	params["connection_service_url"] = message.ConnectionServiceUrl
 
 	if ws, err := websocket.New(subLogger, message.DaemonWebsocketId, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)

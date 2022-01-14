@@ -17,13 +17,15 @@ type CreateConnectionResponse struct {
 }
 
 type ConnectionAuthDetailsResponse struct {
-	ConnectionNodeId string `json:"connectionNodeId"`
-	AuthToken        string `json:"authToken"`
+	ConnectionNodeId     string `json:"connectionNodeId"`
+	AuthToken            string `json:"authToken"`
+	ConnectionServiceUrl string `json:"connectionServiceUrl"`
 }
 
 // Controller Types
 type ConnectionDetailsResponse struct {
-	ConnectionNodeId string
-	AuthToken        string
-	ConnectionId     string
+	ConnectionNodeId     string
+	ConnectionServiceUrl string
+	AuthToken            string
+	ConnectionId         string
 }
