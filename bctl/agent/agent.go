@@ -23,7 +23,14 @@ var (
 	serviceUrl, orgId, targetName    string
 	environmentId, activationToken   string
 	idpProvider, namespace, idpOrgId string
-	targetId, targetType             string
+	targetId, agentType              string
+)
+
+// Keep these as strings so they can be send as query params
+// They are then matched to the correct enum on Bastion by parsing the int
+const (
+	Cluster string = "0"
+	Bzero   string = "1"
 )
 
 func main() {
@@ -79,7 +86,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 		"org_id":      orgId,
 		"target_id":   targetId,
 		"target_name": targetName,
-		"target_type": targetType,
+		"agent_type":  agentType,
 	}
 
 	// create a websocket
@@ -94,7 +101,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	ccId := uuid.New().String()
 	ccLogger := logger.GetControlChannelLogger(ccId)
 
-	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, targetType, dcTargetSelectHandler)
+	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, agentType, dcTargetSelectHandler)
 }
 
 // control channel function to select correct SignalR hubs on message egress
@@ -149,9 +156,9 @@ func parseFlags() error {
 	namespace = os.Getenv("NAMESPACE")
 
 	if vault.InCluster() {
-		targetType = "kube"
+		agentType = Cluster
 	} else {
-		targetType = "bzero"
+		agentType = Bzero
 	}
 
 	// TODO: Try to pull from vault, incase this agent is being restarted, we should not always expect these env vars
@@ -230,9 +237,10 @@ func register(logger *logger.Logger) error {
 
 			// Register with Bastion
 			logger.Info("Cryptographic identity created.  Registering with BastionZero...")
-			agentController := agentcontroller.New(logger, serviceUrl, map[string]string{}, map[string]string{}, targetType)
 
-			if err := agentController.RegisterAgent(pubkeyString, activationToken, getAgentVersion(), orgId, environmentId, targetName, targetId, targetType); err != nil {
+			agentController := agentcontroller.New(logger, serviceUrl, map[string]string{}, map[string]string{}, agentType)
+
+			if err := agentController.RegisterAgent(pubkeyString, activationToken, getAgentVersion(), orgId, environmentId, targetName, targetId, getAgentVersion()); err != nil {
 				return fmt.Errorf("error registering agent: %s", err)
 			}
 

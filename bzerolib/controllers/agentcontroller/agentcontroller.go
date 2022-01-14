@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -18,7 +19,7 @@ type AgentController struct {
 	connectionNodeBaseUrl string
 	headers               map[string]string
 	params                map[string]string
-	targetType            string
+	agentType             int
 }
 
 const (
@@ -30,7 +31,7 @@ func New(logger *logger.Logger,
 	bastionUrl string,
 	headers map[string]string,
 	params map[string]string,
-	targetType string) *AgentController {
+	agentType string) *AgentController {
 
 	// Build the endpoint we want to hit
 	bastionUrlFormatted, err := utils.JoinUrls("https://", bastionUrl)
@@ -39,16 +40,22 @@ func New(logger *logger.Logger,
 		panic(err)
 	}
 
+	agentTypeInt, errParse := strconv.Atoi(agentType)
+	if errParse != nil {
+		logger.Error(fmt.Errorf("error on parsing agentType to enum int: %s", err))
+		panic(errParse)
+	}
+
 	return &AgentController{
 		logger:     logger,
 		bastionUrl: bastionUrlFormatted,
 		headers:    headers,
 		params:     params,
-		targetType: targetType,
+		agentType:  agentTypeInt,
 	}
 }
 
-func (c *AgentController) RegisterAgent(publicKey string, activationToken string, version string, orgId string, environmentId string, targetName string, targetId string, targetType string) error {
+func (c *AgentController) RegisterAgent(publicKey string, activationToken string, agentVersion string, orgId string, environmentId string, targetName string, targetId string, version string) error {
 	// Create our request
 	registerAgentMessage := RegisterAgentMessage{
 		PublicKey:       publicKey,
@@ -59,7 +66,6 @@ func (c *AgentController) RegisterAgent(publicKey string, activationToken string
 		EnvironmentName: "",
 		TargetName:      targetName,
 		TargetId:        targetId,
-		TargetType:      targetType,
 	}
 
 	// Build the endpoint we want to hit
@@ -86,13 +92,13 @@ func (c *AgentController) RegisterAgent(publicKey string, activationToken string
 	return nil
 }
 
-func (c *AgentController) GetChallenge(orgId string, targetId string, targetName string, privateKey string, targetType string, version string) (string, error) {
+func (c *AgentController) GetChallenge(orgId string, targetId string, targetName string, privateKey string, version string) (string, error) {
 	// Get challenge
 	challengeRequest := GetChallengeMessage{
 		OrgId:      orgId,
 		TargetId:   targetId,
 		TargetName: targetName,
-		TargetType: targetType,
+		AgentType:  c.agentType,
 		Version:    version,
 	}
 

@@ -21,6 +21,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/controllers/connectionnodecontroller"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 const (
@@ -41,7 +42,19 @@ const (
 	kubeDaemonConnectionNodeHubEndpoint = "/hub/daemon"
 	kubeAgentConnectionNodeHubEndpoint  = "/hub/agent"
 
-	controlHubEndpoint = "/api/v1/hub/kube-control"
+	controlHubEndpoint = "/api/v1/hub/control"
+)
+
+// Connection Type enum
+type ConnectionType int
+
+const (
+	SHELL  ConnectionType = 0
+	TUNNEL ConnectionType = 1
+	FUD    ConnectionType = 2
+	KUBE   ConnectionType = 3
+	DB     ConnectionType = 4
+	WEB    ConnectionType = 5
 )
 
 type IWebsocket interface {
@@ -303,10 +316,10 @@ func (w *Websocket) Connect() {
 		config, _ := vault.LoadVault()
 
 		// Build our agentController
-		agentController := agentcontroller.New(w.logger, w.serviceUrl, map[string]string{}, map[string]string{}, w.params["target_type"])
+		agentController := agentcontroller.New(w.logger, w.serviceUrl, map[string]string{}, map[string]string{}, w.params["agent_type"])
 
 		// If we have a private key, we must solve the challenge
-		if solvedChallenge, err := agentController.GetChallenge(w.params["org_id"], w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["target_type"], w.params["version"]); err != nil {
+		if solvedChallenge, err := agentController.GetChallenge(w.params["org_id"], w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["version"]); err != nil {
 			w.logger.Error(fmt.Errorf("error getting challenge: %s", err))
 			return
 		} else {
@@ -334,7 +347,11 @@ func (w *Websocket) Connect() {
 	switch w.targetType {
 	case Cluster:
 		// Define our bastionURL
-		bastionUrl := "https://" + w.serviceUrl
+		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
+		if err != nil {
+			w.logger.Error(fmt.Errorf("error building bastionUrl"))
+			panic(err)
+		}
 
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
@@ -358,10 +375,16 @@ func (w *Websocket) Connect() {
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
 
-		w.requestParams["websocketType"] = w.params["websocketType"]
+		// Get the connection type based on the websocket type
+		connectionType := websocketTypeToConnectionType(w.params["websocketType"])
+		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
 	case Db:
 		// Define our bastionURL
-		bastionUrl := "https://" + w.serviceUrl
+		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
+		if err != nil {
+			w.logger.Error(fmt.Errorf("error building bastionUrl"))
+			panic(err)
+		}
 
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
@@ -380,10 +403,17 @@ func (w *Websocket) Connect() {
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
 
-		w.requestParams["websocketType"] = w.params["websocketType"]
+		// Get the connection type based on the websocket type
+		connectionType := websocketTypeToConnectionType(w.params["websocketType"])
+		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
+
 	case Web:
 		// Define our bastionURL
-		bastionUrl := "https://" + w.serviceUrl
+		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
+		if err != nil {
+			w.logger.Error(fmt.Errorf("error building bastionUrl"))
+			panic(err)
+		}
 
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
@@ -402,7 +432,10 @@ func (w *Websocket) Connect() {
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
 
-		w.requestParams["websocketType"] = w.params["websocketType"]
+		// Get the connection type based on the websocket type
+		connectionType := websocketTypeToConnectionType(w.params["websocketType"])
+		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
+
 	case AgentWebsocket:
 		// Build our connectionnode Url
 		w.baseUrl = w.buildConnectionNodeUrl(w.params["connection_node_id"]) + kubeAgentConnectionNodeHubEndpoint
@@ -410,7 +443,7 @@ func (w *Websocket) Connect() {
 		// Define our reqest params
 		w.requestParams["daemon_websocket_id"] = w.params["daemon_websocket_id"]
 		w.requestParams["token"] = w.params["token"]
-		w.requestParams["connection_type"] = w.params["connection_type"]
+		w.requestParams["connectionType"] = w.params["connectionType"]
 	case ClusterAgentControl:
 		// Default base url is just the service url and the hub endpoint
 		// This is because we hit bastion to initiate our control hub
@@ -520,4 +553,17 @@ func (w *Websocket) buildConnectionNodeUrl(connectionNodeId string) string {
 
 	// Build the connect url
 	return urlPrefix + "-connect.bastionzero.com/" + connectionNodeId
+}
+
+func websocketTypeToConnectionType(websocketType string) ConnectionType {
+	switch websocketType {
+	case "kube":
+		return KUBE
+	case "db":
+		return DB
+	case "web":
+		return WEB
+	default:
+		panic(fmt.Errorf("unhandled websocketType: %s", websocketType))
+	}
 }
