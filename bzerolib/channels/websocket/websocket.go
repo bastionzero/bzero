@@ -21,6 +21,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/controllers/connectionnodecontroller"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 const (
@@ -48,12 +49,12 @@ const (
 type ConnectionType int
 
 const (
-	SHELL   ConnectionType = 0
-	TUNNEL  ConnectionType = 1
-	FUD     ConnectionType = 2
-	CLUSTER ConnectionType = 3
-	DB      ConnectionType = 4
-	WEB     ConnectionType = 5
+	SHELL  ConnectionType = 0
+	TUNNEL ConnectionType = 1
+	FUD    ConnectionType = 2
+	KUBE   ConnectionType = 3
+	DB     ConnectionType = 4
+	WEB    ConnectionType = 5
 )
 
 type IWebsocket interface {
@@ -346,7 +347,11 @@ func (w *Websocket) Connect() {
 	switch w.targetType {
 	case Cluster:
 		// Define our bastionURL
-		bastionUrl := "https://" + w.serviceUrl
+		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
+		if err != nil {
+			w.logger.Error(fmt.Errorf("error building bastionUrl"))
+			panic(err)
+		}
 
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
@@ -375,7 +380,11 @@ func (w *Websocket) Connect() {
 		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
 	case Db:
 		// Define our bastionURL
-		bastionUrl := "https://" + w.serviceUrl
+		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
+		if err != nil {
+			w.logger.Error(fmt.Errorf("error building bastionUrl"))
+			panic(err)
+		}
 
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
@@ -400,7 +409,11 @@ func (w *Websocket) Connect() {
 
 	case Web:
 		// Define our bastionURL
-		bastionUrl := "https://" + w.serviceUrl
+		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
+		if err != nil {
+			w.logger.Error(fmt.Errorf("error building bastionUrl"))
+			panic(err)
+		}
 
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
@@ -545,7 +558,7 @@ func (w *Websocket) buildConnectionNodeUrl(connectionNodeId string) string {
 func websocketTypeToConnectionType(websocketType string) ConnectionType {
 	switch websocketType {
 	case "kube":
-		return CLUSTER
+		return KUBE
 	case "db":
 		return DB
 	case "web":
