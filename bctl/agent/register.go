@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
 
 	ed "crypto/ed25519"
 
@@ -15,9 +16,9 @@ import (
 )
 
 type ActivationTokenRequest struct {
-	TargetName      string `json:"targetName"`
-	EnvironmentId   string `json:"environmentId"`
-	EnvironmentName string `json:"environmentName"`
+	TargetName string `json:"targetName"`
+	// EnvironmentId   string `json:"environmentId"`
+	// EnvironmentName string `json:"environmentName"`
 }
 
 type ActivationTokenResponse struct {
@@ -31,9 +32,8 @@ type RegistrationRequest struct {
 	EnvironmentId   string `json:"environmentId"`
 	EnvironmentName string `json:"environmentName"`
 	TargetName      string `json:"targetName"`
+	TargetHostName  string `json:"targetHostName"`
 	TargetType      string `json:"agentType"`
-	// OrgId           string `json:"orgId"`
-	// TargetId        string `json:"targetId"`
 }
 
 type RegistrationResponse struct {
@@ -43,8 +43,8 @@ type RegistrationResponse struct {
 }
 
 const (
-	activationTokenEndpoint = "/api/v2/targets/bzero"
-	registerEndpoint        = "/api/v2/agent/register-agent" // TODO: change this to register
+	activationTokenEndpoint = "/api/v2/agent/token"
+	registerEndpoint        = "/api/v2/agent/register"
 )
 
 func register(logger *logger.Logger) error {
@@ -161,6 +161,11 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 
 	var regResponse RegistrationResponse
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		return regResponse, fmt.Errorf("could not resolve hostname")
+	}
+
 	// Create our request
 	req := RegistrationRequest{
 		PublicKey:       publicKey,
@@ -169,6 +174,7 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 		EnvironmentId:   environmentId,
 		EnvironmentName: environmentName,
 		TargetName:      targetName,
+		TargetHostName:  hostname,
 		TargetType:      agentType,
 	}
 
