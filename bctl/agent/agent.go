@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -24,6 +27,7 @@ import (
 
 const (
 	prodServiceUrl = "https://cloud.bastionzero.com/"
+	whereEndpoint  = "status/where"
 )
 
 var (
@@ -224,6 +228,7 @@ type RegistrationRequest struct {
 	TargetHostName  string `json:"targetHostName"`
 	TargetType      string `json:"agentType"`
 	TargetId        string `json:"targetId"`
+	AwsRegion       string `json:"awsRegion"`
 }
 
 type RegistrationResponse struct {
@@ -367,6 +372,27 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 		return regResponse, fmt.Errorf("could not resolve hostname")
 	}
 
+	// Get our region by pinging out connection-service
+	connectionServiceUrl := getConnectionServiceUrlFromServiceUrl(serviceUrl)
+	whereEndpoint, whereErr := utils.JoinUrls(connectionServiceUrl, whereEndpoint)
+	if whereErr != nil {
+		return regResponse, whereErr
+	}
+	whereEndpointWScheme, whereErrWScheme := utils.JoinUrls("https://", whereEndpoint)
+	if whereErrWScheme != nil {
+		return regResponse, whereErrWScheme
+	}
+	regionResponse, errRegion := bzhttp.Get(logger, whereEndpointWScheme, map[string]string{}, map[string]string{})
+	if errRegion != nil {
+		return regResponse, errRegion
+	}
+
+	regionBodyBytes, regionReadError := io.ReadAll(regionResponse.Body)
+	if regionReadError != nil {
+		log.Fatal(err)
+	}
+	region := string(regionBodyBytes)
+
 	// Create our request
 	req := RegistrationRequest{
 		PublicKey:       publicKey,
@@ -378,6 +404,7 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 		TargetHostName:  hostname,
 		TargetType:      agentType,
 		TargetId:        activationToken, // The activation token is the new targetId
+		AwsRegion:       region,
 	}
 
 	// Build the endpoint we want to hit
@@ -413,4 +440,12 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 
 		return regResponse, nil
 	}
+}
+
+func getConnectionServiceUrlFromServiceUrl(serviceUrl string) string {
+	toReplaceRegex := regexp.MustCompile(`([a-z]*).bastionzero.com`)
+	groupMaches := toReplaceRegex.FindStringSubmatch(serviceUrl)
+	prefix := groupMaches[1] // Extract cloud from cloud.bastionzero.com
+	connectUrl := fmt.Sprintf("%s-connection-service", prefix)
+	return strings.Replace(serviceUrl, prefix, connectUrl, -1)
 }
