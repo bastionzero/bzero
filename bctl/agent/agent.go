@@ -49,32 +49,6 @@ const (
 	Bzero   string = "bzero"
 )
 
-type ActivationTokenRequest struct {
-	TargetName string `json:"targetName"`
-}
-
-type ActivationTokenResponse struct {
-	ActivationToken string `json:"activationToken"`
-}
-
-type RegistrationRequest struct {
-	PublicKey       string `json:"publicKey"`
-	ActivationCode  string `json:"activationCode"`
-	Version         string `json:"version"`
-	EnvironmentId   string `json:"environmentId"`
-	EnvironmentName string `json:"environmentName"`
-	TargetName      string `json:"targetName"`
-	TargetHostName  string `json:"targetHostName"`
-	TargetId        string `json:"targetId"`
-	AwsRegion       string `json:"awsRegion"`
-}
-
-type RegistrationResponse struct {
-	TargetName  string `json:"targetName"`
-	OrgID       string `json:"externalOrganizationId"`
-	OrgProvider string `json:"externalOrganizationProvider"`
-}
-
 func main() {
 	// grab agent version
 	agentVersion := getAgentVersion()
@@ -236,6 +210,34 @@ func handleRegistration(logger *logger.Logger) error {
 		}
 	}
 	return nil
+}
+
+// Register logic
+type ActivationTokenRequest struct {
+	TargetName string `json:"targetName"`
+}
+
+type ActivationTokenResponse struct {
+	ActivationToken string `json:"activationToken"`
+}
+
+type RegistrationRequest struct {
+	PublicKey       string `json:"publicKey"`
+	ActivationCode  string `json:"activationCode"`
+	Version         string `json:"version"`
+	EnvironmentId   string `json:"environmentId"`
+	EnvironmentName string `json:"environmentName"`
+	TargetName      string `json:"targetName"`
+	TargetHostName  string `json:"targetHostName"`
+	TargetType      string `json:"agentType"`
+	TargetId        string `json:"targetId"`
+	AwsRegion       string `json:"awsRegion"`
+}
+
+type RegistrationResponse struct {
+	TargetName  string `json:"targetName"`
+	OrgID       string `json:"externalOrganizationId"`
+	OrgProvider string `json:"externalOrganizationProvider"`
 }
 
 func register(logger *logger.Logger) error {
