@@ -1,7 +1,6 @@
 package main
 
 import (
-	ed "crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -12,6 +11,10 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	ed "crypto/ed25519"
+	"os/signal"
+	"syscall"
 
 	"github.com/google/uuid"
 
@@ -39,54 +42,89 @@ var (
 	environmentId, environmentName   string
 	activationToken, apiKey          string
 	idpProvider, namespace, idpOrgId string
-	targetName, targetId, agentType  string
+	targetId, targetName, agentType  string
 )
 
-// Keep these as strings so they can be send as query params
-// They are then matched to the correct enum on Bastion by parsing the int
 const (
-	Cluster string = "cluster"
-	Bzero   string = "bzero"
+	Cluster = "Cluster"
+	Bzero   = "Bzero"
 )
 
 func main() {
+	parseFlags()
+	exitStatus := start()
+
+	switch agentType {
+	case Cluster:
+		// Sleep forever because otherwise kube will endlessly try restarting
+		// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
+		select {}
+	case Bzero:
+		if exitStatus != 0 {
+			os.Exit(exitStatus)
+		}
+	}
+}
+
+func blockUntilSignaled() os.Signal {
+	// Below channel will handle all machine initiated shutdown/reboot requests.
+
+	// Set up channel on which to receive signal notifications.
+	// We must use a buffered channel or risk missing the signal
+	// if we're not ready to receive when the signal is sent.
+	c := make(chan os.Signal, 1)
+
+	// Listening for OS signals is a blocking call.
+	// Only listen to signals that require us to exit.
+	// Otherwise we will continue execution and exit the program.
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	s := <-c
+	return s
+}
+
+func start() int {
 	// grab agent version
 	agentVersion := getAgentVersion()
 
 	// setup our loggers
 	logger, err := logger.New(logger.Debug, "")
 	if err != nil {
-		return
+		return 1
 	}
+
 	logger.AddAgentVersion(agentVersion)
 	logger.Infof("BastionZero Agent version %s starting up...", agentVersion)
-
-	parseFlags()
-	logger.Infof("Information parsed for %s", targetName)
 
 	// Check if the agent is registered or not.  If not, generate signing keys,
 	// check kube permissions and setup, and register with the Bastion.
 	if err := handleRegistration(logger); err != nil {
 		logger.Error(err)
-		return
+		return 1
 	}
 
 	// Connect the control channel to BastionZero
 	logger.Info("Creating connection to BastionZero...")
-	startControlChannel(logger, agentVersion)
+	control, err := startControlChannel(logger, agentVersion)
+	if err != nil {
+		return 1
+	}
 
 	logger.Info("Connection created successfully. Listening for incoming commands...")
 
-	// Sleep forever because otherwise kube will endlessly try restarting
-	// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
-	select {}
+	if agentType == Bzero {
+		signal := blockUntilSignaled()
+		control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.Signal))
+	}
+
+	return 0
 }
 
-func startControlChannel(logger *logger.Logger, agentVersion string) error {
+func startControlChannel(logger *logger.Logger, agentVersion string) (*controlchannel.ControlChannel, error) {
 	// Load in our saved config
 	config, err := vault.LoadVault()
 	if err != nil {
-		return fmt.Errorf("failed to retrieve vault: %s", err)
+		return &controlchannel.ControlChannel{}, fmt.Errorf("failed to retrieve vault: %s", err)
 	}
 
 	// Create our headers and params, headers are empty
@@ -105,7 +143,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
 	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.AgentControl)
 	if err != nil {
-		return err
+		return &controlchannel.ControlChannel{}, err
 	}
 
 	// create logger for control channel
