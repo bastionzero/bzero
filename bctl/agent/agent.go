@@ -1,18 +1,25 @@
 package main
 
 import (
+	ed "crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"bastionzero.com/bctl/v1/bctl/agent/controlchannel"
 	"bastionzero.com/bctl/v1/bctl/agent/rbac"
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 const (
@@ -30,15 +37,8 @@ var (
 // Keep these as strings so they can be send as query params
 // They are then matched to the correct enum on Bastion by parsing the int
 const (
-	Cluster string = "0"
-	Bzero   string = "1"
-)
-
-type TargetType string
-
-const (
-	BZero TargetType = "bzero"
-	Kube  TargetType = "kube"
+	Cluster string = "cluster"
+	Bzero   string = "bzero"
 )
 
 func main() {
@@ -88,8 +88,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	params := map[string]string{
 		"public_key":  config.Data.PublicKey,
 		"version":     agentVersion,
-		"org_id":      orgId,
-		"target_id":   targetId,
+		"target_id":   config.Data.TargetId,
 		"target_name": targetName,
 		"agent_type":  agentType,
 	}
@@ -97,7 +96,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	// create a websocket
 	wsId := uuid.New().String()
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
-	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.ClusterAgentControl)
+	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.AgentControl)
 	if err != nil {
 		return err
 	}
@@ -163,6 +162,7 @@ func parseFlags() {
 	idpProvider = os.Getenv("IDP_PROVIDER")
 	idpOrgId = os.Getenv("IDP_ORG_ID")
 	namespace = os.Getenv("NAMESPACE")
+	apiKey = os.Getenv("API_KEY")
 
 	// determine agent type
 	if vault.InCluster() {
@@ -181,8 +181,8 @@ func getAgentVersion() string {
 }
 
 func handleRegistration(logger *logger.Logger) error {
-	// if there are more than zero flags, register
-	if flag.NFlag() > 0 {
+	// if there are more than zero flags, register, or if the api key has been passed via an env var
+	if flag.NFlag() > 0 || apiKey != "" {
 		if activationToken == "" && apiKey == "" {
 			return fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
 		} else {
@@ -196,8 +196,221 @@ func handleRegistration(logger *logger.Logger) error {
 			}
 
 			// register the agent with bastion, if not already registered
-			register(logger)
+			err := register(logger)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 	return nil
+}
+
+// Register logic
+type ActivationTokenRequest struct {
+	TargetName string `json:"targetName"`
+}
+
+type ActivationTokenResponse struct {
+	ActivationToken string `json:"activationToken"`
+}
+
+type RegistrationRequest struct {
+	PublicKey       string `json:"publicKey"`
+	ActivationCode  string `json:"activationCode"`
+	Version         string `json:"version"`
+	EnvironmentId   string `json:"environmentId"`
+	EnvironmentName string `json:"environmentName"`
+	TargetName      string `json:"targetName"`
+	TargetHostName  string `json:"targetHostName"`
+	TargetType      string `json:"agentType"`
+	TargetId        string `json:"targetId"`
+}
+
+type RegistrationResponse struct {
+	TargetName  string `json:"targetName"`
+	OrgID       string `json:"externalOrganizationId"`
+	OrgProvider string `json:"externalOrganizationProvider"`
+}
+
+const (
+	activationTokenEndpoint = "/api/v2/agent/token"
+	registerEndpoint        = "/api/v2/agent/register"
+)
+
+func register(logger *logger.Logger) error {
+	logger.Info("Checking if Agent is already registered...")
+
+	config, err := vault.LoadVault()
+	if err != nil {
+		return fmt.Errorf("could not load vault: %s", err)
+	}
+
+	// Check if vault is empty, if so generate a private, public key pair
+	if config.IsEmpty() {
+		logger.Info("This is a new agent, starting registration...")
+
+		// Generate public, secret key pair and convert to strings
+		publicKey, privateKey, err := ed.GenerateKey(nil)
+		if err != nil {
+			return fmt.Errorf("error generating key pair: %v", err.Error())
+		}
+		pubkeyString := base64.StdEncoding.EncodeToString([]byte(publicKey))
+		seckeyString := base64.StdEncoding.EncodeToString([]byte(privateKey))
+		logger.Info("Generated cryptographic identity")
+
+		// If we don't have an activation token, use api key to get one
+		if activationToken == "" {
+			if token, err := getActivationToken(logger); err != nil {
+				return err
+			} else {
+				activationToken = token
+			}
+		}
+
+		// Register with Bastion
+		logger.Info("Registering with BastionZero...")
+
+		if resp, err := getRegistrationResponse(logger, pubkeyString); err != nil {
+			return fmt.Errorf("error registering agent: %s", err)
+		} else {
+
+			// only replace, if values were undefined by user
+			if idpProvider == "" {
+				idpProvider = resp.OrgProvider
+			}
+
+			if idpOrgId == "" {
+				idpOrgId = resp.OrgID
+			}
+
+			// store data in config
+			config.Data = vault.SecretData{
+				PublicKey:   pubkeyString,
+				PrivateKey:  seckeyString,
+				ServiceUrl:  serviceUrl,
+				TargetName:  resp.TargetName,
+				Namespace:   namespace,
+				IdpProvider: idpProvider,
+				IdpOrgId:    idpOrgId,
+				TargetId:    activationToken,
+			}
+			logger.Info("Agent successfully Registered.  BastionZero says hi.")
+
+			// If the registration went ok, save the config
+			if err := config.Save(); err != nil {
+				return fmt.Errorf("error saving vault: %s", err)
+			}
+		}
+		logger.Info("Successfully completed registration.  Starting Agent normally...")
+	} else {
+		// If the vault isn't empty, don't do anything
+		logger.Info("This Agent is already registered.  Starting Agent normally...")
+	}
+	return nil
+}
+
+func getActivationToken(logger *logger.Logger) (string, error) {
+
+	tokenEndpoint, err := utils.JoinUrls(serviceUrl, activationTokenEndpoint)
+	if err != nil {
+		return "", err
+	}
+
+	// Always make sure we've added a scheme
+	if !strings.Contains(tokenEndpoint, "https://") {
+		tokenEndpoint, err = utils.JoinUrls("https://", tokenEndpoint)
+		if err != nil {
+			return "", fmt.Errorf("error adding scheme to url: {serviceUrl: %s, tokenEndpoint: %s", serviceUrl, tokenEndpoint)
+		}
+	}
+
+	req := ActivationTokenRequest{
+		TargetName: targetName,
+	}
+
+	// Marshall the request
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("error marshalling activation token request: %+v", req)
+	}
+
+	headers := map[string]string{
+		"X-API-KEY": apiKey,
+	}
+
+	if resp, err := bzhttp.Post(logger, tokenEndpoint, "application/json", reqBytes, headers, map[string]string{}); err != nil {
+		return "", fmt.Errorf("failed to get activation token: %s, Endpoint: %s, Response: %+v", err, tokenEndpoint, resp)
+	} else {
+
+		// read our activation token request body
+		respBytes, _ := ioutil.ReadAll(resp.Body)
+
+		var tokenResponse ActivationTokenResponse
+		if err := json.Unmarshal(respBytes, &tokenResponse); err != nil {
+			return "", fmt.Errorf("malformed activation token response: %s", err)
+		}
+
+		if tokenResponse.ActivationToken == "" {
+			return "", fmt.Errorf("activation request returned empty response")
+		} else {
+			return tokenResponse.ActivationToken, nil
+		}
+	}
+}
+
+func getRegistrationResponse(logger *logger.Logger, publicKey string) (RegistrationResponse, error) {
+
+	var regResponse RegistrationResponse
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		return regResponse, fmt.Errorf("could not resolve hostname")
+	}
+
+	// Create our request
+	req := RegistrationRequest{
+		PublicKey:       publicKey,
+		ActivationCode:  activationToken,
+		Version:         getAgentVersion(),
+		EnvironmentId:   environmentId,
+		EnvironmentName: environmentName,
+		TargetName:      targetName,
+		TargetHostName:  hostname,
+		TargetType:      agentType,
+		TargetId:        activationToken, // The activation token is the new targetId
+	}
+
+	// Build the endpoint we want to hit
+	registrationEndpoint, err := utils.JoinUrls(serviceUrl, registerEndpoint)
+	if err != nil {
+		return regResponse, fmt.Errorf("error building registration url: {serviceUrl: %s, registerEndpoint: %s", serviceUrl, registerEndpoint)
+	}
+
+	// Always make sure we've added a scheme
+	if !strings.Contains(registrationEndpoint, "https://") {
+		registrationEndpoint, err = utils.JoinUrls("https://", registrationEndpoint)
+		if err != nil {
+			return regResponse, fmt.Errorf("error adding scheme to url: {serviceUrl: %s, registerEndpoint: %s", serviceUrl, registerEndpoint)
+		}
+	}
+
+	// Marshall the request
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return regResponse, fmt.Errorf("error marshalling register agent message for agent: %+v", req)
+	}
+
+	// Perform the request
+	if resp, err := bzhttp.Post(logger, registrationEndpoint, "application/json", reqBytes, map[string]string{}, map[string]string{}); err != nil {
+		return regResponse, fmt.Errorf("error on register agent: %s. Response: %+v", err, resp)
+	} else {
+		// read our activation token request body
+		respBytes, _ := ioutil.ReadAll(resp.Body)
+
+		if err := json.Unmarshal(respBytes, &regResponse); err != nil {
+			return regResponse, fmt.Errorf("malformed registration response: %s", err)
+		}
+
+		return regResponse, nil
+	}
 }

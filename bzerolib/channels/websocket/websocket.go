@@ -35,8 +35,8 @@ const (
 	Web     = 4
 
 	// Enum target types for agent side connections
-	AgentWebsocket      = -1
-	ClusterAgentControl = -2
+	AgentWebsocket = -1
+	AgentControl   = -2
 
 	// Hub endpoints
 	daemonConnectionNodeHubEndpoint = "hub/daemon"
@@ -46,15 +46,15 @@ const (
 )
 
 // Connection Type enum
-type ConnectionType int
+type ConnectionType string
 
 const (
-	SHELL  ConnectionType = 0
-	TUNNEL ConnectionType = 1
-	FUD    ConnectionType = 2
-	KUBE   ConnectionType = 3
-	DB     ConnectionType = 4
-	WEB    ConnectionType = 5
+	SHELL  ConnectionType = "SHELL"
+	TUNNEL ConnectionType = "TUNNEL"
+	FUD    ConnectionType = "FUD"
+	KUBE   ConnectionType = "CLUSTER"
+	DB     ConnectionType = "DB"
+	WEB    ConnectionType = "WEB"
 )
 
 type IWebsocket interface {
@@ -319,7 +319,7 @@ func (w *Websocket) Connect() {
 		agentController := agentcontroller.New(w.logger, w.serviceUrl, map[string]string{}, map[string]string{}, w.params["agent_type"])
 
 		// If we have a private key, we must solve the challenge
-		if solvedChallenge, err := agentController.GetChallenge(w.params["org_id"], w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["version"]); err != nil {
+		if solvedChallenge, err := agentController.GetChallenge(w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["version"]); err != nil {
 			w.logger.Error(fmt.Errorf("error getting challenge: %s", err))
 			return
 		} else {
@@ -460,7 +460,7 @@ func (w *Websocket) Connect() {
 		w.requestParams["daemon_websocket_id"] = w.params["daemon_websocket_id"]
 		w.requestParams["token"] = w.params["token"]
 		w.requestParams["connectionType"] = w.params["connectionType"]
-	case ClusterAgentControl:
+	case AgentControl:
 		// Default base url is just the service url and the hub endpoint
 		// This is because we hit bastion to initiate our control hub
 		// Now we can build our connectionnode url

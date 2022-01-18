@@ -14,7 +14,7 @@ type OpenWebsocketMessage struct {
 	ConnectionNodeId     string `json:"connectionNodeId"`
 	ConnectionServiceUrl string `json:"connectionServiceUrl"`
 	Token                string `json:"token"`
-	Type                 int    `json:"type"`
+	Type                 string `json:"type"`
 }
 
 type CloseWebsocketMessage struct {

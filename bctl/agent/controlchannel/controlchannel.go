@@ -142,7 +142,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	params["daemon_websocket_id"] = message.DaemonWebsocketId
 	params["connection_node_id"] = message.ConnectionNodeId
 	params["token"] = message.Token
-	params["connectionType"] = fmt.Sprint(message.Type)
+	params["connectionType"] = message.Type
 	params["connection_service_url"] = message.ConnectionServiceUrl
 
 	if ws, err := websocket.New(subLogger, message.DaemonWebsocketId, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {

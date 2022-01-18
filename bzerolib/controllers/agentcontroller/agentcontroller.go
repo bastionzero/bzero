@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -19,7 +18,7 @@ type AgentController struct {
 	connectionNodeBaseUrl string
 	headers               map[string]string
 	params                map[string]string
-	agentType             int
+	agentType             string
 }
 
 const (
@@ -39,24 +38,17 @@ func New(logger *logger.Logger,
 		panic(err)
 	}
 
-	agentTypeInt, errParse := strconv.Atoi(agentType)
-	if errParse != nil {
-		logger.Error(fmt.Errorf("error on parsing agentType to enum int: %s", err))
-		panic(errParse)
-	}
-
 	return &AgentController{
 		logger:     logger,
 		bastionUrl: bastionUrlFormatted,
 		headers:    headers,
 		params:     params,
-		agentType:  agentTypeInt,
+		agentType:  agentType,
 	}
 }
-func (c *AgentController) GetChallenge(orgId string, targetId string, targetName string, privateKey string, version string) (string, error) {
+func (c *AgentController) GetChallenge(targetId string, targetName string, privateKey string, version string) (string, error) {
 	// Get challenge
 	challengeRequest := GetChallengeMessage{
-		OrgId:      orgId,
 		TargetId:   targetId,
 		TargetName: targetName,
 		AgentType:  c.agentType,
