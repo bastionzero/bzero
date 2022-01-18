@@ -1,12 +1,9 @@
 package main
 
 import (
-	"encoding/base64"
 	"flag"
 	"fmt"
 	"os"
-
-	ed "crypto/ed25519"
 
 	"github.com/google/uuid"
 
@@ -15,15 +12,19 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/controllers/agentcontroller"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
+const (
+	prodServiceUrl = "https://cloud.bastionzero.com/"
+)
+
 var (
-	serviceUrl, orgId, targetName    string
-	environmentId, activationToken   string
+	serviceUrl, orgId                string
+	environmentId, environmentName   string
+	activationToken, apiKey          string
 	idpProvider, namespace, idpOrgId string
-	targetId, agentType              string
+	targetName, targetId, agentType  string
 )
 
 // Keep these as strings so they can be send as query params
@@ -31,6 +32,13 @@ var (
 const (
 	Cluster string = "0"
 	Bzero   string = "1"
+)
+
+type TargetType string
+
+const (
+	BZero TargetType = "bzero"
+	Kube  TargetType = "kube"
 )
 
 func main() {
@@ -45,15 +53,12 @@ func main() {
 	logger.AddAgentVersion(agentVersion)
 	logger.Infof("BastionZero Agent version %s starting up...", agentVersion)
 
-	if err := parseFlags(); err != nil {
-		logger.Error(err)
-		os.Exit(1)
-	}
+	parseFlags()
 	logger.Infof("Information parsed for %s", targetName)
 
 	// Check if the agent is registered or not.  If not, generate signing keys,
 	// check kube permissions and setup, and register with the Bastion.
-	if err := register(logger); err != nil {
+	if err := handleRegistration(logger); err != nil {
 		logger.Error(err)
 		return
 	}
@@ -127,19 +132,23 @@ func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 		return "ResponseClusterToBastionV1", nil
 	case am.Error:
 		return "ResponseClusterToBastionV1", nil
+	default:
+		return "", fmt.Errorf("unable to determine SignalR endpoint for message type: %s", agentMessage.MessageType)
 	}
-
-	return "", fmt.Errorf("unable to determine SignalR endpoint for message type: %s", agentMessage.MessageType)
 }
 
-func parseFlags() error {
-	// Our expected flags we need to start
-	flag.StringVar(&serviceUrl, "serviceUrl", "", "Service URL to use")
-	flag.StringVar(&orgId, "orgId", "", "OrgId to use")
+func parseFlags() {
+	// Our required registration flags
+	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
+	flag.StringVar(&apiKey, "apiKey", "", "API Key used to register the agent")
+
+	// All optional flags
+	flag.StringVar(&serviceUrl, "serviceUrl", prodServiceUrl, "Service URL to use")
+	flag.StringVar(&orgId, "orgId", "", "OrgID to use")
 	flag.StringVar(&targetName, "targetName", "", "Target name to use")
-	flag.StringVar(&targetId, "targetId", "", "Target Id to use")
-	flag.StringVar(&environmentId, "environmentId", "", "Optional environmentId to specify")
-	flag.StringVar(&activationToken, "activationToken", "", "Activation Token to use to register the cluster")
+	flag.StringVar(&targetId, "targetId", "", "Target ID to use")
+	flag.StringVar(&environmentId, "environmentId", "", "Policy environment ID to associate with agent")
+	flag.StringVar(&environmentName, "environmentName", "", "Policy environment Name to associate with agent")
 
 	// Parse any flag
 	flag.Parse()
@@ -155,36 +164,11 @@ func parseFlags() error {
 	idpOrgId = os.Getenv("IDP_ORG_ID")
 	namespace = os.Getenv("NAMESPACE")
 
+	// determine agent type
 	if vault.InCluster() {
 		agentType = Cluster
 	} else {
 		agentType = Bzero
-	}
-
-	// TODO: Try to pull from vault, incase this agent is being restarted, we should not always expect these env vars
-
-	// Ensure we have all needed vars
-	missing := []string{}
-	switch {
-	case serviceUrl == "":
-		missing = append(missing, "serviceUrl")
-		fallthrough
-	case orgId == "":
-		missing = append(missing, "orgId")
-		fallthrough
-	case targetName == "":
-		missing = append(missing, "targetName")
-		fallthrough
-	case targetId == "":
-		missing = append(missing, "targetId")
-		fallthrough
-	case activationToken == "":
-		missing = append(missing, "activationToken")
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("missing flags: %v", missing)
-	} else {
-		return nil
 	}
 }
 
@@ -196,68 +180,24 @@ func getAgentVersion() string {
 	}
 }
 
-func register(logger *logger.Logger) error {
-	logger.Info("Checking if Agent is already registered...")
-
-	config, err := vault.LoadVault()
-	if err != nil {
-		return fmt.Errorf("could not load vault: %s", err)
-	}
-
-	// Check if vault is empty, if so generate a private, public key pair
-	if config.IsEmpty() {
-		logger.Info("This is a new agent")
-
-		if vault.InCluster() {
-			// Only check RBAC permissions if we are inside a cluster
-			if err := rbac.CheckPermissions(logger, namespace); err != nil {
-				return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
-			} else {
-				logger.Info("Namespace and service account permissions verified.")
-			}
-		}
-
-		logger.Info("Creating cryptographic identity...")
-
-		if publicKey, privateKey, err := ed.GenerateKey(nil); err != nil {
-			return fmt.Errorf("error generating key pair: %v", err.Error())
+func handleRegistration(logger *logger.Logger) error {
+	// if there are more than zero flags, register
+	if flag.NFlag() > 0 {
+		if activationToken == "" && apiKey == "" {
+			return fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
 		} else {
-			pubkeyString := base64.StdEncoding.EncodeToString([]byte(publicKey))
-			privkeyString := base64.StdEncoding.EncodeToString([]byte(privateKey))
-			config.Data = vault.SecretData{
-				PublicKey:   pubkeyString,
-				PrivateKey:  privkeyString,
-				OrgId:       orgId,
-				ServiceUrl:  serviceUrl,
-				TargetName:  targetName,
-				Namespace:   namespace,
-				IdpProvider: idpProvider,
-				IdpOrgId:    idpOrgId,
+			if vault.InCluster() {
+				// Only check RBAC permissions if we are inside a cluster
+				if err := rbac.CheckPermissions(logger, namespace); err != nil {
+					return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
+				} else {
+					logger.Info("Namespace and service account permissions verified.")
+				}
 			}
 
-			// Register with Bastion
-			logger.Info("Cryptographic identity created.  Registering with BastionZero...")
-
-			agentController := agentcontroller.New(logger, serviceUrl, map[string]string{}, map[string]string{}, agentType)
-
-			if err := agentController.RegisterAgent(pubkeyString, activationToken, getAgentVersion(), orgId, environmentId, targetName, targetId, getAgentVersion()); err != nil {
-				return fmt.Errorf("error registering agent: %s", err)
-			}
-
-			logger.Info("Agent successfully Registered.  BastionZero says hi.")
-
-			// If the registration went ok, save the config
-			if err := config.Save(); err != nil {
-				return fmt.Errorf("error saving vault: %s", err)
-			}
-
-			logger.Info("Agent identity saved.")
-
-			logger.Info("Successfully completed registration.  Starting Agent normally...")
+			// register the agent with bastion, if not already registered
+			register(logger)
 		}
-	} else {
-		// If the vault isn't empty, don't do anything
-		logger.Info("This Agent is already registered.  Starting Agent normally...")
 	}
 	return nil
 }
