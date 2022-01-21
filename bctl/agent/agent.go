@@ -46,8 +46,8 @@ var (
 )
 
 const (
-	Cluster = "Cluster"
-	Bzero   = "Bzero"
+	Cluster = "cluster"
+	Bzero   = "bzero"
 )
 
 func main() {
