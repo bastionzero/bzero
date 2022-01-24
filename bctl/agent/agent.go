@@ -90,11 +90,10 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 
 	// Make and add our params
 	params := map[string]string{
-		"public_key":  config.Data.PublicKey,
-		"version":     agentVersion,
-		"target_id":   config.Data.TargetId,
-		"target_name": targetName,
-		"agent_type":  agentType,
+		"public_key": config.Data.PublicKey,
+		"version":    agentVersion,
+		"target_id":  config.Data.TargetId,
+		"agent_type": agentType,
 	}
 
 	// create a websocket
@@ -226,7 +225,6 @@ type RegistrationRequest struct {
 	EnvironmentName string `json:"environmentName"`
 	TargetName      string `json:"targetName"`
 	TargetHostName  string `json:"targetHostName"`
-	TargetType      string `json:"agentType"`
 	TargetId        string `json:"targetId"`
 	AwsRegion       string `json:"awsRegion"`
 }
@@ -402,7 +400,6 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 		EnvironmentName: environmentName,
 		TargetName:      targetName,
 		TargetHostName:  hostname,
-		TargetType:      agentType,
 		TargetId:        activationToken, // The activation token is the new targetId
 		AwsRegion:       region,
 	}
