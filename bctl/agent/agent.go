@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -30,8 +29,9 @@ const (
 	whereEndpoint  = "status/where"
 
 	// Register info
-	activationTokenEndpoint = "/api/v2/agent/token"
-	registerEndpoint        = "/api/v2/agent/register"
+	activationTokenEndpoint      = "/api/v2/agent/token"
+	registerEndpoint             = "/api/v2/agent/register"
+	getConnectionServiceEndpoint = "/api/v2/agent/connection-service"
 )
 
 var (
@@ -55,6 +55,10 @@ type ActivationTokenRequest struct {
 
 type ActivationTokenResponse struct {
 	ActivationToken string `json:"activationToken"`
+}
+
+type GetConnectionServiceResponse struct {
+	ConnectionServiceUrl string `json:"connectionServiceUrl"`
 }
 
 type RegistrationRequest struct {
@@ -369,16 +373,16 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 	}
 
 	// Get our region by pinging out connection-service
-	connectionServiceUrl := getConnectionServiceUrlFromServiceUrl(serviceUrl)
+	connectionServiceUrl, connectionServiceUrlErr := getConnectionServiceUrlFromServiceUrl(logger, serviceUrl)
+	if connectionServiceUrlErr != nil {
+		return regResponse, connectionServiceUrlErr
+	}
 	whereEndpoint, whereErr := utils.JoinUrls(connectionServiceUrl, whereEndpoint)
 	if whereErr != nil {
 		return regResponse, whereErr
 	}
-	whereEndpointWScheme, whereErrWScheme := utils.JoinUrls("https://", whereEndpoint)
-	if whereErrWScheme != nil {
-		return regResponse, whereErrWScheme
-	}
-	regionResponse, errRegion := bzhttp.Get(logger, whereEndpointWScheme, map[string]string{}, map[string]string{})
+
+	regionResponse, errRegion := bzhttp.Get(logger, whereEndpoint, map[string]string{}, map[string]string{})
 	if errRegion != nil {
 		return regResponse, errRegion
 	}
@@ -437,10 +441,42 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 	}
 }
 
-func getConnectionServiceUrlFromServiceUrl(serviceUrl string) string {
-	toReplaceRegex := regexp.MustCompile(`([a-z]*).bastionzero.com`)
-	groupMaches := toReplaceRegex.FindStringSubmatch(serviceUrl)
-	prefix := groupMaches[1] // Extract cloud from cloud.bastionzero.com
-	connectUrl := fmt.Sprintf("%s-connection-service", prefix)
-	return strings.Replace(serviceUrl, prefix, connectUrl, -1)
+func getConnectionServiceUrlFromServiceUrl(logger *logger.Logger, serviceUrl string) (string, error) {
+	// Make our request to get the connection service url from our service url
+	if !strings.Contains("https://", serviceUrl) {
+		serviceUrlWithScheme, err := utils.JoinUrls("https://", serviceUrl)
+		if err != nil {
+			logger.Error(fmt.Errorf("error building service url with scheme for connection service url get"))
+			return "", err
+		} else {
+			serviceUrl = serviceUrlWithScheme
+		}
+	}
+
+	// Make our request
+	endpointToHit, err := utils.JoinUrls(serviceUrl, getConnectionServiceEndpoint)
+	if err != nil {
+		logger.Error(fmt.Errorf("error building endpoint for get connection service request"))
+		return "", err
+	}
+
+	resp, httpErr := bzhttp.Get(logger, endpointToHit, map[string]string{}, map[string]string{})
+	if httpErr != nil {
+		logger.Error(fmt.Errorf("error making get request to get connection service url"))
+		return "", httpErr
+	}
+
+	// Unmarshal the response
+	respBytes, readAllErr := ioutil.ReadAll(resp.Body)
+	if readAllErr != nil {
+		logger.Error(fmt.Errorf("error reading body on get connection service url requets"))
+		return "", readAllErr
+	}
+
+	var getConnectionServiceResponse GetConnectionServiceResponse
+	if err := json.Unmarshal(respBytes, &getConnectionServiceResponse); err != nil {
+		return "", fmt.Errorf("malformed getConnectionService response: %s", err)
+	}
+
+	return getConnectionServiceResponse.ConnectionServiceUrl, nil
 }
