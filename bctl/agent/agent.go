@@ -31,7 +31,7 @@ const (
 	// Register info
 	activationTokenEndpoint      = "/api/v2/agent/token"
 	registerEndpoint             = "/api/v2/agent/register"
-	getConnectionServiceEndpoint = "/api/v2/agent/connection-service"
+	getConnectionServiceEndpoint = "/api/v2/connection-service/url"
 )
 
 var (
