@@ -39,7 +39,8 @@ type WebServer struct {
 	targetHost string
 
 	// fields for new datachannels
-	daemonport          string
+	localPort           string
+	localHost           string
 	params              map[string]string
 	headers             map[string]string
 	serviceUrl          string
@@ -48,7 +49,8 @@ type WebServer struct {
 }
 
 func StartWebServer(logger *logger.Logger,
-	daemonPort string,
+	localPort string,
+	localHost string,
 	targetPort int,
 	targetHost string,
 	refreshTokenCommand string,
@@ -66,7 +68,8 @@ func StartWebServer(logger *logger.Logger,
 		targetSelectHandler: targetSelectHandler,
 		configPath:          configPath,
 		refreshTokenCommand: refreshTokenCommand,
-		daemonport:          daemonPort,
+		localPort:           localPort,
+		localHost:           localHost,
 		targetHost:          targetHost,
 		targetPort:          targetPort,
 	}
@@ -85,8 +88,8 @@ func StartWebServer(logger *logger.Logger,
 	}
 
 	// Now create our local listener for TCP connections
-	logger.Infof("Resolving TCP address for port: %s", daemonPort)
-	localTcpAddress, err := net.ResolveTCPAddr("tcp", ":"+daemonPort)
+	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
+	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
 	if err != nil {
 		logger.Errorf("Failed to resolve TCP address %s", err)
 		os.Exit(1)
@@ -101,9 +104,6 @@ func StartWebServer(logger *logger.Logger,
 
 	// Always ensure we close the local tcp connection when we exit
 	defer localTcpListener.Close()
-
-	// Wait until the datachannel is ready, block here?
-	// TODO: This
 
 	// Block and keep listening for new tcp events
 	for {

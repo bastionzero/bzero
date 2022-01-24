@@ -28,6 +28,10 @@ import (
 const (
 	prodServiceUrl = "https://cloud.bastionzero.com/"
 	whereEndpoint  = "status/where"
+
+	// Register info
+	activationTokenEndpoint = "/api/v2/agent/token"
+	registerEndpoint        = "/api/v2/agent/register"
 )
 
 var (
@@ -44,6 +48,32 @@ const (
 	Cluster string = "cluster"
 	Bzero   string = "bzero"
 )
+
+type ActivationTokenRequest struct {
+	TargetName string `json:"targetName"`
+}
+
+type ActivationTokenResponse struct {
+	ActivationToken string `json:"activationToken"`
+}
+
+type RegistrationRequest struct {
+	PublicKey       string `json:"publicKey"`
+	ActivationCode  string `json:"activationCode"`
+	Version         string `json:"version"`
+	EnvironmentId   string `json:"environmentId"`
+	EnvironmentName string `json:"environmentName"`
+	TargetName      string `json:"targetName"`
+	TargetHostName  string `json:"targetHostName"`
+	TargetId        string `json:"targetId"`
+	AwsRegion       string `json:"awsRegion"`
+}
+
+type RegistrationResponse struct {
+	TargetName  string `json:"targetName"`
+	OrgID       string `json:"externalOrganizationId"`
+	OrgProvider string `json:"externalOrganizationProvider"`
+}
 
 func main() {
 	// grab agent version
@@ -207,38 +237,6 @@ func handleRegistration(logger *logger.Logger) error {
 	}
 	return nil
 }
-
-// Register logic
-type ActivationTokenRequest struct {
-	TargetName string `json:"targetName"`
-}
-
-type ActivationTokenResponse struct {
-	ActivationToken string `json:"activationToken"`
-}
-
-type RegistrationRequest struct {
-	PublicKey       string `json:"publicKey"`
-	ActivationCode  string `json:"activationCode"`
-	Version         string `json:"version"`
-	EnvironmentId   string `json:"environmentId"`
-	EnvironmentName string `json:"environmentName"`
-	TargetName      string `json:"targetName"`
-	TargetHostName  string `json:"targetHostName"`
-	TargetId        string `json:"targetId"`
-	AwsRegion       string `json:"awsRegion"`
-}
-
-type RegistrationResponse struct {
-	TargetName  string `json:"targetName"`
-	OrgID       string `json:"externalOrganizationId"`
-	OrgProvider string `json:"externalOrganizationProvider"`
-}
-
-const (
-	activationTokenEndpoint = "/api/v2/agent/token"
-	registerEndpoint        = "/api/v2/agent/register"
-)
 
 func register(logger *logger.Logger) error {
 	logger.Info("Checking if Agent is already registered...")

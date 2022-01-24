@@ -61,7 +61,8 @@ type KubeServer struct {
 }
 
 func StartKubeServer(logger *logger.Logger,
-	daemonPort string,
+	localPort string,
+	localHost string,
 	certPath string,
 	keyPath string,
 	refreshTokenCommand string,
@@ -116,7 +117,7 @@ func StartKubeServer(logger *logger.Logger,
 			listener.statusCallback(w, r)
 		})
 
-		if err := http.ListenAndServeTLS(":"+daemonPort, certPath, keyPath, nil); err != nil {
+		if err := http.ListenAndServeTLS(localHost+":"+localPort, certPath, keyPath, nil); err != nil {
 			logger.Error(err)
 		}
 	}()

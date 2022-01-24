@@ -16,7 +16,7 @@ import (
 // Declaring flags as package-accessible variables
 var (
 	sessionId, authHeader, targetId, serviceUrl, plugin string
-	logPath, refreshTokenCommand, daemonPort            string
+	logPath, refreshTokenCommand, localPort, localHost  string
 
 	// Kube server specifc values
 	targetGroupsRaw, targetUser, certPath, keyPath string
@@ -91,7 +91,8 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 	params["target_id"] = targetId
 
 	return webserver.StartWebServer(subLogger,
-		daemonPort,
+		localPort,
+		localHost,
 		remotePort,
 		remoteHost,
 		refreshTokenCommand,
@@ -108,7 +109,8 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 	params["target_id"] = targetId
 
 	return dbserver.StartDbServer(subLogger,
-		daemonPort,
+		localPort,
+		localHost,
 		remotePort,
 		remoteHost,
 		refreshTokenCommand,
@@ -128,7 +130,8 @@ func startKubeServer(logger *logger.Logger, headers map[string]string, params ma
 	params["target_groups"] = targetGroupsRaw
 
 	return kubeserver.StartKubeServer(subLogger,
-		daemonPort,
+		localPort,
+		localHost,
 		certPath,
 		keyPath,
 		refreshTokenCommand,
@@ -163,7 +166,8 @@ func parseFlags() error {
 	flag.StringVar(&serviceUrl, "serviceURL", "", "Service URL to use")
 	flag.StringVar(&targetId, "targetId", "", "Kube Cluster Id to Connect to")
 	flag.StringVar(&plugin, "plugin", "", "Plugin to activate (kube, db, web)")
-	flag.StringVar(&daemonPort, "daemonPort", "", "Daemon Port To Use")
+	flag.StringVar(&localPort, "localPort", "", "Daemon Port To Use")
+	flag.StringVar(&localHost, "localHost", "", "Daemon Post To Use")
 
 	// Kube plugin variables
 	flag.StringVar(&targetGroupsRaw, "targetGroups", "", "Kube Group to Assume")
@@ -182,7 +186,7 @@ func parseFlags() error {
 	// Check we have all required flags
 	flag.Parse()
 	if sessionId == "" || authHeader == "" || serviceUrl == "" ||
-		logPath == "" || configPath == "" || daemonPort == "" {
+		logPath == "" || configPath == "" || localPort == "" {
 		return fmt.Errorf("missing flags")
 	}
 

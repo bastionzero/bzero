@@ -38,7 +38,8 @@ type DbServer struct {
 	remoteHost string
 
 	// fields for new datachannels
-	daemonport          string
+	localPort           string
+	localHost           string
 	params              map[string]string
 	headers             map[string]string
 	serviceUrl          string
@@ -47,7 +48,8 @@ type DbServer struct {
 }
 
 func StartDbServer(logger *logger.Logger,
-	daemonPort string,
+	localPort string,
+	localHost string,
 	remotePort int,
 	remoteHost string,
 	refreshTokenCommand string,
@@ -65,7 +67,8 @@ func StartDbServer(logger *logger.Logger,
 		targetSelectHandler: targetSelectHandler,
 		configPath:          configPath,
 		refreshTokenCommand: refreshTokenCommand,
-		daemonport:          daemonPort,
+		localPort:           localPort,
+		localHost:           localHost,
 		remoteHost:          remoteHost,
 		remotePort:          remotePort,
 	}
@@ -84,8 +87,8 @@ func StartDbServer(logger *logger.Logger,
 	}
 
 	// Now create our local listener for TCP connections
-	logger.Infof("Resolving TCP address for port: %s", daemonPort)
-	localTcpAddress, err := net.ResolveTCPAddr("tcp", ":"+daemonPort)
+	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
+	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
 	if err != nil {
 		logger.Errorf("Failed to resolve TCP address %s", err)
 		os.Exit(1)
