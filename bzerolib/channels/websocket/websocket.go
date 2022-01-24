@@ -35,26 +35,26 @@ const (
 	Web     = 4
 
 	// Enum target types for agent side connections
-	AgentWebsocket      = -1
-	ClusterAgentControl = -2
+	AgentWebsocket = -1
+	AgentControl   = -2
 
 	// Hub endpoints
-	kubeDaemonConnectionNodeHubEndpoint = "/hub/daemon"
-	kubeAgentConnectionNodeHubEndpoint  = "/hub/agent"
+	daemonConnectionNodeHubEndpoint = "hub/daemon"
+	agentConnectionNodeHubEndpoint  = "hub/agent"
 
 	controlHubEndpoint = "/api/v1/hub/control"
 )
 
 // Connection Type enum
-type ConnectionType int
+type ConnectionType string
 
 const (
-	SHELL  ConnectionType = 0
-	TUNNEL ConnectionType = 1
-	FUD    ConnectionType = 2
-	KUBE   ConnectionType = 3
-	DB     ConnectionType = 4
-	WEB    ConnectionType = 5
+	SHELL  ConnectionType = "SHELL"
+	TUNNEL ConnectionType = "TUNNEL"
+	FUD    ConnectionType = "FUD"
+	KUBE   ConnectionType = "CLUSTER"
+	DB     ConnectionType = "DB"
+	WEB    ConnectionType = "WEB"
 )
 
 type IWebsocket interface {
@@ -319,7 +319,7 @@ func (w *Websocket) Connect() {
 		agentController := agentcontroller.New(w.logger, w.serviceUrl, map[string]string{}, map[string]string{}, w.params["agent_type"])
 
 		// If we have a private key, we must solve the challenge
-		if solvedChallenge, err := agentController.GetChallenge(w.params["org_id"], w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["version"]); err != nil {
+		if solvedChallenge, err := agentController.GetChallenge(w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["version"]); err != nil {
 			w.logger.Error(fmt.Errorf("error getting challenge: %s", err))
 			return
 		} else {
@@ -369,7 +369,11 @@ func (w *Websocket) Connect() {
 		createConnectionResponse := cnController.CreateKubeConnection(w.params["target_user"], targetGroups, w.params["target_id"])
 
 		// Now we can build our connectionnode url
-		w.baseUrl = w.buildConnectionNodeUrl(createConnectionResponse.ConnectionNodeId) + kubeDaemonConnectionNodeHubEndpoint
+		newBaseUrl, baseUrlJoinErr := utils.JoinUrls(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
+		if baseUrlJoinErr != nil {
+			panic(baseUrlJoinErr)
+		}
+		w.baseUrl = newBaseUrl
 
 		// Define our request params
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
@@ -397,7 +401,11 @@ func (w *Websocket) Connect() {
 		createConnectionResponse := cnController.CreateDbConnection(w.params["target_id"])
 
 		// Now we can build our connectionnode url
-		w.baseUrl = w.buildConnectionNodeUrl(createConnectionResponse.ConnectionNodeId) + kubeDaemonConnectionNodeHubEndpoint
+		newBaseUrl, baseUrlJoinErr := utils.JoinUrls(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
+		if baseUrlJoinErr != nil {
+			panic(baseUrlJoinErr)
+		}
+		w.baseUrl = newBaseUrl
 
 		// Define our request params
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
@@ -426,7 +434,11 @@ func (w *Websocket) Connect() {
 		createConnectionResponse := cnController.CreateWebConnection(w.params["target_id"])
 
 		// Now we can build our connectionnode url
-		w.baseUrl = w.buildConnectionNodeUrl(createConnectionResponse.ConnectionNodeId) + kubeDaemonConnectionNodeHubEndpoint
+		newBaseUrl, baseUrlJoinErr := utils.JoinUrls(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
+		if baseUrlJoinErr != nil {
+			panic(baseUrlJoinErr)
+		}
+		w.baseUrl = newBaseUrl
 
 		// Define our request params
 		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
@@ -437,17 +449,26 @@ func (w *Websocket) Connect() {
 		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
 
 	case AgentWebsocket:
-		// Build our connectionnode Url
-		w.baseUrl = w.buildConnectionNodeUrl(w.params["connection_node_id"]) + kubeAgentConnectionNodeHubEndpoint
+		// Build our connection node Url
+		newBaseUrl, baseUrlJoinErr := utils.JoinUrls(w.params["connection_service_url"], agentConnectionNodeHubEndpoint)
+		if baseUrlJoinErr != nil {
+			panic(baseUrlJoinErr)
+		}
+		w.baseUrl = newBaseUrl
 
 		// Define our reqest params
 		w.requestParams["daemon_websocket_id"] = w.params["daemon_websocket_id"]
 		w.requestParams["token"] = w.params["token"]
 		w.requestParams["connectionType"] = w.params["connectionType"]
-	case ClusterAgentControl:
+	case AgentControl:
 		// Default base url is just the service url and the hub endpoint
 		// This is because we hit bastion to initiate our control hub
-		w.baseUrl = w.serviceUrl + controlHubEndpoint
+		// Now we can build our connectionnode url
+		newBaseUrl, baseUrlJoinErr := utils.JoinUrls(w.serviceUrl, controlHubEndpoint)
+		if baseUrlJoinErr != nil {
+			panic(baseUrlJoinErr)
+		}
+		w.baseUrl = newBaseUrl
 
 		// Default request params are just the params based
 		w.requestParams = w.params
@@ -457,7 +478,19 @@ func (w *Websocket) Connect() {
 	}
 
 	// Make our POST request
-	negotiateEndpoint := "https://" + w.baseUrl + "/negotiate"
+	if !strings.Contains(w.baseUrl, "https://") {
+		// Always make sure we have https:// in our baseUrl
+		newBaseUrl, errBaseUrl := utils.JoinUrls("https://", w.baseUrl)
+		if errBaseUrl != nil {
+			panic(errBaseUrl)
+		}
+		w.baseUrl = newBaseUrl
+	}
+	negotiateEndpoint, errNegotiateEndpoint := utils.JoinUrls(w.baseUrl, "/negotiate")
+	if errNegotiateEndpoint != nil {
+		panic(errNegotiateEndpoint)
+	}
+
 	w.logger.Infof("Starting negotiation with endpoint %s", negotiateEndpoint)
 
 	if response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.requestParams); err != nil {
@@ -484,13 +517,13 @@ func (w *Websocket) Connect() {
 	}
 
 	// Build our url u , add our params as well
-	// websocketUrl := url.URL{Scheme: "wss", Host: w.serviceUrl, Path: w.hubEndpoint}
-	websocketRawUrl := "wss://" + w.baseUrl
-	websocketUrl, urlParseError := url.Parse(websocketRawUrl)
+	websocketUrl, urlParseError := url.Parse(w.baseUrl)
 	if urlParseError != nil {
-		w.logger.Error(fmt.Errorf("error parsing url %s", websocketRawUrl))
+		w.logger.Error(fmt.Errorf("error parsing url %s", w.baseUrl))
 		return
 	}
+	// Update the scheme to be wss://
+	websocketUrl.Scheme = "wss"
 	w.logger.Infof("Connecting to %s", websocketUrl.String())
 
 	q := websocketUrl.Query()

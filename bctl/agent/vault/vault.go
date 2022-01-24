@@ -42,6 +42,7 @@ type SecretData struct {
 	Namespace   string
 	IdpProvider string
 	IdpOrgId    string
+	TargetId    string
 }
 
 func LoadVault() (*Vault, error) {

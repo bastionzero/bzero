@@ -223,8 +223,9 @@ func (c *ConnectionNodeController) createCnConnection(connectionId string, typeO
 
 	// Return the auth details response
 	return ConnectionDetailsResponse{
-		ConnectionNodeId: getAuthDetailsResponse.ConnectionNodeId,
-		AuthToken:        getAuthDetailsResponse.AuthToken,
-		ConnectionId:     connectionId,
+		ConnectionNodeId:     getAuthDetailsResponse.ConnectionNodeId,
+		AuthToken:            getAuthDetailsResponse.AuthToken,
+		ConnectionServiceUrl: getAuthDetailsResponse.ConnectionServiceUrl,
+		ConnectionId:         connectionId,
 	}
 }
