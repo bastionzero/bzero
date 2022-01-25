@@ -78,6 +78,10 @@ type RegistrationResponse struct {
 	OrgProvider string `json:"externalOrganizationProvider"`
 }
 
+type GetConnectionServiceResponse struct {
+	ConnectionServiceUrl string `json:"connectionServiceUrl"`
+}
+
 func main() {
 	parseFlags()
 
