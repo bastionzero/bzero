@@ -1,0 +1,33 @@
+[Unit]
+Description=$BZERO_PKG_NAME
+
+# Wait until network is online to start
+After=network-online.target
+
+# Only try to restart thrice (v230 and above).
+StartLimitBurst=3
+StartLimitIntervalSec=400
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/bin
+ExecStart=/usr/bin/$BZERO_PKG_NAME
+KillMode=process
+
+StandardOutput=file:/var/log/bzero/$BZERO_PKG_NAME.log
+StandardError=file:/var/log/bzero/$BZERO_PKG_NAME.log
+
+# Restart the agent regardless of whether it crashes (and returns a non-zero result code) or if
+# is terminated normally (e.g. via 'kill -HUP').  Delay restart so that the agent is less likely
+# to restart during a reboot initiated by a script. If the agent exits with status 194 (reboot
+# requested) or 234 (Bzero reg error), don't restart at all.
+Restart=always
+RestartPreventExitStatus=194 234
+RestartSec=90
+
+# Only try to restart thrice (v229 and below).
+StartLimitInterval=400
+StartLimitBurst=3

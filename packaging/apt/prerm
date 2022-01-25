@@ -1,0 +1,10 @@
+echo "Stopping agent"
+if [ $(cat /proc/1/comm) = init ]
+then
+    stop $BZERO_PKG_NAME || true
+elif [ $(cat /proc/1/comm) = systemd ]
+then
+    systemctl stop $BZERO_PKG_NAME
+    systemctl disable $BZERO_PKG_NAME
+    systemctl daemon-reload
+fi
