@@ -51,7 +51,7 @@ func Start(logger *logger.Logger,
 	websocket *websocket.Websocket, // control channel websocket
 	serviceUrl string,
 	targetType string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) (*ControlChannel, error) {
 
 	control := &ControlChannel{
 		websocket: websocket,
@@ -103,7 +103,7 @@ func Start(logger *logger.Logger,
 		}
 	})
 
-	return nil
+	return control, nil
 }
 
 func (c *ControlChannel) Close(reason error) {

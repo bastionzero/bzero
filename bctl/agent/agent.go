@@ -1,7 +1,6 @@
 package main
 
 import (
-	ed "crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -11,6 +10,10 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	ed "crypto/ed25519"
+	"os/signal"
+	"syscall"
 
 	"github.com/google/uuid"
 
@@ -39,26 +42,21 @@ var (
 	environmentId, environmentName   string
 	activationToken, apiKey          string
 	idpProvider, namespace, idpOrgId string
-	targetName, targetId, agentType  string
+	targetId, targetName, agentType  string
 )
 
-// Keep these as strings so they can be send as query params
-// They are then matched to the correct enum on Bastion by parsing the int
 const (
-	Cluster string = "cluster"
-	Bzero   string = "bzero"
+	Cluster = "cluster"
+	Bzero   = "bzero"
 )
 
+// Register logic
 type ActivationTokenRequest struct {
 	TargetName string `json:"targetName"`
 }
 
 type ActivationTokenResponse struct {
 	ActivationToken string `json:"activationToken"`
-}
-
-type GetConnectionServiceResponse struct {
-	ConnectionServiceUrl string `json:"connectionServiceUrl"`
 }
 
 type RegistrationRequest struct {
@@ -69,6 +67,7 @@ type RegistrationRequest struct {
 	EnvironmentName string `json:"environmentName"`
 	TargetName      string `json:"targetName"`
 	TargetHostName  string `json:"targetHostName"`
+	TargetType      string `json:"agentType"`
 	TargetId        string `json:"targetId"`
 	AwsRegion       string `json:"awsRegion"`
 }
@@ -80,43 +79,76 @@ type RegistrationResponse struct {
 }
 
 func main() {
-	// grab agent version
-	agentVersion := getAgentVersion()
-
-	// setup our loggers
-	logger, err := logger.New(logger.Debug, "")
-	if err != nil {
-		return
-	}
-	logger.AddAgentVersion(agentVersion)
-	logger.Infof("BastionZero Agent version %s starting up...", agentVersion)
-
 	parseFlags()
-	logger.Infof("Information parsed for %s", targetName)
 
-	// Check if the agent is registered or not.  If not, generate signing keys,
-	// check kube permissions and setup, and register with the Bastion.
-	if err := handleRegistration(logger); err != nil {
+	if logger, err := setupLogger(); err != nil {
 		logger.Error(err)
-		return
+	} else {
+		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
+
+		// Check if the agent is registered or not.  If not, generate signing keys,
+		// check kube permissions and setup, and register with the Bastion.
+		if err := handleRegistration(logger); err != nil {
+			logger.Error(err)
+		} else {
+
+			// Connect the control channel to BastionZero
+			logger.Info("Creating connection to BastionZero...")
+			if control, err := startControlChannel(logger, getAgentVersion()); err != nil {
+				logger.Error(err)
+			} else {
+				logger.Info("Connection created successfully. Listening for incoming commands...")
+
+				if agentType == Bzero {
+					signal := blockUntilSignaled()
+					control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.Signal))
+				}
+			}
+		}
 	}
 
-	// Connect the control channel to BastionZero
-	logger.Info("Creating connection to BastionZero...")
-	startControlChannel(logger, agentVersion)
-
-	logger.Info("Connection created successfully. Listening for incoming commands...")
-
-	// Sleep forever because otherwise kube will endlessly try restarting
-	// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
-	select {}
+	switch agentType {
+	case Cluster:
+		// Sleep forever because otherwise kube will endlessly try restarting
+		// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
+		select {}
+	case Bzero:
+		os.Exit(1)
+	}
 }
 
-func startControlChannel(logger *logger.Logger, agentVersion string) error {
+func setupLogger() (*logger.Logger, error) {
+	// setup our loggers
+	if logger, err := logger.New(logger.Debug, ""); err != nil {
+		return logger, err
+	} else {
+		logger.AddAgentVersion(getAgentVersion())
+		return logger, nil
+	}
+}
+
+func blockUntilSignaled() os.Signal {
+	// Below channel will handle all machine initiated shutdown/reboot requests.
+
+	// Set up channel on which to receive signal notifications.
+	// We must use a buffered channel or risk missing the signal
+	// if we're not ready to receive when the signal is sent.
+	c := make(chan os.Signal, 1)
+
+	// Listening for OS signals is a blocking call.
+	// Only listen to signals that require us to exit.
+	// Otherwise we will continue execution and exit the program.
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	s := <-c
+	return s
+}
+
+func startControlChannel(logger *logger.Logger, agentVersion string) (*controlchannel.ControlChannel, error) {
 	// Load in our saved config
 	config, err := vault.LoadVault()
 	if err != nil {
-		return fmt.Errorf("failed to retrieve vault: %s", err)
+		return &controlchannel.ControlChannel{}, fmt.Errorf("failed to retrieve vault: %s", err)
 	}
 
 	// Create our headers and params, headers are empty
@@ -135,7 +167,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) error {
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
 	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.AgentControl)
 	if err != nil {
-		return err
+		return &controlchannel.ControlChannel{}, err
 	}
 
 	// create logger for control channel
@@ -218,8 +250,14 @@ func getAgentVersion() string {
 }
 
 func handleRegistration(logger *logger.Logger) error {
-	// if there are more than zero flags, register, or if the api key has been passed via an env var
-	if flag.NFlag() > 0 || apiKey != "" {
+	config, err := vault.LoadVault()
+	if err != nil {
+		return fmt.Errorf("could not load vault: %s", err)
+	}
+
+	// Check if vault is empty, if so, the agent is not registered
+	if config.IsEmpty() {
+		// if there are more than zero flags, register, or if the api key has been passed via an env var
 		if activationToken == "" && apiKey == "" {
 			return fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
 		} else {
@@ -233,9 +271,8 @@ func handleRegistration(logger *logger.Logger) error {
 			}
 
 			// register the agent with bastion, if not already registered
-			err := register(logger)
-			if err != nil {
-				panic(err)
+			if err := register(logger); err != nil {
+				return err
 			}
 		}
 	}
