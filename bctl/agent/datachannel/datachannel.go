@@ -239,6 +239,7 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 	case Db:
 		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, payload)
 	case Web:
+		d.logger.Infof("HERE?")
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, payload)
 	default:
 		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)

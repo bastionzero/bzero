@@ -33,11 +33,6 @@ const (
 )
 
 func main() {
-	parseErr := parseFlags() // TODO: Output missing args error
-	if parseErr != nil {
-		// TODO: We should alert zli somehow?, in all of these panics in this file?
-		panic(parseErr)
-	}
 
 	// Setup our loggers
 	// TODO: Pass in debug level as flag or put it in the config
@@ -46,6 +41,13 @@ func main() {
 		os.Exit(1)
 	}
 	logger.AddDaemonVersion(version)
+
+	parseErr := parseFlags() // TODO: Output missing args error
+	if parseErr != nil {
+		// TODO: We should alert zli somehow?, in all of these panics in this file?
+		logger.Errorf("HERE:??? %v", parseErr)
+		os.Exit(1)
+	}
 
 	// Create our headers and params
 	headers := make(map[string]string)

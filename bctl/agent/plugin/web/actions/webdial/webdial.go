@@ -1,6 +1,7 @@
 package webdial
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -31,7 +32,7 @@ type WebDial struct {
 	requestId     string
 	remoteAddress *net.TCPAddr
 
-	remoteConnection *net.TCPConn
+	remoteConnection *tls.Conn
 }
 
 func New(logger *logger.Logger,
@@ -100,8 +101,16 @@ func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action strin
 	// Set our requestId
 	e.requestId = dialActionRequest.RequestId
 
+	// remoteConnection, err := net.DialTCP("tcp", nil, e.remoteAddress)
+
 	// For each start, call the dial the TCP address
-	remoteConnection, err := net.DialTCP("tcp", nil, e.remoteAddress)
+	conf := &tls.Config{
+		// InsecureSkipVerify: true,
+		// ServerName: "espn.com",
+		// MinVersion: tls.VersionTLS11,
+	}
+
+	remoteConnection, err := tls.Dial("tcp", "localhost:8000", conf)
 	if err != nil {
 		e.logger.Errorf("Failed to dial remote address: %s", err)
 		// Let the agent know that there was an error

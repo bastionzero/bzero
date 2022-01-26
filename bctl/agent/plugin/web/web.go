@@ -53,9 +53,11 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	// Determine if we are using target hostname or host:port
-	address := synPayload.RemoteHost + ":" + fmt.Sprint(synPayload.RemotePort)
+	// address := synPayload.RemoteHost + ":" + fmt.Sprint(synPayload.RemotePort)
 
 	// Open up a connection to the TCP addr we are trying to connect to
+	address := "google.com:443"
+	logger.Infof("HERE? %s", address)
 	raddr, err := net.ResolveTCPAddr("tcp", address)
 	if err != nil {
 		logger.Errorf("Failed to resolve remote address: %s", err)
