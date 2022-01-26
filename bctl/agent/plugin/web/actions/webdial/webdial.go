@@ -1,12 +1,14 @@
 package webdial
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"gopkg.in/tomb.v2"
@@ -79,15 +81,23 @@ func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 		}
 
 		// Then send the data to our remote connection, decode the data first
-		dataToWrite, _ := base64.StdEncoding.DecodeString(dataIn.Data)
+		// dataToWrite, _ := base64.StdEncoding.DecodeString(dataIn.Data)
 
-		// Send this data to our remote connection
-		e.logger.Info("Received data from bastion, forwarding to remote tcp connection")
-		_, err := e.remoteConnection.Write(dataToWrite)
+		// // Send this data to our remote connection
+		// e.logger.Info("Received data from bastion, forwarding to remote tcp connection")
+		// _, err := e.remoteConnection.Write(dataToWrite)
+		// if err != nil {
+		// 	e.logger.Errorf("error writing to to remote connection: %v", err)
+		// 	return "", []byte{}, err
+		// }
+
+		// Now make a request to the endpoint given by the dataIn
+		e.logger.Infof("Making request for %s", dataIn.Endpoint)
+		req, err := BuildHttpRequest(dataIn.Endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
 		if err != nil {
-			e.logger.Errorf("error writing to to remote connection: %v", err)
-			return "", []byte{}, err
+			return action, []byte{}, err
 		}
+		e.logger.Infof("HERE: %v", req)
 
 		return "", []byte{}, nil
 	default:
@@ -110,7 +120,7 @@ func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action strin
 		// MinVersion: tls.VersionTLS11,
 	}
 
-	remoteConnection, err := tls.Dial("tcp", "localhost:8000", conf)
+	remoteConnection, err := tls.Dial("tcp", "espn.com:443", conf)
 	if err != nil {
 		e.logger.Errorf("Failed to dial remote address: %s", err)
 		// Let the agent know that there was an error
@@ -176,4 +186,19 @@ func (e *WebDial) validateRequestId(requestId string) error {
 		return rerr
 	}
 	return nil
+}
+
+func BuildHttpRequest(endpoint string, body string, method string, headers map[string][]string) (*http.Request, error) {
+	bodyBytesReader := bytes.NewReader([]byte(body))
+	req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
+
+	// Add any headers
+	for name, values := range headers {
+		// Loop over all values for the name.
+		for _, value := range values {
+			req.Header.Set(name, value)
+		}
+	}
+
+	return req, nil
 }

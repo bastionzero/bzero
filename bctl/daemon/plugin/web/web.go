@@ -3,7 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"net"
+	"net/http"
 	"sync"
 
 	"github.com/google/uuid"
@@ -20,7 +20,7 @@ import (
 type IWebDaemonAction interface {
 	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
+	Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error
 }
 
 type WebDaemonPlugin struct {
@@ -170,7 +170,7 @@ func (k *WebDaemonPlugin) Feed(food interface{}) error {
 	k.logger.Infof("Created %s action with requestId %v", string(webFood.Action), requestId)
 
 	// send local tcp connection to action
-	if err := act.Start(k.tmb, webFood.Conn); err != nil {
+	if err := act.Start(k.tmb, webFood.Writer, webFood.Request); err != nil {
 		k.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
 	}
 

@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"os"
+	"net/http"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -53,6 +52,8 @@ func StartWebServer(logger *logger.Logger,
 	localHost string,
 	targetPort int,
 	targetHost string,
+	certPath string,
+	keyPath string,
 	refreshTokenCommand string,
 	configPath string,
 	serviceUrl string,
@@ -87,43 +88,59 @@ func StartWebServer(logger *logger.Logger,
 		return err
 	}
 
-	// Now create our local listener for TCP connections
-	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
-	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
-	if err != nil {
-		logger.Errorf("Failed to resolve TCP address %s", err)
-		os.Exit(1)
-	}
+	// // Now create our local listener for TCP connections
+	// logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
+	// localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
+	// if err != nil {
+	// 	logger.Errorf("Failed to resolve TCP address %s", err)
+	// 	os.Exit(1)
+	// }
 
-	logger.Infof("Setting up TCP lister")
-	localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
-	if err != nil {
-		logger.Errorf("Failed to open local port to listen: %s", err)
-		os.Exit(1)
-	}
+	// logger.Infof("Setting up TCP lister")
+	// localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
+	// if err != nil {
+	// 	logger.Errorf("Failed to open local port to listen: %s", err)
+	// 	os.Exit(1)
+	// }
 
-	// Always ensure we close the local tcp connection when we exit
-	defer localTcpListener.Close()
+	// // Always ensure we close the local tcp connection when we exit
+	// defer localTcpListener.Close()
 
-	// Block and keep listening for new tcp events
-	for {
-		conn, err := localTcpListener.AcceptTCP()
-		if err != nil {
-			logger.Errorf("Failed to accept connection '%s'", err)
-			continue
+	// // Block and keep listening for new tcp events
+	// for {
+	// 	conn, err := localTcpListener.AcceptTCP()
+	// 	if err != nil {
+	// 		logger.Errorf("Failed to accept connection '%s'", err)
+	// 		continue
+	// 	}
+
+	// 	// Always generate a requestId, each new proxy connection is its own request
+	// 	requestId := uuid.New().String()
+
+	// 	go listener.handleProxy(conn, logger, requestId)
+	// }
+
+	// Create HTTP Server listens for incoming kubectl commands
+	go func() {
+		// Define our http handlers
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			listener.handleProxy(logger, w, r)
+		})
+
+		if err := http.ListenAndServeTLS(localHost+":"+localPort, certPath, keyPath, nil); err != nil {
+			logger.Error(err)
 		}
+	}()
 
-		// Always generate a requestId, each new proxy connection is its own request
-		requestId := uuid.New().String()
-
-		go listener.handleProxy(conn, logger, requestId)
-	}
+	select {}
+	return nil
 }
 
-func (h *WebServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, requestId string) {
+func (h *WebServer) handleProxy(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
 	food := bzweb.WebFood{
-		Action: bzweb.Dial,
-		Conn:   lconn,
+		Action:  bzweb.Dial,
+		Request: r,
+		Writer:  w,
 	}
 	// Start the dial plugin
 	h.datachannel.Feed(food)
