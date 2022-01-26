@@ -7,10 +7,10 @@ import (
 	"net/http"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"bastionzero.com/bctl/v1/bzerolib/utils"
 
 	"gopkg.in/tomb.v2"
 )
@@ -20,7 +20,7 @@ const (
 	dialDataIn = "web/dial/datain"
 )
 
-type WebAction struct {
+type WebDialAction struct {
 	logger *logger.Logger
 
 	requestId string
@@ -34,9 +34,9 @@ type WebAction struct {
 }
 
 func New(logger *logger.Logger,
-	requestId string) (*WebAction, chan plugin.ActionWrapper) {
+	requestId string) (*WebDialAction, chan plugin.ActionWrapper) {
 
-	stream := &WebAction{
+	stream := &WebDialAction{
 		logger: logger,
 
 		requestId: requestId,
@@ -51,23 +51,12 @@ func New(logger *logger.Logger,
 	return stream, stream.outputChan
 }
 
-func (s *WebAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error {
+func (s *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error {
 	// this action ends at the end of this function, in order to signal that to the parent plugin,
 	// we close the output channel which will close the go routine listening on it
 	defer close(s.outputChan)
 
-	// First modify the host header to reflect what we are trying to connect too
-	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
-	// TODO: Make this not janky
-	Request.URL.Host = "localhost.com"
-	Request.URL.Scheme = "https"
-	Request.Header.Set("X-Forwarded-Host", Request.Header.Get("Host"))
-	Request.Host = "piesocket.com"
-
-	// // Set our local connection
-	// s.localConnection = lconn
-
-	// Build the action payload
+	// Build the action payload to start the web action dial
 	payload := webdial.WebDialActionPayload{
 		RequestId: s.requestId,
 	}
@@ -78,6 +67,18 @@ func (s *WebAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *h
 		Action:        startDial,
 		ActionPayload: payloadBytes,
 	}
+
+	return s.handleHttpRequest(Writer, Request)
+}
+
+func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *http.Request) error {
+	// First modify the host header to reflect what we are trying to connect too
+	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
+	// TODO: Make this not janky
+	Request.URL.Host = "localhost.com"
+	Request.URL.Scheme = "https"
+	Request.Header.Set("X-Forwarded-Host", Request.Header.Get("Host"))
+	Request.Host = "piesocket.com"
 
 	// First extract the headers out of the request
 	headers := utils.GetHeaders(Request.Header)
@@ -134,10 +135,6 @@ func (s *WebAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *h
 				Writer.Write(response.Content)
 				return nil
 
-				// _, err := Writer.Write(contentBytes)
-				// if err != nil {
-				// 	s.logger.Errorf("Write failed '%s'\n", err)
-				// }
 			case smsg.WebAgentClose:
 				// The agent has closed the connection, close the local connection as well
 				s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
@@ -150,11 +147,11 @@ func (s *WebAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *h
 	}
 }
 
-func (s *WebAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
+func (s *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
 	s.ksInputChan <- wrappedAction
 }
 
-func (s *WebAction) ReceiveStream(smessage smsg.StreamMessage) {
+func (s *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {
 	s.logger.Debugf("Stream action received %v stream", smessage.Type)
 	s.streamInputChan <- smessage
 }

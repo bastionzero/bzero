@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
-	"net/http/httputil"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"gopkg.in/tomb.v2"
@@ -33,23 +31,20 @@ type WebDial struct {
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan chan smsg.StreamMessage
 
-	requestId     string
-	remoteAddress *net.TCPAddr
+	requestId string
 
 	remoteConnection *tls.Conn
 }
 
 func New(logger *logger.Logger,
 	pluginTmb *tomb.Tomb,
-	ch chan smsg.StreamMessage,
-	raddr *net.TCPAddr) (*WebDial, error) {
+	ch chan smsg.StreamMessage) (*WebDial, error) {
 
 	return &WebDial{
 		logger:           logger,
 		tmb:              pluginTmb,
 		closed:           false,
 		streamOutputChan: ch,
-		remoteAddress:    raddr,
 	}, nil
 }
 
@@ -77,79 +72,66 @@ func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 			return "", []byte{}, rerr
 		}
 
-		// First validate the requestId
-		if err := e.validateRequestId(dataIn.RequestId); err != nil {
-			return "", []byte{}, err
-		}
-
-		// Then send the data to our remote connection, decode the data first
-		// dataToWrite, _ := base64.StdEncoding.DecodeString(dataIn.Data)
-
-		// // Send this data to our remote connection
-		// e.logger.Info("Received data from bastion, forwarding to remote tcp connection")
-		// _, err := e.remoteConnection.Write(dataToWrite)
-		// if err != nil {
-		// 	e.logger.Errorf("error writing to to remote connection: %v", err)
-		// 	return "", []byte{}, err
-		// }
-
-		// Now make a request to the endpoint given by the dataIn
-		e.logger.Infof("Making request for %s", dataIn.Endpoint)
-		req, err := BuildHttpRequest(dataIn.Endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
-		if err != nil {
-			return action, []byte{}, err
-		}
-
-		dump, _ := httputil.DumpRequestOut(req, true)
-
-		e.logger.Infof("HERE: %+v", dump)
-
-		httpClient := &http.Client{}
-		res, err := httpClient.Do(req)
-		if err != nil {
-			rerr := fmt.Errorf("bad response to API request: %s", err)
-			e.logger.Error(rerr)
-			return action, []byte{}, rerr
-		}
-		defer res.Body.Close()
-
-		e.logger.Infof("HERE2: %v", res.StatusCode)
-
-		// Build the header response
-		header := make(map[string][]string)
-		for key, value := range res.Header {
-			header[key] = value
-		}
-
-		// Parse out the body
-		bodyBytes, _ := ioutil.ReadAll(res.Body)
-
-		// Now we need to send that data back to the client
-		responsePayload := WebDataOutActionPayload{
-			StatusCode: res.StatusCode,
-			RequestId:  dataIn.RequestId,
-			Headers:    header,
-			Content:    bodyBytes,
-		}
-		responsePayloadBytes, _ := json.Marshal(responsePayload)
-
-		// Now send this to bastion
-		str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
-		message := smsg.StreamMessage{
-			Type:           string(smsg.WebOut),
-			RequestId:      e.requestId,
-			SequenceNumber: 1,
-			Content:        str,
-			LogId:          "", // No log id for web messages
-		}
-		e.streamOutputChan <- message
-
-		return "", []byte{}, nil
+		return e.HandleNewHttpRequest(action, dataIn)
 	default:
 		rerr := fmt.Errorf("unhandled stream action: %v", action)
 		e.logger.Error(rerr)
 		return "", []byte{}, rerr
 	}
+}
+
+func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayload) (string, []byte, error) {
+	// First validate the requestId
+	if err := e.validateRequestId(dataIn.RequestId); err != nil {
+		return "", []byte{}, err
+	}
+
+	// Now make a request to the endpoint given by the dataIn
+	e.logger.Infof("Making request for %s", dataIn.Endpoint)
+	req, err := BuildHttpRequest(dataIn.Endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
+	if err != nil {
+		return action, []byte{}, err
+	}
+
+	httpClient := &http.Client{}
+	res, err := httpClient.Do(req)
+	if err != nil {
+		rerr := fmt.Errorf("bad response to API request: %s", err)
+		e.logger.Error(rerr)
+		return action, []byte{}, rerr
+	}
+	defer res.Body.Close()
+
+	// Build the header response
+	header := make(map[string][]string)
+	for key, value := range res.Header {
+		header[key] = value
+	}
+
+	// Parse out the body
+	bodyBytes, _ := ioutil.ReadAll(res.Body)
+
+	// Now we need to send that data back to the client
+	responsePayload := WebDataOutActionPayload{
+		StatusCode: res.StatusCode,
+		RequestId:  dataIn.RequestId,
+		Headers:    header,
+		Content:    bodyBytes,
+	}
+	responsePayloadBytes, _ := json.Marshal(responsePayload)
+
+	// Now send this to bastion
+	str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
+	message := smsg.StreamMessage{
+		Type:           string(smsg.WebOut),
+		RequestId:      e.requestId,
+		SequenceNumber: 1,
+		Content:        str,
+		LogId:          "", // No log id for web messages
+	}
+	e.streamOutputChan <- message
+
+	return "", []byte{}, nil
 }
 
 func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action string) (string, []byte, error) {

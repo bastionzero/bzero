@@ -4,11 +4,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
 	"sync"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -34,8 +34,6 @@ type WebPlugin struct {
 	remotePort int
 	remoteHost string
 
-	remoteAddress *net.TCPAddr
-
 	// Keep track of all the dials TCP connections
 	actions        map[string]IWebAction
 	actionsMapLock sync.Mutex
@@ -52,25 +50,12 @@ func New(parentTmb *tomb.Tomb,
 		return &WebPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
-	// Determine if we are using target hostname or host:port
-	// address := synPayload.RemoteHost + ":" + fmt.Sprint(synPayload.RemotePort)
-
-	// Open up a connection to the TCP addr we are trying to connect to
-	address := "google.com:443"
-	logger.Infof("HERE? %s", address)
-	raddr, err := net.ResolveTCPAddr("tcp", address)
-	if err != nil {
-		logger.Errorf("Failed to resolve remote address: %s", err)
-		return &WebPlugin{}, fmt.Errorf("failed to resolve remote address: %s", err)
-	}
-
 	plugin := &WebPlugin{
 		remotePort:       synPayload.RemotePort,
 		remoteHost:       synPayload.RemoteHost,
 		logger:           logger,
 		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,
-		remoteAddress:    raddr,
 		actions:          make(map[string]IWebAction),
 	}
 
@@ -126,8 +111,26 @@ func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte
 		subLogger.AddRequestId(rid)
 		switch bzweb.WebAction(webAction) {
 		case bzweb.Dial:
-			// Create a new dbdial action
-			a, err := webdial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
+			// Create a new web dial action
+			a, err := webdial.New(subLogger, k.tmb, k.streamOutputChan)
+			k.updateActionsMap(a, rid) // save action for later input
+
+			if err != nil {
+				rerr := fmt.Errorf("could not start new action object: %s", err)
+				k.logger.Error(rerr)
+				return "", []byte{}, rerr
+			}
+
+			// Send the payload to the action and add it to the map for future incoming requests
+			action, payload, err := a.Receive(action, actionPayloadSafe)
+			return action, payload, err
+		case bzweb.Websocket:
+			// Create a new web websocket action
+
+			// TODO: fix this
+			tempPort := 8765
+			tempHost := "localhost"
+			a, err := webwebsocket.New(subLogger, tempHost, tempPort, k.tmb, k.streamOutputChan)
 			k.updateActionsMap(a, rid) // save action for later input
 
 			if err != nil {

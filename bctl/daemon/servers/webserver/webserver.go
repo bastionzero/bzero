@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
@@ -13,7 +12,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 	"gopkg.in/tomb.v2"
 )
 
@@ -90,38 +88,6 @@ func StartWebServer(logger *logger.Logger,
 		return err
 	}
 
-	// // Now create our local listener for TCP connections
-	// logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
-	// localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
-	// if err != nil {
-	// 	logger.Errorf("Failed to resolve TCP address %s", err)
-	// 	os.Exit(1)
-	// }
-
-	// logger.Infof("Setting up TCP lister")
-	// localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
-	// if err != nil {
-	// 	logger.Errorf("Failed to open local port to listen: %s", err)
-	// 	os.Exit(1)
-	// }
-
-	// // Always ensure we close the local tcp connection when we exit
-	// defer localTcpListener.Close()
-
-	// // Block and keep listening for new tcp events
-	// for {
-	// 	conn, err := localTcpListener.AcceptTCP()
-	// 	if err != nil {
-	// 		logger.Errorf("Failed to accept connection '%s'", err)
-	// 		continue
-	// 	}
-
-	// 	// Always generate a requestId, each new proxy connection is its own request
-	// 	requestId := uuid.New().String()
-
-	// 	go listener.handleProxy(conn, logger, requestId)
-	// }
-
 	// Create HTTP Server listens for incoming kubectl commands
 	go func() {
 		// Define our http handlers
@@ -140,46 +106,14 @@ func StartWebServer(logger *logger.Logger,
 
 func (h *WebServer) handleProxy(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
 	// Determine if we are trying to upgrade the request
-	h.logger.Infof("HERE: %+v", r)
+	isWebsocketRequest := r.Header.Get("Upgrade")
 
-	var upgrader = websocket.Upgrader{}
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Print("upgrade failed: ", err)
-		return
+	action := bzweb.Dial
+	if isWebsocketRequest == "websocket" {
+		action = bzweb.Websocket
 	}
-	defer conn.Close()
-
-	// Continuosly read and write message
-	for {
-		mt, message, err := conn.ReadMessage()
-		if err != nil {
-			log.Println("read failed:", err)
-			break
-		}
-		input := string(message)
-		// cmd := getCmd(input)
-		// msg := getMessage(input)
-		// if cmd == "add" {
-		// 	todoList = append(todoList, msg)
-		// } else if cmd == "done" {
-		// 	updateTodoList(msg)
-		// }
-		// output := "Current Todos: \n"
-		// for _, todo := range todoList {
-		// 	output += "\n - " + todo + "\n"
-		// }
-		// output += "\n----------------------------------------"
-		message = []byte(input)
-		err = conn.WriteMessage(mt, message)
-		// if err != nil {
-		// 	log.Println("write failed:", err)
-		// 	break
-		// }
-	}
-
 	food := bzweb.WebFood{
-		Action:  bzweb.Dial,
+		Action:  action,
 		Request: r,
 		Writer:  w,
 	}

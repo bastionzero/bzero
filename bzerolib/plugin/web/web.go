@@ -7,7 +7,8 @@ import (
 type WebAction string
 
 const (
-	Dial WebAction = "dial"
+	Dial      WebAction = "dial"
+	Websocket WebAction = "websocket"
 )
 
 type WebActionParams struct {
