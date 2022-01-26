@@ -87,6 +87,8 @@ func (c *ConnectionNodeController) createConnection(request interface{}, connect
 		endpoint = createWebConnectionEndpoint
 	case "db":
 		endpoint = createDbConnectionEndpoint
+	default:
+		return ConnectionDetailsResponse{}, fmt.Errorf("attempting to make an unrecognized connection: %s", connectionType)
 	}
 
 	createConnectionEndpoint, err := utils.JoinUrls(c.bastionUrl, endpoint)
@@ -97,13 +99,13 @@ func (c *ConnectionNodeController) createConnection(request interface{}, connect
 	// Marshall the request
 	msgBytes, errMarshal := json.Marshal(request)
 	if errMarshal != nil {
-		return ConnectionDetailsResponse{}, fmt.Errorf("error marshalling create kube connection request for connection node: %+v", request)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error marshalling create %s connection request for connection node: %+v", connectionType, request)
 	}
 
 	// Perform the request
 	httpCreateConnectionResponse, errPost := bzhttp.Post(c.logger, createConnectionEndpoint, "application/json", msgBytes, c.headers, c.params)
 	if errPost != nil {
-		return ConnectionDetailsResponse{}, fmt.Errorf("error on create kube connection for connection node: %s. Response: %+v", errPost, httpCreateConnectionResponse)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error on create %s connection for connection node: %s. Response: %+v", connectionType, errPost, httpCreateConnectionResponse)
 	}
 
 	// Read all the bytes from the response

@@ -214,7 +214,7 @@ func (w *Websocket) receive() error {
 			rerr := errors.New("websocket closed")
 			w.Close(rerr)
 			return rerr
-		} else { // else, reconnectreturn ConnectionDetailsResponse{},
+		} else { // else, reconnect
 			msg := fmt.Errorf("error in websocket, will attempt to reconnect: %s", err)
 			w.logger.Error(msg)
 			if err := w.Connect(); err != nil {
