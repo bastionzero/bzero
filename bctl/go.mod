@@ -9,6 +9,7 @@ replace bastionzero.com/bctl/v1/bctl => ./
 require (
 	bastionzero.com/bctl/v1/bzerolib v0.0.0
 	github.com/google/uuid v1.2.0
+	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/ovh/configstore v0.5.2 // indirect
 	github.com/tucnak/store v0.0.0-20170905113834-b02ecdcc6dfb // indirect
 	golang.org/x/build v0.0.0-20211108163316-3ce30f35b9aa

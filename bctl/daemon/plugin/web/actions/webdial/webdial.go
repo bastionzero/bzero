@@ -3,7 +3,7 @@ package webdial
 import (
 	"encoding/base64"
 	"encoding/json"
-	"net"
+	"fmt"
 	"net/http"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
@@ -30,8 +30,7 @@ type WebAction struct {
 	streamInputChan chan smsg.StreamMessage
 	ksInputChan     chan plugin.ActionWrapper
 
-	sequenceNumber  int
-	localConnection *net.TCPConn
+	sequenceNumber int
 }
 
 func New(logger *logger.Logger,
@@ -60,10 +59,10 @@ func (s *WebAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *h
 	// First modify the host header to reflect what we are trying to connect too
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
 	// TODO: Make this not janky
-	Request.URL.Host = "espn.com"
+	Request.URL.Host = "localhost.com"
 	Request.URL.Scheme = "https"
 	Request.Header.Set("X-Forwarded-Host", Request.Header.Get("Host"))
-	Request.Host = "espn.com"
+	Request.Host = "piesocket.com"
 
 	// // Set our local connection
 	// s.localConnection = lconn
@@ -108,56 +107,47 @@ func (s *WebAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *h
 	}
 
 	// Listen to stream messages coming from bastion, and forward to our local connection
-	go func() {
-		for {
-			select {
-			case data := <-s.streamInputChan:
-				switch smsg.StreamType(data.Type) {
-				case smsg.WebOut:
-					contentBytes, _ := base64.StdEncoding.DecodeString(data.Content)
-					s.logger.Infof("HERE: %v", contentBytes)
+	for {
+		select {
+		case data := <-s.streamInputChan:
+			switch smsg.StreamType(data.Type) {
+			case smsg.WebOut:
+				contentBytes, _ := base64.StdEncoding.DecodeString(data.Content)
 
-					// _, err := Writer.Write(contentBytes)
-					// if err != nil {
-					// 	s.logger.Errorf("Write failed '%s'\n", err)
-					// }
-				case smsg.WebAgentClose:
-					// The agent has closed the connection, close the local connection as well
-					s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-					Request.Body.Close()
-				default:
-					s.logger.Errorf("unhandled stream type: %s", data.Type)
+				var response webdial.WebDataOutActionPayload
+				if err := json.Unmarshal(contentBytes, &response); err != nil {
+					rerr := fmt.Errorf("could not unmarshal Action Response Payload: %s", err)
+					s.logger.Error(rerr)
+					return err
 				}
+
+				// extract and build our writer headers
+				for name, values := range response.Headers {
+					for _, value := range values {
+						if name != "Content-Length" {
+							Writer.Header().Set(name, value)
+						}
+					}
+				}
+
+				// write response to user
+				Writer.Write(response.Content)
+				return nil
+
+				// _, err := Writer.Write(contentBytes)
+				// if err != nil {
+				// 	s.logger.Errorf("Write failed '%s'\n", err)
+				// }
+			case smsg.WebAgentClose:
+				// The agent has closed the connection, close the local connection as well
+				s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
+				Request.Body.Close()
+				return nil
+			default:
+				s.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}
-	}()
-
-	// Keep looping till we hit EOF
-	// tmp := make([]byte, 0xffff)
-	for {
-		// Now send this http request to bastion
-
-		// n, err := lconn.Read(tmp)
-		// if err == io.EOF {
-		// 	// Tell the agent to stop the dial session
-		// 	s.logger.Info("local tcp connection has been closed")
-
-		// 	return nil
-		// }
-		// if err != nil {
-		// 	s.logger.Errorf("Read failed '%s'\n", err)
-		// 	// Tell the agent to stop the dial session
-		// 	return nil
-		// }
-
-		// buff := tmp[:n]
-
-		// dataToSend := base64.StdEncoding.EncodeToString(buff)
-
-		s.sequenceNumber += 1
 	}
-
-	return nil
 }
 
 func (s *WebAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {

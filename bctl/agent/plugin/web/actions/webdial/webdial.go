@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
+	"net/http/httputil"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"gopkg.in/tomb.v2"
@@ -97,7 +99,50 @@ func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 		if err != nil {
 			return action, []byte{}, err
 		}
-		e.logger.Infof("HERE: %v", req)
+
+		dump, _ := httputil.DumpRequestOut(req, true)
+
+		e.logger.Infof("HERE: %+v", dump)
+
+		httpClient := &http.Client{}
+		res, err := httpClient.Do(req)
+		if err != nil {
+			rerr := fmt.Errorf("bad response to API request: %s", err)
+			e.logger.Error(rerr)
+			return action, []byte{}, rerr
+		}
+		defer res.Body.Close()
+
+		e.logger.Infof("HERE2: %v", res.StatusCode)
+
+		// Build the header response
+		header := make(map[string][]string)
+		for key, value := range res.Header {
+			header[key] = value
+		}
+
+		// Parse out the body
+		bodyBytes, _ := ioutil.ReadAll(res.Body)
+
+		// Now we need to send that data back to the client
+		responsePayload := WebDataOutActionPayload{
+			StatusCode: res.StatusCode,
+			RequestId:  dataIn.RequestId,
+			Headers:    header,
+			Content:    bodyBytes,
+		}
+		responsePayloadBytes, _ := json.Marshal(responsePayload)
+
+		// Now send this to bastion
+		str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
+		message := smsg.StreamMessage{
+			Type:           string(smsg.WebOut),
+			RequestId:      e.requestId,
+			SequenceNumber: 1,
+			Content:        str,
+			LogId:          "", // No log id for web messages
+		}
+		e.streamOutputChan <- message
 
 		return "", []byte{}, nil
 	default:
@@ -120,7 +165,7 @@ func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action strin
 		// MinVersion: tls.VersionTLS11,
 	}
 
-	remoteConnection, err := tls.Dial("tcp", "espn.com:443", conf)
+	remoteConnection, err := tls.Dial("tcp", "piesocket.com:443", conf)
 	if err != nil {
 		e.logger.Errorf("Failed to dial remote address: %s", err)
 		// Let the agent know that there was an error
@@ -140,18 +185,18 @@ func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action strin
 					e.logger.Errorf("Read failed '%s'\n", err)
 				}
 
-				// Let our daemon know that we have got the error and we need to close the connection
-				message := smsg.StreamMessage{
-					Type:           string(smsg.WebAgentClose),
-					RequestId:      e.requestId,
-					SequenceNumber: sequenceNumber,
-					Content:        "", // No content for webAgent Close
-					LogId:          "", // No log id for web messages
-				}
-				e.streamOutputChan <- message
+				// // Let our daemon know that we have got the error and we need to close the connection
+				// message := smsg.StreamMessage{
+				// 	Type:           string(smsg.WebAgentClose),
+				// 	RequestId:      e.requestId,
+				// 	SequenceNumber: sequenceNumber,
+				// 	Content:        "", // No content for webAgent Close
+				// 	LogId:          "", // No log id for web messages
+				// }
+				// e.streamOutputChan <- message
 
-				// Ensure that we close the dial action
-				e.closed = true
+				// // Ensure that we close the dial action
+				// e.closed = true
 				return
 			}
 
