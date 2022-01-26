@@ -87,7 +87,42 @@ func (s *WebWebsocketAction) handleWebsocketRequest(Writer http.ResponseWriter, 
 	}
 	defer conn.Close()
 
-	// Continuosly read and write message
+	// Setup a go routine to stream data from the agent back to daemon
+	go func() {
+		for {
+			select {
+			case incomingMessage := <-s.streamInputChan:
+				// Undo the base 64 encoding
+				incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
+				if base64Err != nil {
+					s.logger.Errorf("error decoding stream message: %v", base64Err)
+					return
+				}
+
+				// Unmarshell the stream message
+				var streamDataOut webwebsocket.WebWebsocketStreamDataOut
+				if err := json.Unmarshal(incomingContent, &streamDataOut); err != nil {
+					s.logger.Errorf("error unmarshalling stream message: %s", err)
+					return
+				}
+
+				// Unmarshel the websocket message
+				websocketMessage, base64Err := base64.StdEncoding.DecodeString(streamDataOut.Message)
+				if base64Err != nil {
+					s.logger.Errorf("error decoding stream message: %s", base64Err)
+					return
+				}
+
+				// Send the message to the user!
+				err = conn.WriteMessage(streamDataOut.MessageType, websocketMessage)
+				if err != nil {
+					s.logger.Errorf("error writing to websocket: %s", err)
+				}
+			}
+		}
+	}()
+
+	// Continuosly read
 	for {
 		mt, message, err := conn.ReadMessage()
 		if err != nil {
@@ -100,6 +135,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(Writer http.ResponseWriter, 
 
 		// Send the input along with mt to our agent
 		payload := webwebsocket.WebWebsocketDataInActionPayload{
+			RequestId:   s.requestId,
 			Message:     messageBase64,
 			MessageType: mt,
 		}
@@ -110,25 +146,6 @@ func (s *WebWebsocketAction) handleWebsocketRequest(Writer http.ResponseWriter, 
 			Action:        dataInWebsocket,
 			ActionPayload: payloadBytes,
 		}
-
-		// cmd := getCmd(input)
-		// msg := getMessage(input)
-		// if cmd == "add" {
-		// 	todoList = append(todoList, msg)
-		// } else if cmd == "done" {
-		// 	updateTodoList(msg)
-		// }
-		// output := "Current Todos: \n"
-		// for _, todo := range todoList {
-		// 	output += "\n - " + todo + "\n"
-		// }
-		// output += "\n----------------------------------------"
-		message = []byte("poopie")
-		err = conn.WriteMessage(mt, message)
-		// if err != nil {
-		// 	log.Println("write failed:", err)
-		// 	break
-		// }
 	}
 	return nil
 }

@@ -16,8 +16,9 @@ import (
 type WebWebsocketSubAction string
 
 const (
-	WebWebsocketStart  WebWebsocketSubAction = "web/websocket/start"
-	WebWebsocketDataIn WebWebsocketSubAction = "web/websocket/datain"
+	WebWebsocketStart   WebWebsocketSubAction = "web/websocket/start"
+	WebWebsocketDataIn  WebWebsocketSubAction = "web/websocket/datain"
+	WebWebsocketDataOut WebWebsocketSubAction = "web/websocket/dataout"
 )
 
 type WebWebsocket struct {
@@ -80,6 +81,11 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 			return "", []byte{}, rerr
 		}
 
+		// First validate the requestId
+		if err := e.validateRequestId(webWebsocketDataIn.RequestId); err != nil {
+			return "", []byte{}, err
+		}
+
 		return e.DataInWebsocket(webWebsocketDataIn, action)
 	default:
 		rerr := fmt.Errorf("unhandled stream action: %v", action)
@@ -94,14 +100,12 @@ func (e *WebWebsocket) DataInWebsocket(webWebsocketDataIn WebWebsocketDataInActi
 	if err != nil {
 		return "", []byte{}, err
 	}
-	e.logger.Infof("HERE: %v", e.ws)
-	e.wsToSend <- messageDecoded
 
-	// // Write this data to our websocket
-	// if _, err := e.ws.Write([]byte("hello, world!\n")); err != nil {
-	// 	return "", []byte{}, err
-	// }
-	// websocket.Message.Send(e.ws, []byte("hello, world!\n"))
+	// Write the message to the websocket
+	wsWriteError := e.ws.WriteMessage(webWebsocketDataIn.MessageType, messageDecoded)
+	if wsWriteError != nil {
+		return "", []byte{}, wsWriteError
+	}
 
 	return action, []byte{}, nil
 }
@@ -115,56 +119,53 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 	baseAddress := e.remoteHost + ":" + fmt.Sprint(e.remotePort)
 
 	u := url.URL{Scheme: "ws", Host: baseAddress, Path: webWebsocketStartRequest.Endpoint}
-	e.logger.Infof("connecting to %s", u.String())
+	e.logger.Infof("Connecting to %s", u.String())
 
-	// ws, err := websocket.Dial(fmt.Sprintf("ws://%s/", address), "", fmt.Sprintf("http://%s/", address))
-	// if err != nil {
-	// 	return "", []byte{}, fmt.Errorf("dial failed: %s", err.Error())
-	// }
+	ws, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		e.logger.Errorf("dial error: %s", err)
+		return "", []byte{}, err
+	}
 
-	// Save our websocket object so as data comes in we can write to it
+	// Keep reading messages in a go function in the background
+	go func() {
+		for {
+			mt, message, err := ws.ReadMessage()
+			if err != nil {
+				e.logger.Infof("Read websocket error: %s", err)
+				return
+			}
+
+			// Forward this message along to the daemon
+			toSend := WebWebsocketStreamDataOut{
+				Message:     base64.StdEncoding.EncodeToString(message),
+				MessageType: mt,
+			}
+			toSendBytes, err := json.Marshal(toSend)
+			if err != nil {
+				e.logger.Infof("Json marshell error: %s", err)
+				return
+			}
+			content := base64.StdEncoding.EncodeToString(toSendBytes)
+
+			// Stream the response back
+			// TODO: Eventually we want a new type of stream message
+			streamMessage := smsg.StreamMessage{
+				Type:           string(WebWebsocketDataOut),
+				RequestId:      e.requestId,
+				LogId:          "", // No log id for web websocket
+				SequenceNumber: 0,
+				Content:        content,
+			}
+			e.streamOutputChan <- streamMessage
+
+			e.logger.Infof("Recivied websocket message: %s", message)
+		}
+	}()
+
 	e.ws = ws
 
-	// Keep reading messages into a channel in the background
-	incomingMessages := make(chan string)
-	go readClientMessages(ws, incomingMessages)
-
-	// Listen for messages in the background and forward to the client
-	go func() {
-		for {
-			select {
-			case message := <-incomingMessages:
-				fmt.Println(`Message Received:`, message)
-			}
-		}
-	}()
-
-	// Listen for incoming messages from the client
-	go func() {
-		for {
-			select {
-			case message := <-e.wsToSend:
-				e.logger.Infof("HERE: %v", message)
-				if _, err := e.ws.Write([]byte("hello, world!\n")); err != nil {
-					return
-				}
-			}
-		}
-	}()
-
 	return action, []byte{}, nil
-}
-
-func readClientMessages(ws *websocket.Conn, incomingMessages chan string) {
-	for {
-		var message string
-		err := websocket.Message.Receive(ws, &message)
-		if err != nil {
-			fmt.Printf("Error::: %s\n", err.Error())
-			return
-		}
-		incomingMessages <- message
-	}
 }
 
 func (e *WebWebsocket) validateRequestId(requestId string) error {

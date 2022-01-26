@@ -7,6 +7,12 @@ type WebWebsocketStartActionPayload struct {
 }
 
 type WebWebsocketDataInActionPayload struct {
+	RequestId   string `json:"requestId"`
+	Message     string `json:"message"`
+	MessageType int    `json:"messageType"`
+}
+
+type WebWebsocketStreamDataOut struct {
 	Message     string `json:"message"`
 	MessageType int    `json:"messageType"`
 }

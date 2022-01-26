@@ -92,7 +92,7 @@ func StartWebServer(logger *logger.Logger,
 	go func() {
 		// Define our http handlers
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			listener.handleProxy(logger, w, r)
+			listener.handleHttp(logger, w, r)
 		})
 
 		if err := http.ListenAndServeTLS(localHost+":"+localPort, certPath, keyPath, nil); err != nil {
@@ -104,7 +104,7 @@ func StartWebServer(logger *logger.Logger,
 	return nil
 }
 
-func (h *WebServer) handleProxy(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
+func (h *WebServer) handleHttp(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
 	// Determine if we are trying to upgrade the request
 	isWebsocketRequest := r.Header.Get("Upgrade")
 
