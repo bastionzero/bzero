@@ -144,6 +144,7 @@ func (h *WebServer) handleProxy(logger *logger.Logger, w http.ResponseWriter, r 
 	}
 	// Start the dial plugin
 	h.datachannel.Feed(food)
+	h.logger.Info("handleProxy ended")
 }
 
 // for creating new websockets

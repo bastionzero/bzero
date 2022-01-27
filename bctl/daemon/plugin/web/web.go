@@ -173,7 +173,7 @@ func (k *WebDaemonPlugin) Feed(food interface{}) error {
 	if err := act.Start(k.tmb, webFood.Writer, webFood.Request); err != nil {
 		k.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
 	}
-
+	k.logger.Infof("Web plugin Feed ended")
 	return nil
 }
 

@@ -256,6 +256,7 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 func (d *DataChannel) Feed(data interface{}) error {
 	if d.plugin != nil {
 		d.plugin.Feed(data)
+		d.logger.Info("datachannel Feed ended")
 		return nil
 	} else {
 		rerr := fmt.Errorf("no plugin is associated with this datachannel")

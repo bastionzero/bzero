@@ -81,23 +81,17 @@ func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 		}
 
 		// Then send the data to our remote connection, decode the data first
-		// dataToWrite, _ := base64.StdEncoding.DecodeString(dataIn.Data)
+		dataToWrite, _ := base64.StdEncoding.DecodeString(dataIn.Content)
+		e.logger.Infof("dataToWrite: %v", dataToWrite)
 
-		// // Send this data to our remote connection
-		// e.logger.Info("Received data from bastion, forwarding to remote tcp connection")
-		// _, err := e.remoteConnection.Write(dataToWrite)
-		// if err != nil {
-		// 	e.logger.Errorf("error writing to to remote connection: %v", err)
-		// 	return "", []byte{}, err
-		// }
-
-		// Now make a request to the endpoint given by the dataIn
-		e.logger.Infof("Making request for %s", dataIn.Endpoint)
-		req, err := BuildHttpRequest(dataIn.Endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
+		// Send this data to our remote connection
+		e.logger.Info("Received data from bastion, forwarding to remote tcp connection")
+		_, err := e.remoteConnection.Write(dataToWrite)
 		if err != nil {
-			return action, []byte{}, err
+			e.logger.Errorf("error writing to to remote connection: %v", err)
+			return "", []byte{}, err
 		}
-		e.logger.Infof("HERE: %v", req)
+		e.logger.Info("HEHERHEHEHEHE")
 
 		return "", []byte{}, nil
 	default:
@@ -120,7 +114,7 @@ func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action strin
 		// MinVersion: tls.VersionTLS11,
 	}
 
-	remoteConnection, err := tls.Dial("tcp", "espn.com:443", conf)
+	remoteConnection, err := tls.Dial("tcp", "google.com:443", conf)
 	if err != nil {
 		e.logger.Errorf("Failed to dial remote address: %s", err)
 		// Let the agent know that there was an error
@@ -140,6 +134,7 @@ func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action strin
 					e.logger.Errorf("Read failed '%s'\n", err)
 				}
 
+				e.logger.Errorf("FAILED %s", err)
 				// Let our daemon know that we have got the error and we need to close the connection
 				message := smsg.StreamMessage{
 					Type:           string(smsg.WebAgentClose),
@@ -161,6 +156,7 @@ func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action strin
 
 			// Now send this to bastion
 			str := base64.StdEncoding.EncodeToString(tcpBytesBuffer)
+			e.logger.Infof("RETURN BYTES: %v", tcpBytesBuffer)
 			message := smsg.StreamMessage{
 				Type:           string(smsg.WebOut),
 				RequestId:      e.requestId,
