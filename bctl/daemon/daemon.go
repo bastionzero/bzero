@@ -33,19 +33,22 @@ const (
 )
 
 func main() {
-	parseErr := parseFlags() // TODO: Output missing args error
-	if parseErr != nil {
-		// TODO: We should alert zli somehow?, in all of these panics in this file?
-		panic(parseErr)
-	}
+	flagErr := parseFlags()
 
 	// Setup our loggers
 	// TODO: Pass in debug level as flag or put it in the config
-	logger, err := logger.New(logger.Debug, getLogFilePath())
+	logger, err := logger.New(logger.Debug, logPath)
+
 	if err != nil {
 		os.Exit(1)
 	}
 	logger.AddDaemonVersion(version)
+
+	// print out parseflags error now
+	if flagErr != nil {
+		logger.Error(flagErr)
+		os.Exit(1)
+	}
 
 	// Create our headers and params
 	headers := make(map[string]string)
@@ -55,34 +58,30 @@ func main() {
 	params["session_id"] = sessionId
 	params["version"] = version
 
+	if err := startServer(logger, headers, params); err != nil {
+		logger.Error(err)
+		os.Exit(1)
+	}
+
+	select {} // sleep forever?
+}
+
+func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	logger.Infof("Opening websocket to Bastion: %s for plugin %s", serviceUrl, plugin)
 
 	switch plugin {
 	case "kube":
 		params["websocketType"] = "kube"
-		if err := startKubeServer(logger, headers, params); err != nil {
-			logger.Error(err)
-			panic(err)
-		}
+		return startKubeServer(logger, headers, params)
 	case "db":
 		params["websocketType"] = "db"
-		if err := startDbServer(logger, headers, params); err != nil {
-			logger.Error(err)
-			panic(err)
-		}
+		return startDbServer(logger, headers, params)
 	case "web":
 		params["websocketType"] = "web"
-		if err := startWebServer(logger, headers, params); err != nil {
-			logger.Error(err)
-			panic(err)
-		}
+		return startWebServer(logger, headers, params)
 	default:
-		pluginErr := fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
-		logger.Error(pluginErr)
-		panic(pluginErr)
+		return fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
-
-	select {} // sleep forever?
 }
 
 func startWebServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
@@ -183,28 +182,35 @@ func parseFlags() error {
 	flag.IntVar(&remotePort, "remotePort", -1, "Remote target port to connect to")
 	flag.StringVar(&remoteHost, "remoteHost", "", "Remote target host to connect to")
 
-	// Check we have all required flags
 	flag.Parse()
-	if sessionId == "" || authHeader == "" || serviceUrl == "" ||
-		logPath == "" || configPath == "" || localPort == "" {
-		return fmt.Errorf("missing flags")
-	}
 
-	// Depending on the plugin ensure we have the correct values
+	// Check we have all required flags
+	// Depending on the plugin ensure we have the correct required flag values
+	requiredFlags := []string{"sessionId", "authHeader", "serviceURL", "logPath", "configPath", "localPort"}
 	switch plugin {
 	case "kube":
-		if targetUser == "" || targetId == "" ||
-			localhostToken == "" || certPath == "" || keyPath == "" {
-			return fmt.Errorf("missing kube plugin flags")
-		}
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
 	case "db":
 	case "web":
-		// We need remotePort AND remoteHost
-		if remotePort == -1 && remoteHost == "" {
-			return fmt.Errorf("missing db/web plugin flags")
-		}
+		requiredFlags = append(requiredFlags, "remoteHost", "remotePort")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
+	}
+
+	// Put all of the flags we've seen into a dict
+	seen := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { seen[f.Name] = true })
+
+	// Check against required dict to find the missing ones
+	var missingFlags []string
+	for _, req := range requiredFlags {
+		if !seen[req] {
+			missingFlags = append(missingFlags, req)
+		}
+	}
+
+	if len(missingFlags) > 0 {
+		return fmt.Errorf("missing flags! %v", missingFlags)
 	}
 
 	// Parse target groups
