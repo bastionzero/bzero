@@ -31,7 +31,6 @@ type Keysplitting struct {
 	privatekey       string
 	idpProvider      string
 	idpOrgId         string
-	orgId            string
 }
 
 func New() (IKeysplitting, error) {
@@ -53,7 +52,6 @@ func New() (IKeysplitting, error) {
 			privatekey:       privkeyString,
 			idpProvider:      config.Data.IdpProvider,
 			idpOrgId:         config.Data.IdpOrgId,
-			orgId:            config.Data.OrgId,
 		}, nil
 	}
 }
