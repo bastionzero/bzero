@@ -29,13 +29,12 @@ func New(logger *logger.Logger,
 	bastionUrl string,
 	headers map[string]string,
 	params map[string]string,
-	agentType string) *AgentController {
+	agentType string) (*AgentController, error) {
 
 	// Build the endpoint we want to hit
 	bastionUrlFormatted, err := utils.JoinUrls("https://", bastionUrl)
 	if err != nil {
-		logger.Error(fmt.Errorf("error building url"))
-		panic(err)
+		return &AgentController{}, fmt.Errorf("error building url")
 	}
 
 	return &AgentController{
@@ -44,7 +43,7 @@ func New(logger *logger.Logger,
 		headers:    headers,
 		params:     params,
 		agentType:  agentType,
-	}
+	}, nil
 }
 func (c *AgentController) GetChallenge(targetId string, targetName string, privateKey string, version string) (string, error) {
 	// Get challenge
@@ -63,8 +62,7 @@ func (c *AgentController) GetChallenge(targetId string, targetName string, priva
 	// Build the endpoint we want to hit
 	challengeEndpointFormatted, err := utils.JoinUrls(c.bastionUrl, challengeEndpoint)
 	if err != nil {
-		c.logger.Error(fmt.Errorf("error building url"))
-		panic(err)
+		return "", fmt.Errorf("error building url")
 	}
 
 	// Make our POST request
