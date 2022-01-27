@@ -112,17 +112,17 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		return "", []byte{}, err
 	}
 
-	e.logger.Infof("HERE: %+v", req)
-
 	// Redefine the host header by parsing our the host from our remoteHost
 	remoteHostUrl, urlParseError := url.Parse(e.remoteHost)
 	if urlParseError != nil {
 		e.logger.Error(fmt.Errorf("error parsing url %s", e.remoteHost))
 		return "", []byte{}, err
 	}
-
 	req.Header.Set("Host", remoteHostUrl.Host)
 
+	// We don't want to attempt to follow any redirect, we want to allow the browser/client to decided to
+	// redirect if they choose too
+	// Ref: https://stackoverflow.com/questions/23297520/how-can-i-make-the-go-http-client-not-follow-redirects-automatically
 	httpClient := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -169,7 +169,7 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 	message := smsg.StreamMessage{
 		Type:           string(smsg.WebOut),
 		RequestId:      e.requestId,
-		SequenceNumber: 1,
+		SequenceNumber: 0, // Always just 1 sequence
 		Content:        str,
 		LogId:          "", // No log id for web messages
 	}

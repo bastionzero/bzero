@@ -112,7 +112,10 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 		case data := <-s.streamInputChan:
 			switch smsg.StreamType(data.Type) {
 			case smsg.WebOut:
-				contentBytes, _ := base64.StdEncoding.DecodeString(data.Content)
+				contentBytes, base64Err := base64.StdEncoding.DecodeString(data.Content)
+				if base64Err != nil {
+					return base64Err
+				}
 
 				var response webdial.WebDataOutActionPayload
 				if err := json.Unmarshal(contentBytes, &response); err != nil {
