@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/utils"
@@ -101,15 +102,26 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 	e.logger.Infof("Making request for %s", endpoint)
 	req, err := BuildHttpRequest(endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
 	if err != nil {
-		return action, []byte{}, err
+		return "", []byte{}, err
 	}
+
+	// Redefine the host header by parsing our the host from our remoteHost
+	remoteHostUrl, urlParseError := url.Parse(e.remoteHost)
+	if urlParseError != nil {
+		e.logger.Error(fmt.Errorf("error parsing url %s", e.remoteHost))
+		return "", []byte{}, err
+	}
+
+	req.Host = remoteHostUrl.Host
+	req.URL.Host = remoteHostUrl.Host
+	req.Header.Set("Host", remoteHostUrl.Host)
 
 	httpClient := &http.Client{}
 	res, err := httpClient.Do(req)
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		e.logger.Error(rerr)
-		return action, []byte{}, rerr
+		return "", []byte{}, rerr
 	}
 	defer res.Body.Close()
 
@@ -171,6 +183,7 @@ func BuildHttpRequest(endpoint string, body string, method string, headers map[s
 		for _, value := range values {
 			req.Header.Set(name, value)
 		}
+
 	}
 
 	return req, nil

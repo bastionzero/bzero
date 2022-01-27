@@ -159,7 +159,15 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 	ws, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		e.logger.Errorf("dial error: %s", err)
-		// Do not return an error incase the user wants to try again in making this connection
+		// Do not return an error incase the user wants to try again in making this connection, rather send a close message
+		streamMessage := smsg.StreamMessage{
+			Type:           string(WebWebsocketAgentStop),
+			RequestId:      e.requestId,
+			LogId:          "", // No log id for web websocket
+			SequenceNumber: 0,
+			Content:        "",
+		}
+		e.streamOutputChan <- streamMessage
 		return action, []byte{}, nil
 	}
 

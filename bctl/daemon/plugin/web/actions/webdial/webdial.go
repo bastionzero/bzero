@@ -77,7 +77,7 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 	// TODO: Make this not janky
 	// Request.URL.Host = "localhost.com"
 	// Request.URL.Scheme = "https"
-	Request.Header.Set("X-Forwarded-Host", Request.Header.Get("Host"))
+	Request.Header.Set("X-Forwarded-Host", Request.Host)
 	// Request.Host = "piesocket.com"
 
 	// First extract the headers out of the request
@@ -121,6 +121,9 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 					s.logger.Error(rerr)
 					return err
 				}
+
+				s.logger.Infof("SAVED REQ: %s", s.requestId)
+				s.logger.Infof("PASSED REQ: %s", response.RequestId)
 
 				// extract and build our writer headers
 				for name, values := range response.Headers {
