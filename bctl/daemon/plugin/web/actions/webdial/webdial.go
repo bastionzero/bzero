@@ -74,11 +74,7 @@ func (s *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Reques
 func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *http.Request) error {
 	// First modify the host header to reflect what we are trying to connect too
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
-	// TODO: Make this not janky
-	// Request.URL.Host = "localhost.com"
-	// Request.URL.Scheme = "https"
 	Request.Header.Set("X-Forwarded-Host", Request.Host)
-	// Request.Host = "piesocket.com"
 
 	// First extract the headers out of the request
 	headers := utils.GetHeaders(Request.Header)
@@ -90,11 +86,14 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 		return err
 	}
 
+	// Always base64 encoded the endpoint we are trying to hit to ensure that any query params are propely escaped on the agent
+	encodedEndpoint := base64.StdEncoding.EncodeToString([]byte(Request.URL.String()))
+
 	// Build the action payload
 	dataInPayload := webdial.WebDataInActionPayload{
 		RequestId:      s.requestId,
 		SequenceNumber: s.sequenceNumber,
-		Endpoint:       Request.URL.String(),
+		Endpoint:       encodedEndpoint,
 		Headers:        headers,
 		Method:         Request.Method,
 		Body:           string(bodyInBytes), // fix this
@@ -122,20 +121,17 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 					return err
 				}
 
-				s.logger.Infof("SAVED REQ: %s", s.requestId)
-				s.logger.Infof("PASSED REQ: %s", response.RequestId)
-
 				// extract and build our writer headers
 				for name, values := range response.Headers {
 					for _, value := range values {
-						if name != "Content-Length" {
-							Writer.Header().Set(name, value)
-						}
+						Writer.Header().Add(name, value)
 					}
 				}
 
 				// write response to user
+				Writer.WriteHeader(response.StatusCode)
 				Writer.Write(response.Content)
+
 				return nil
 
 			case smsg.WebAgentClose:

@@ -91,9 +91,16 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		return "", []byte{}, err
 	}
 
+	// Revert the base64 encoding
+	endpointClean, base64Err := base64.StdEncoding.DecodeString(dataIn.Endpoint)
+	if base64Err != nil {
+		return "", []byte{}, base64Err
+	}
+
 	// Build the endpoint given the remoteHost
 	remoteUrl := e.remoteHost + ":" + fmt.Sprint(e.remotePort)
-	endpoint, endpointErr := utils.JoinUrls(remoteUrl, dataIn.Endpoint)
+
+	endpoint, endpointErr := utils.JoinUrls(remoteUrl, string(endpointClean))
 	if endpointErr != nil {
 		return "", []byte{}, endpointErr
 	}
@@ -105,6 +112,8 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		return "", []byte{}, err
 	}
 
+	e.logger.Infof("HERE: %+v", req)
+
 	// Redefine the host header by parsing our the host from our remoteHost
 	remoteHostUrl, urlParseError := url.Parse(e.remoteHost)
 	if urlParseError != nil {
@@ -112,35 +121,47 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		return "", []byte{}, err
 	}
 
-	req.Host = remoteHostUrl.Host
-	req.URL.Host = remoteHostUrl.Host
 	req.Header.Set("Host", remoteHostUrl.Host)
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	res, err := httpClient.Do(req)
+	var responsePayload WebDataOutActionPayload
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		e.logger.Error(rerr)
-		return "", []byte{}, rerr
-	}
-	defer res.Body.Close()
+		// Do not quit, just return the user the info regarding the api request
+		// Now we need to send that data back to the client
+		responsePayload = WebDataOutActionPayload{
+			StatusCode: http.StatusInternalServerError,
+			RequestId:  dataIn.RequestId,
+			Headers:    map[string][]string{},
+			Content:    []byte{},
+		}
+	} else {
+		defer res.Body.Close()
 
-	// Build the header response
-	header := make(map[string][]string)
-	for key, value := range res.Header {
-		header[key] = value
+		// Build the header response
+		header := make(map[string][]string)
+		for key, value := range res.Header {
+			header[key] = value
+		}
+
+		// Parse out the body
+		bodyBytes, _ := ioutil.ReadAll(res.Body)
+
+		// Now we need to send that data back to the client
+		responsePayload = WebDataOutActionPayload{
+			StatusCode: res.StatusCode,
+			RequestId:  dataIn.RequestId,
+			Headers:    header,
+			Content:    bodyBytes,
+		}
 	}
 
-	// Parse out the body
-	bodyBytes, _ := ioutil.ReadAll(res.Body)
-
-	// Now we need to send that data back to the client
-	responsePayload := WebDataOutActionPayload{
-		StatusCode: res.StatusCode,
-		RequestId:  dataIn.RequestId,
-		Headers:    header,
-		Content:    bodyBytes,
-	}
 	responsePayloadBytes, _ := json.Marshal(responsePayload)
 
 	// Now send this to bastion

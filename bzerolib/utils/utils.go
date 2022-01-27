@@ -15,7 +15,14 @@ func JoinUrls(base string, toAdd string) (string, error) {
 		return "", err
 	}
 	urlObject.Path = path.Join(urlObject.Path, toAdd)
-	return urlObject.String(), nil
+
+	// Now undo any url encoding that might have happened in UrlObject.String()
+	decodedUrl, err := url.QueryUnescape(urlObject.String())
+	if err != nil {
+		return "", err
+	}
+
+	return decodedUrl, nil
 }
 
 // Helper function to extract the body of a http request

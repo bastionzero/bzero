@@ -45,7 +45,6 @@ func main() {
 	parseErr := parseFlags() // TODO: Output missing args error
 	if parseErr != nil {
 		// TODO: We should alert zli somehow?, in all of these panics in this file?
-		logger.Errorf("HERE:??? %v", parseErr)
 		os.Exit(1)
 	}
 
