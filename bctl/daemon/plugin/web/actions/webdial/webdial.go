@@ -75,10 +75,10 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 	// First modify the host header to reflect what we are trying to connect too
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
 	// TODO: Make this not janky
-	Request.URL.Host = "localhost.com"
-	Request.URL.Scheme = "https"
+	// Request.URL.Host = "localhost.com"
+	// Request.URL.Scheme = "https"
 	Request.Header.Set("X-Forwarded-Host", Request.Header.Get("Host"))
-	Request.Host = "piesocket.com"
+	// Request.Host = "piesocket.com"
 
 	// First extract the headers out of the request
 	headers := utils.GetHeaders(Request.Header)

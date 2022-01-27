@@ -2,15 +2,14 @@ package webdial
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/utils"
 	"gopkg.in/tomb.v2"
 
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -31,12 +30,15 @@ type WebDial struct {
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan chan smsg.StreamMessage
 
-	requestId string
+	remoteHost string
+	remotePort int
 
-	remoteConnection *tls.Conn
+	requestId string
 }
 
 func New(logger *logger.Logger,
+	remoteHost string,
+	remotePort int,
 	pluginTmb *tomb.Tomb,
 	ch chan smsg.StreamMessage) (*WebDial, error) {
 
@@ -45,6 +47,8 @@ func New(logger *logger.Logger,
 		tmb:              pluginTmb,
 		closed:           false,
 		streamOutputChan: ch,
+		remoteHost:       remoteHost,
+		remotePort:       remotePort,
 	}, nil
 }
 
@@ -86,9 +90,16 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		return "", []byte{}, err
 	}
 
+	// Build the endpoint given the remoteHost
+	remoteUrl := e.remoteHost + ":" + fmt.Sprint(e.remotePort)
+	endpoint, endpointErr := utils.JoinUrls(remoteUrl, dataIn.Endpoint)
+	if endpointErr != nil {
+		return "", []byte{}, endpointErr
+	}
+
 	// Now make a request to the endpoint given by the dataIn
-	e.logger.Infof("Making request for %s", dataIn.Endpoint)
-	req, err := BuildHttpRequest(dataIn.Endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
+	e.logger.Infof("Making request for %s", endpoint)
+	req, err := BuildHttpRequest(endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
 	if err != nil {
 		return action, []byte{}, err
 	}
@@ -138,71 +149,6 @@ func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action strin
 	// Set our requestId
 	e.requestId = dialActionRequest.RequestId
 
-	// remoteConnection, err := net.DialTCP("tcp", nil, e.remoteAddress)
-
-	// For each start, call the dial the TCP address
-	conf := &tls.Config{
-		// InsecureSkipVerify: true,
-		// ServerName: "espn.com",
-		// MinVersion: tls.VersionTLS11,
-	}
-
-	remoteConnection, err := tls.Dial("tcp", "piesocket.com:443", conf)
-	if err != nil {
-		e.logger.Errorf("Failed to dial remote address: %s", err)
-		// Let the agent know that there was an error
-		return action, []byte{}, err
-	}
-
-	// Setup a go routine to listen for messages coming from this local connection and forward to the client
-	// TODO: Setup tomb for this to be cancelled?
-	sequenceNumber := 1
-
-	go func() {
-		buff := make([]byte, 0xffff)
-		for {
-			n, err := remoteConnection.Read(buff)
-			if err != nil {
-				if err != io.EOF {
-					e.logger.Errorf("Read failed '%s'\n", err)
-				}
-
-				// // Let our daemon know that we have got the error and we need to close the connection
-				// message := smsg.StreamMessage{
-				// 	Type:           string(smsg.WebAgentClose),
-				// 	RequestId:      e.requestId,
-				// 	SequenceNumber: sequenceNumber,
-				// 	Content:        "", // No content for webAgent Close
-				// 	LogId:          "", // No log id for web messages
-				// }
-				// e.streamOutputChan <- message
-
-				// // Ensure that we close the dial action
-				// e.closed = true
-				return
-			}
-
-			tcpBytesBuffer := buff[:n]
-
-			e.logger.Infof("Received %d bytes from local tcp connection, sending to bastion", n)
-
-			// Now send this to bastion
-			str := base64.StdEncoding.EncodeToString(tcpBytesBuffer)
-			message := smsg.StreamMessage{
-				Type:           string(smsg.WebOut),
-				RequestId:      e.requestId,
-				SequenceNumber: sequenceNumber,
-				Content:        str,
-				LogId:          "", // No log id for web messages
-			}
-			e.streamOutputChan <- message
-
-			sequenceNumber += 1
-		}
-	}()
-
-	// Update our remote connection
-	e.remoteConnection = remoteConnection
 	return action, []byte{}, nil
 }
 

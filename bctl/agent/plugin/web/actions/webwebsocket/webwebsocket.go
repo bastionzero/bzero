@@ -16,9 +16,11 @@ import (
 type WebWebsocketSubAction string
 
 const (
-	WebWebsocketStart   WebWebsocketSubAction = "web/websocket/start"
-	WebWebsocketDataIn  WebWebsocketSubAction = "web/websocket/datain"
-	WebWebsocketDataOut WebWebsocketSubAction = "web/websocket/dataout"
+	WebWebsocketStart      WebWebsocketSubAction = "web/websocket/start"
+	WebWebsocketDataIn     WebWebsocketSubAction = "web/websocket/datain"
+	WebWebsocketDataOut    WebWebsocketSubAction = "web/websocket/dataout"
+	WebWebsocketAgentStop  WebWebsocketSubAction = "web/websocket/agentstop"
+	WebWebsocketDaemonStop WebWebsocketSubAction = "web/websocket/daemonstop"
 )
 
 type WebWebsocket struct {
@@ -87,6 +89,28 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		}
 
 		return e.DataInWebsocket(webWebsocketDataIn, action)
+	case WebWebsocketDaemonStop:
+		// The daemon has closed the websocket, close this one as well
+		// Deserialize the action payload, the only action passed is DataIn
+		var webWebsocketDaemonStop WebWebsocketDaemonStopActionPayload
+		if err := json.Unmarshal(actionPayload, &webWebsocketDaemonStop); err != nil {
+			rerr := fmt.Errorf("unable to unmarshal daemonStop message: %s", err)
+			e.logger.Error(rerr)
+			return "", []byte{}, rerr
+		}
+
+		// First validate the requestId
+		if err := e.validateRequestId(webWebsocketDaemonStop.RequestId); err != nil {
+			return "", []byte{}, err
+		}
+
+		if e.ws != nil {
+			e.ws.Close()
+		} else {
+			e.logger.Info("Attempted to close websocket connection that does not exist")
+		}
+
+		return action, []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled stream action: %v", action)
 		e.logger.Error(rerr)
@@ -114,25 +138,49 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 	// Set our requestId
 	e.requestId = webWebsocketStartRequest.RequestId
 
+	// Remove the scheme from the remoteHost and determine the scheme
+	scheme := "ws"
+	baseAddress := e.remoteHost + ":" + fmt.Sprint(e.remotePort)
+	remoteHostUrl, parseErr := url.Parse(baseAddress)
+	if parseErr != nil {
+		e.logger.Errorf("error parsing remote host url: %s", parseErr)
+		return "", []byte{}, parseErr
+	}
+	if remoteHostUrl.Scheme == "https" {
+		scheme = "wss"
+	}
+
 	// Open up our websocket
 	// Ref: https://stackoverflow.com/questions/32745716/i-need-to-connect-to-an-existing-websocket-server-using-go-lang
-	baseAddress := e.remoteHost + ":" + fmt.Sprint(e.remotePort)
 
-	u := url.URL{Scheme: "ws", Host: baseAddress, Path: webWebsocketStartRequest.Endpoint}
+	u := url.URL{Scheme: scheme, Host: remoteHostUrl.Host, Path: webWebsocketStartRequest.Endpoint}
 	e.logger.Infof("Connecting to %s", u.String())
 
 	ws, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		e.logger.Errorf("dial error: %s", err)
-		return "", []byte{}, err
+		// Do not return an error incase the user wants to try again in making this connection
+		return action, []byte{}, nil
 	}
 
 	// Keep reading messages in a go function in the background
+	sequenceNumber := 0
 	go func() {
 		for {
 			mt, message, err := ws.ReadMessage()
 			if err != nil {
 				e.logger.Infof("Read websocket error: %s", err)
+
+				// We have to let the daemon know the websocket has ended
+				streamMessage := smsg.StreamMessage{
+					Type:           string(WebWebsocketAgentStop),
+					RequestId:      e.requestId,
+					LogId:          "", // No log id for web websocket
+					SequenceNumber: sequenceNumber,
+					Content:        "",
+				}
+				sequenceNumber += 1
+				e.streamOutputChan <- streamMessage
 				return
 			}
 
@@ -149,14 +197,14 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 			content := base64.StdEncoding.EncodeToString(toSendBytes)
 
 			// Stream the response back
-			// TODO: Eventually we want a new type of stream message
 			streamMessage := smsg.StreamMessage{
 				Type:           string(WebWebsocketDataOut),
 				RequestId:      e.requestId,
 				LogId:          "", // No log id for web websocket
-				SequenceNumber: 0,
+				SequenceNumber: sequenceNumber,
 				Content:        content,
 			}
+			sequenceNumber += 1
 			e.streamOutputChan <- streamMessage
 
 			e.logger.Infof("Recivied websocket message: %s", message)

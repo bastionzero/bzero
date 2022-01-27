@@ -4,12 +4,6 @@ type WebDialActionPayload struct {
 	RequestId string `json:"requestId"`
 }
 
-type WebWebsocketStartActionPayload struct {
-	RequestId string              `json:"requestId"`
-	Endpoint  string              `json:"endpoint"`
-	Headers   map[string][]string `json:"headers"`
-}
-
 type WebDataInActionPayload struct {
 	Body           string              `json:"body"`
 	Endpoint       string              `json:"endpoint"`

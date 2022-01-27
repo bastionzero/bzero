@@ -4,6 +4,7 @@ type WebWebsocketStartActionPayload struct {
 	RequestId string              `json:"requestId"`
 	Endpoint  string              `json:"endpoint"`
 	Headers   map[string][]string `json:"headers"`
+	Method    string              `json:"method"`
 }
 
 type WebWebsocketDataInActionPayload struct {
@@ -15,4 +16,8 @@ type WebWebsocketDataInActionPayload struct {
 type WebWebsocketStreamDataOut struct {
 	Message     string `json:"message"`
 	MessageType int    `json:"messageType"`
+}
+
+type WebWebsocketDaemonStopActionPayload struct {
+	RequestId string `json:"requestId"`
 }

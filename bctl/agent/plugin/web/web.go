@@ -112,7 +112,7 @@ func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte
 		switch bzweb.WebAction(webAction) {
 		case bzweb.Dial:
 			// Create a new web dial action
-			a, err := webdial.New(subLogger, k.tmb, k.streamOutputChan)
+			a, err := webdial.New(subLogger, k.remoteHost, k.remotePort, k.tmb, k.streamOutputChan)
 			k.updateActionsMap(a, rid) // save action for later input
 
 			if err != nil {
@@ -126,11 +126,7 @@ func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte
 			return action, payload, err
 		case bzweb.Websocket:
 			// Create a new web websocket action
-
-			// TODO: fix this
-			tempPort := 8765
-			tempHost := "localhost"
-			a, err := webwebsocket.New(subLogger, tempHost, tempPort, k.tmb, k.streamOutputChan)
+			a, err := webwebsocket.New(subLogger, k.remoteHost, k.remotePort, k.tmb, k.streamOutputChan)
 			k.updateActionsMap(a, rid) // save action for later input
 
 			if err != nil {
