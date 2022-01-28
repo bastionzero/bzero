@@ -91,16 +91,10 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		return "", []byte{}, err
 	}
 
-	// Revert the base64 encoding
-	endpointClean, base64Err := base64.StdEncoding.DecodeString(dataIn.Endpoint)
-	if base64Err != nil {
-		return "", []byte{}, base64Err
-	}
-
 	// Build the endpoint given the remoteHost
 	remoteUrl := e.remoteHost + ":" + fmt.Sprint(e.remotePort)
 
-	endpoint, endpointErr := utils.JoinUrls(remoteUrl, string(endpointClean))
+	endpoint, endpointErr := utils.JoinUrls(remoteUrl, dataIn.Endpoint)
 	if endpointErr != nil {
 		return "", []byte{}, endpointErr
 	}

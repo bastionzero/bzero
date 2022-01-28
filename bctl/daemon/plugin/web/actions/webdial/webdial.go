@@ -86,14 +86,11 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 		return err
 	}
 
-	// Always base64 encoded the endpoint we are trying to hit to ensure that any query params are propely escaped on the agent
-	encodedEndpoint := base64.StdEncoding.EncodeToString([]byte(Request.URL.String()))
-
 	// Build the action payload
 	dataInPayload := webdial.WebDataInActionPayload{
 		RequestId:      s.requestId,
 		SequenceNumber: s.sequenceNumber,
-		Endpoint:       encodedEndpoint,
+		Endpoint:       Request.URL.String(),
 		Headers:        headers,
 		Method:         Request.Method,
 		Body:           string(bodyInBytes), // fix this
