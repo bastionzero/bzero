@@ -11,6 +11,7 @@ type HealthCheckMessage struct {
 // websocket and datachannel management payloads
 type OpenWebsocketMessage struct {
 	DaemonWebsocketId    string `json:"daemonWebsocketId"`
+	ConnectionId         string `json:"connectionId"`
 	ConnectionNodeId     string `json:"connectionNodeId"`
 	ConnectionServiceUrl string `json:"connectionServiceUrl"`
 	Token                string `json:"token"`
@@ -18,13 +19,13 @@ type OpenWebsocketMessage struct {
 }
 
 type CloseWebsocketMessage struct {
-	DaemonWebsocketId string `json:"daemonWebsocketId"`
+	ConnectionId string `json:"connectionId"`
 }
 
 type OpenDataChannelMessage struct {
-	DataChannelId     string `json:"dataChannelId"`
-	DaemonWebsocketId string `json:"daemonWebsocketId"`
-	Syn               []byte `json:"syn"`
+	ConnectionId  string `json:"connectionId"`
+	DataChannelId string `json:"dataChannelId"`
+	Syn           []byte `json:"syn"`
 }
 
 type CloseDataChannelMessage struct {
