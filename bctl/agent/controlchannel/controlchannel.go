@@ -139,7 +139,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 
 	// Add our token to our params
 	params := make(map[string]string)
-	params["daemon_websocket_id"] = message.DaemonWebsocketId
+	params["connection_id"] = message.ConnectionId
 	params["connection_node_id"] = message.ConnectionNodeId
 	params["token"] = message.Token
 	params["connectionType"] = message.Type
