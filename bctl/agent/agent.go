@@ -9,7 +9,9 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"runtime"
 	"strings"
+	"time"
 
 	ed "crypto/ed25519"
 	"os/signal"
@@ -23,6 +25,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
@@ -86,26 +89,26 @@ func main() {
 	parseFlags()
 
 	if logger, err := setupLogger(); err != nil {
-		logger.Error(err)
+		reportError(logger, err)
 	} else {
 		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
 
 		// Check if the agent is registered or not.  If not, generate signing keys,
 		// check kube permissions and setup, and register with the Bastion.
 		if err := handleRegistration(logger); err != nil {
-			logger.Error(err)
+			reportError(logger, err)
 		} else {
 
 			// Connect the control channel to BastionZero
 			logger.Info("Creating connection to BastionZero...")
 			if control, err := startControlChannel(logger, getAgentVersion()); err != nil {
-				logger.Error(err)
+				reportError(logger, err)
 			} else {
 				logger.Info("Connection created successfully. Listening for incoming commands...")
 
 				if agentType == Bzero {
 					signal := blockUntilSignaled()
-					control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.Signal))
+					control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
 				}
 			}
 		}
@@ -129,6 +132,34 @@ func setupLogger() (*logger.Logger, error) {
 		logger.AddAgentVersion(getAgentVersion())
 		return logger, nil
 	}
+}
+
+// report early errors to the bastion so we have greater visibility
+func reportError(logger *logger.Logger, errorReport error) {
+	if logger != nil {
+		logger.Error(errorReport)
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = ""
+	}
+
+	errReport := errorreport.ErrorReport{
+		Reporter:  "agent-" + getAgentVersion(),
+		Timestamp: fmt.Sprint(time.Now().Unix()),
+		Message:   errorReport.Error(),
+		State: map[string]string{
+			"activationToken": activationToken,
+			"registrationKey": apiKey,
+			"targetName":      targetName,
+			"targetHostName":  hostname,
+			"goos":            runtime.GOOS,
+			"goarch":          runtime.GOARCH,
+		},
+	}
+
+	errorreport.ReportError(logger, serviceUrl, errReport)
 }
 
 func blockUntilSignaled() os.Signal {

@@ -4,12 +4,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
+	"time"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
+	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
@@ -37,33 +40,58 @@ func main() {
 
 	// Setup our loggers
 	// TODO: Pass in debug level as flag or put it in the config
-	logger, err := logger.New(logger.Debug, logPath)
+	if logger, err := logger.New(logger.Debug, logPath); err != nil {
+		reportError(logger, err)
+	} else {
+		logger.AddDaemonVersion(version)
 
+		// print out parseflags error now
+		if flagErr != nil {
+			reportError(logger, flagErr)
+		} else {
+			// Create our headers and params
+			headers := make(map[string]string)
+			headers["Authorization"] = authHeader
+
+			params := make(map[string]string)
+			params["session_id"] = sessionId
+			params["version"] = version
+
+			if err := startServer(logger, headers, params); err != nil {
+				logger.Error(err)
+				os.Exit(1)
+			} else {
+				select {} // sleep forever
+			}
+		}
+	}
+
+	// if we hit this, something has gone wrong
+	os.Exit(1)
+}
+
+func reportError(logger *logger.Logger, errorReport error) {
+	if logger != nil {
+		logger.Error(errorReport)
+	}
+
+	hostname, err := os.Hostname()
 	if err != nil {
-		os.Exit(1)
-	}
-	logger.AddDaemonVersion(version)
-
-	// print out parseflags error now
-	if flagErr != nil {
-		logger.Error(flagErr)
-		os.Exit(1)
+		hostname = ""
 	}
 
-	// Create our headers and params
-	headers := make(map[string]string)
-	headers["Authorization"] = authHeader
-
-	params := make(map[string]string)
-	params["session_id"] = sessionId
-	params["version"] = version
-
-	if err := startServer(logger, headers, params); err != nil {
-		logger.Error(err)
-		os.Exit(1)
+	errReport := errorreport.ErrorReport{
+		Reporter:  "daemon-" + version,
+		Timestamp: fmt.Sprint(time.Now().Unix()),
+		Message:   errorReport.Error(),
+		State: map[string]string{
+			"targetHostName": hostname,
+			"goos":           runtime.GOOS,
+			"goarch":         runtime.GOARCH,
+		},
 	}
 
-	select {} // sleep forever?
+	errorreport.ReportError(logger, serviceUrl, errReport)
 }
 
 func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
