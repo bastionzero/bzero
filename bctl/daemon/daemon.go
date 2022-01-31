@@ -71,7 +71,7 @@ func startServer(logger *logger.Logger, headers map[string]string, params map[st
 
 	switch plugin {
 	case "kube":
-		params["websocketType"] = "kube"
+		params["websocketType"] = "cluster"
 		return startKubeServer(logger, headers, params)
 	case "db":
 		params["websocketType"] = "db"
