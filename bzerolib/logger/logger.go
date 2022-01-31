@@ -35,7 +35,7 @@ func New(debugLevel DebugLevel, logFilePath string) (*Logger, error) {
 		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Printf("error: %s", err)
-			return &Logger{}, err
+			return nil, err
 		}
 
 		consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
