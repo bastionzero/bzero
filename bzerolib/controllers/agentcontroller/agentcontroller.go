@@ -34,7 +34,7 @@ func New(logger *logger.Logger,
 	// Build the endpoint we want to hit
 	bastionUrlFormatted, err := utils.JoinUrls("https://", bastionUrl)
 	if err != nil {
-		return &AgentController{}, fmt.Errorf("error building url")
+		return nil, fmt.Errorf("error building url")
 	}
 
 	return &AgentController{

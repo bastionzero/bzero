@@ -140,7 +140,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 	// Load in our saved config
 	config, err := vault.LoadVault()
 	if err != nil {
-		return &controlchannel.ControlChannel{}, fmt.Errorf("failed to retrieve vault: %s", err)
+		return nil, fmt.Errorf("failed to retrieve vault: %s", err)
 	}
 
 	// Create our headers and params, headers are empty
@@ -159,7 +159,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
 	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.AgentControl)
 	if err != nil {
-		return &controlchannel.ControlChannel{}, err
+		return nil, err
 	}
 
 	// create logger for control channel

@@ -81,7 +81,7 @@ func New(logger *logger.Logger,
 	keysplitter, err := keysplitting.New("", configPath, refreshTokenCommand)
 	if err != nil {
 		logger.Error(err)
-		return &DataChannel{}, &tomb.Tomb{}, err
+		return nil, &tomb.Tomb{}, err
 	}
 
 	dc := &DataChannel{
@@ -106,13 +106,13 @@ func New(logger *logger.Logger,
 	// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
 	if err := dc.openDataChannel(action, actionParams); err != nil {
 		logger.Error(err)
-		return &DataChannel{}, &tomb.Tomb{}, err
+		return nil, &tomb.Tomb{}, err
 	}
 
 	// start our plugin
 	if err := dc.startPlugin(action, actionParams); err != nil {
 		logger.Error(err)
-		return &DataChannel{}, &tomb.Tomb{}, err
+		return nil, &tomb.Tomb{}, err
 	}
 
 	// listener for incoming messages

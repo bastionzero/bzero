@@ -36,7 +36,7 @@ type Keysplitting struct {
 func New() (IKeysplitting, error) {
 	// Generate public private key pair along ed25519 curve
 	if publicKey, privateKey, err := ed.GenerateKey(nil); err != nil {
-		return &Keysplitting{}, fmt.Errorf("error generating key pair: %v", err.Error())
+		return nil, fmt.Errorf("error generating key pair: %v", err.Error())
 	} else {
 		pubkeyString := base64.StdEncoding.EncodeToString([]byte(publicKey))
 		privkeyString := base64.StdEncoding.EncodeToString([]byte(privateKey))

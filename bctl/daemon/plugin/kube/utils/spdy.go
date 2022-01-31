@@ -47,7 +47,7 @@ func NewExecSPDYService(logger *logger.Logger, writer http.ResponseWriter, reque
 	// Build a generic spdy serice
 	service, streamCh, err := NewSPDYService(logger, writer, request, expectedStreams)
 	if err != nil {
-		return &ExecSPDYService{}, fmt.Errorf("could nor create service: %v", err.Error())
+		return nil, fmt.Errorf("could nor create service: %v", err.Error())
 	}
 
 	// Build our object
@@ -61,7 +61,7 @@ func NewExecSPDYService(logger *logger.Logger, writer http.ResponseWriter, reque
 
 	// Wait for streams to come in and return SPDY service
 	if err := spdyService.waitForStreamsExec(request.Context(), streamCh, expectedStreams, expired.C); err != nil {
-		return &ExecSPDYService{}, fmt.Errorf("error waiting for streams to come in: %v", err.Error())
+		return nil, fmt.Errorf("error waiting for streams to come in: %v", err.Error())
 	} else {
 		return spdyService, nil
 	}
@@ -72,7 +72,7 @@ func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *
 	supportedProtocols := []string{"v4.channel.k8s.io", "v3.channel.k8s.io", "v2.channel.k8s.io", "channel.k8s.io"}
 	protocol, err := httpstream.Handshake(request, writer, supportedProtocols)
 	if err != nil {
-		return &SPDYService{}, nil, fmt.Errorf("could not complete http stream handshake: %v", err.Error())
+		return nil, nil, fmt.Errorf("could not complete http stream handshake: %v", err.Error())
 	}
 	logger.Infof("Using protocol: %s\n", protocol)
 
@@ -89,7 +89,7 @@ func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *
 		// if we weren't successful in upgrading.
 		// TODO: Return a better error
 		logger.Error(fmt.Errorf("unable to upgrade request"))
-		return &SPDYService{}, nil, fmt.Errorf("unable to upgrade request")
+		return nil, nil, fmt.Errorf("unable to upgrade request")
 	}
 
 	// Set our idle timeout, set to 4 hours as that is what the kubelet uses by default

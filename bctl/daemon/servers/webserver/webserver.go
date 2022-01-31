@@ -149,7 +149,7 @@ func (h *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
 	if marshalErr != nil {
 		h.logger.Error(fmt.Errorf("error marshalling action params for web"))
-		return &datachannel.DataChannel{}, marshalErr
+		return nil, marshalErr
 	}
 
 	action = "web/" + action

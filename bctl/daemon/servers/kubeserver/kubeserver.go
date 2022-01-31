@@ -180,7 +180,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
 	if marshalErr != nil {
 		h.logger.Error(fmt.Errorf("error marshalling action params for kube"))
-		return &datachannel.DataChannel{}, marshalErr
+		return nil, marshalErr
 	}
 
 	action = "kube/" + action

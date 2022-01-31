@@ -58,7 +58,7 @@ func NewBZCertVerifier(bzcert *BZCert, idpProvider string, idpOrgId string) (IBZ
 	// case Custom:
 	// 	issUrl = customIss
 	default:
-		return &BZCertVerifier{}, fmt.Errorf("unrecognized OIDC provider: %s", idpProvider)
+		return nil, fmt.Errorf("unrecognized OIDC provider: %s", idpProvider)
 	}
 
 	return &BZCertVerifier{
