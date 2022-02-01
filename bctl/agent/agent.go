@@ -63,6 +63,7 @@ func main() {
 			} else {
 				logger.Info("Connection created successfully. Listening for incoming commands...")
 
+				// If this is this agent uses systemd, then we wait until we recieve a kill signal
 				if agentType == Bzero {
 					signal := blockUntilSignaled()
 					control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
@@ -119,6 +120,7 @@ func reportError(logger *logger.Logger, errorReport error) {
 	errorreport.ReportError(logger, serviceUrl, errReport)
 }
 
+// ref: https://github.com/bastionzero/bzero-ssm-agent/blob/76d133c565bb7e11683f63fbc23d39fa0840df14/core/agent.go#L89
 func blockUntilSignaled() os.Signal {
 	// Below channel will handle all machine initiated shutdown/reboot requests.
 
