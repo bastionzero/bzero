@@ -69,7 +69,7 @@ type RegistrationRequest struct {
 	TargetHostName  string `json:"targetHostName"`
 	TargetType      string `json:"agentType"`
 	TargetId        string `json:"targetId"`
-	AwsRegion       string `json:"awsRegion"`
+	Region          string `json:"region"`
 }
 
 type RegistrationResponse struct {
@@ -444,7 +444,7 @@ func getRegistrationResponse(logger *logger.Logger, publicKey string) (Registrat
 		TargetName:      targetName,
 		TargetHostName:  hostname,
 		TargetId:        activationToken, // The activation token is the new targetId
-		AwsRegion:       region,
+		Region:          region,
 	}
 
 	// Build the endpoint we want to hit
