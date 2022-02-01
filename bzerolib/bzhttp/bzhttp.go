@@ -2,11 +2,9 @@ package bzhttp
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -25,18 +23,6 @@ type bzhttp struct {
 	headers       map[string]string
 	params        map[string]string
 	backoffParams backoff.BackOff
-}
-
-func Convert(resp *http.Response, obj interface{}) (interface{}, error) {
-	// read our activation token request body
-	if respBytes, err := ioutil.ReadAll(resp.Body); err != nil {
-		return obj, err
-	} else {
-		if err := json.Unmarshal(respBytes, &obj); err != nil {
-			return obj, fmt.Errorf("malformed registration response: %s", err)
-		}
-		return obj, nil
-	}
 }
 
 func BuildEndpoint(base string, toAdd string) (string, error) {

@@ -8,7 +8,6 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 type ConnectionNodeController struct {
@@ -91,7 +90,7 @@ func (c *ConnectionNodeController) createConnection(request interface{}, connect
 		return ConnectionDetailsResponse{}, fmt.Errorf("attempting to make an unrecognized connection: %s", connectionType)
 	}
 
-	createConnectionEndpoint, err := utils.JoinUrls(c.bastionUrl, endpoint)
+	createConnectionEndpoint, err := bzhttp.BuildEndpoint(c.bastionUrl, endpoint)
 	if err != nil {
 		return ConnectionDetailsResponse{}, fmt.Errorf("error building url")
 	}
@@ -133,7 +132,7 @@ func (c *ConnectionNodeController) createCnConnection(connectionId string, typeO
 	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpointFormatted, "$VERSION", c.params["version"], -1)
 
 	// Build our endpoint
-	getAuthDetailsEndpoint, err := utils.JoinUrls(c.bastionUrl, getAuthDetailsEndpointFormatted)
+	getAuthDetailsEndpoint, err := bzhttp.BuildEndpoint(c.bastionUrl, getAuthDetailsEndpointFormatted)
 	if err != nil {
 		return ConnectionDetailsResponse{}, fmt.Errorf("error building url")
 	}

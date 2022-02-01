@@ -17,11 +17,11 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/rbac"
 	"bastionzero.com/bctl/v1/bctl/agent/registration"
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 var (
@@ -234,7 +234,7 @@ func parseFlags() error {
 
 	// Make sure our service url is correctly formatted
 	if !strings.HasPrefix(serviceUrl, "http") {
-		if url, err := utils.JoinUrls("https://", serviceUrl); err != nil {
+		if url, err := bzhttp.BuildEndpoint("https://", serviceUrl); err != nil {
 			return fmt.Errorf("error adding scheme to serviceUrl %s: %s", serviceUrl, err)
 		} else {
 			serviceUrl = url
@@ -258,8 +258,7 @@ func handleRegistration(logger *logger.Logger) error {
 	}
 
 	// Check if there is a public key in the vault, if not then agent is not registered
-	if config.Data.Namespace == "" { // PLACEHOLDER REMOVE BEFORE PUSH
-
+	if config.Data.PublicKey == "" {
 		// we need either an activation token or an apikey to register the agent
 		if activationToken == "" && apiKey == "" {
 			return fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
@@ -274,7 +273,7 @@ func handleRegistration(logger *logger.Logger) error {
 				if err := rbac.CheckPermissions(logger, namespace); err != nil {
 					return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
 				} else {
-					logger.Info("Namespace and service account permissions verified.")
+					logger.Info("Namespace and service account permissions verified")
 				}
 			}
 
@@ -283,7 +282,10 @@ func handleRegistration(logger *logger.Logger) error {
 				return err
 			}
 		}
+	} else {
+		logger.Infof("The agent already registered")
 	}
+
 	return nil
 }
 

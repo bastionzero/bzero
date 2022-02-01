@@ -8,7 +8,6 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -31,15 +30,9 @@ func New(logger *logger.Logger,
 	params map[string]string,
 	agentType string) (*AgentController, error) {
 
-	// Build the endpoint we want to hit
-	bastionUrlFormatted, err := utils.JoinUrls("https://", bastionUrl)
-	if err != nil {
-		return nil, fmt.Errorf("error building url")
-	}
-
 	return &AgentController{
 		logger:     logger,
-		bastionUrl: bastionUrlFormatted,
+		bastionUrl: bastionUrl,
 		headers:    headers,
 		params:     params,
 		agentType:  agentType,
@@ -60,7 +53,7 @@ func (c *AgentController) GetChallenge(targetId string, targetName string, priva
 	}
 
 	// Build the endpoint we want to hit
-	challengeEndpointFormatted, err := utils.JoinUrls(c.bastionUrl, challengeEndpoint)
+	challengeEndpointFormatted, err := bzhttp.BuildEndpoint(c.bastionUrl, challengeEndpoint)
 	if err != nil {
 		return "", fmt.Errorf("error building url")
 	}

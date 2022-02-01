@@ -5,7 +5,6 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 const (
@@ -35,7 +34,7 @@ func ReportError(logger *logger.Logger, serviceUrl string, errReport ErrorReport
 	}
 	errReport.State = string(stateBytes)
 
-	endpoint, err := utils.JoinUrls("https://"+serviceUrl, errorEndpoint)
+	endpoint, err := bzhttp.BuildEndpoint(serviceUrl, errorEndpoint)
 	if err != nil && log {
 		logger.Errorf("failed to report error: %s", errReport)
 	}
