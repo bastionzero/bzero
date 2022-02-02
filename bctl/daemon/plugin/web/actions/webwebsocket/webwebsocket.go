@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
+	bzwebwebsocket "bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -14,12 +15,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"gopkg.in/tomb.v2"
-)
-
-const (
-	startWebsocket      = "web/websocket/start"
-	dataInWebsocket     = "web/websocket/datain"
-	daemonStopWebsocket = "web/websocket/daemonstop"
 )
 
 type WebWebsocketAction struct {
@@ -72,7 +67,7 @@ func (s *WebWebsocketAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, R
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        startWebsocket,
+		Action:        string(bzwebwebsocket.Start),
 		ActionPayload: payloadBytes,
 	}
 
@@ -95,7 +90,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(Writer http.ResponseWriter, 
 			select {
 			case incomingMessage := <-s.streamInputChan:
 				switch incomingMessage.Type {
-				case string(webwebsocket.WebWebsocketDataOut):
+				case string(webwebsocket.DataOut):
 					// Stream data to the local connection
 					// Undo the base 64 encoding
 					incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
@@ -123,7 +118,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(Writer http.ResponseWriter, 
 					if err != nil {
 						s.logger.Errorf("error writing to websocket: %s", err)
 					}
-				case string(webwebsocket.WebWebsocketAgentStop):
+				case string(webwebsocket.AgentStop):
 					// End the local connection
 					s.logger.Infof("Received close message from agent, closing websocket")
 					conn.Close()
@@ -149,7 +144,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(Writer http.ResponseWriter, 
 
 			// Let the agent know to close the websocket
 			s.outputChan <- plugin.ActionWrapper{
-				Action:        daemonStopWebsocket,
+				Action:        string(bzwebwebsocket.DaemonStop),
 				ActionPayload: payloadBytes,
 			}
 			break
@@ -168,7 +163,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(Writer http.ResponseWriter, 
 		// Send payload to plugin output queue
 		payloadBytes, _ := json.Marshal(payload)
 		s.outputChan <- plugin.ActionWrapper{
-			Action:        dataInWebsocket,
+			Action:        string(bzwebwebsocket.DataIn),
 			ActionPayload: payloadBytes,
 		}
 	}

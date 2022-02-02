@@ -53,7 +53,7 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	// Build our address
-	address := synPayload.RemoteHost + ":" + fmt.Sprint(synPayload.RemotePort)
+	address := fmt.Sprintf("%s:%v", synPayload.RemoteHost, synPayload.RemotePort)
 
 	// Open up a connection to the TCP addr we are trying to connect to
 	raddr, err := net.ResolveTCPAddr("tcp", address)

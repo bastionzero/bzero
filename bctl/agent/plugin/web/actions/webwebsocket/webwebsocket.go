@@ -16,11 +16,11 @@ import (
 type WebWebsocketSubAction string
 
 const (
-	WebWebsocketStart      WebWebsocketSubAction = "web/websocket/start"
-	WebWebsocketDataIn     WebWebsocketSubAction = "web/websocket/datain"
-	WebWebsocketDataOut    WebWebsocketSubAction = "web/websocket/dataout"
-	WebWebsocketAgentStop  WebWebsocketSubAction = "web/websocket/agentstop"
-	WebWebsocketDaemonStop WebWebsocketSubAction = "web/websocket/daemonstop"
+	Start      WebWebsocketSubAction = "web/websocket/start"
+	DataIn     WebWebsocketSubAction = "web/websocket/datain"
+	DataOut    WebWebsocketSubAction = "web/websocket/dataout"
+	AgentStop  WebWebsocketSubAction = "web/websocket/agentstop"
+	DaemonStop WebWebsocketSubAction = "web/websocket/daemonstop"
 )
 
 type WebWebsocket struct {
@@ -32,8 +32,6 @@ type WebWebsocket struct {
 	streamOutputChan chan smsg.StreamMessage
 
 	ws *websocket.Conn
-
-	wsToSend chan []byte
 
 	remoteHost string
 	remotePort int
@@ -52,7 +50,6 @@ func New(logger *logger.Logger,
 		tmb:              pluginTmb,
 		closed:           false,
 		streamOutputChan: ch,
-		wsToSend:         make(chan []byte, 10),
 		remoteHost:       remoteHost,
 		remotePort:       remotePort,
 	}, nil
@@ -64,7 +61,7 @@ func (s *WebWebsocket) Closed() bool {
 
 func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	switch WebWebsocketSubAction(action) {
-	case WebWebsocketStart:
+	case Start:
 		// Deserialize the action payload, the only action passed is DataIn
 		var webWebsocketStartRequest WebWebsocketStartActionPayload
 		if err := json.Unmarshal(actionPayload, &webWebsocketStartRequest); err != nil {
@@ -74,7 +71,7 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		}
 
 		return e.StartWebsocket(webWebsocketStartRequest, action)
-	case WebWebsocketDataIn:
+	case DataIn:
 		// Deserialize the action payload, the only action passed is DataIn
 		var webWebsocketDataIn WebWebsocketDataInActionPayload
 		if err := json.Unmarshal(actionPayload, &webWebsocketDataIn); err != nil {
@@ -89,7 +86,7 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		}
 
 		return e.DataInWebsocket(webWebsocketDataIn, action)
-	case WebWebsocketDaemonStop:
+	case DaemonStop:
 		// The daemon has closed the websocket, close this one as well
 		// Deserialize the action payload, the only action passed is DataIn
 		var webWebsocketDaemonStop WebWebsocketDaemonStopActionPayload
@@ -140,7 +137,7 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 
 	// Remove the scheme from the remoteHost and determine the scheme
 	scheme := "ws"
-	baseAddress := e.remoteHost + ":" + fmt.Sprint(e.remotePort)
+	baseAddress := fmt.Sprintf("%s:%v", e.remoteHost, e.remotePort)
 	remoteHostUrl, parseErr := url.Parse(baseAddress)
 	if parseErr != nil {
 		e.logger.Errorf("error parsing remote host url: %s", parseErr)
@@ -161,7 +158,7 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 		e.logger.Errorf("dial error: %s", err)
 		// Do not return an error incase the user wants to try again in making this connection, rather send a close message
 		streamMessage := smsg.StreamMessage{
-			Type:           string(WebWebsocketAgentStop),
+			Type:           string(AgentStop),
 			RequestId:      e.requestId,
 			LogId:          "", // No log id for web websocket
 			SequenceNumber: 0,
@@ -181,7 +178,7 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 
 				// We have to let the daemon know the websocket has ended
 				streamMessage := smsg.StreamMessage{
-					Type:           string(WebWebsocketAgentStop),
+					Type:           string(AgentStop),
 					RequestId:      e.requestId,
 					LogId:          "", // No log id for web websocket
 					SequenceNumber: sequenceNumber,
@@ -206,7 +203,7 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 
 			// Stream the response back
 			streamMessage := smsg.StreamMessage{
-				Type:           string(WebWebsocketDataOut),
+				Type:           string(DataOut),
 				RequestId:      e.requestId,
 				LogId:          "", // No log id for web websocket
 				SequenceNumber: sequenceNumber,
@@ -215,7 +212,7 @@ func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStart
 			sequenceNumber += 1
 			e.streamOutputChan <- streamMessage
 
-			e.logger.Infof("Recivied websocket message: %s", message)
+			e.logger.Infof("Received websocket message: %s", message)
 		}
 	}()
 

@@ -85,14 +85,14 @@ func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 	}
 }
 
-func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayload) (string, []byte, error) {
+func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayload) (string, []byte, error) {
 	// First validate the requestId
-	if err := e.validateRequestId(dataIn.RequestId); err != nil {
+	if err := w.validateRequestId(dataIn.RequestId); err != nil {
 		return "", []byte{}, err
 	}
 
 	// Build the endpoint given the remoteHost
-	remoteUrl := e.remoteHost + ":" + fmt.Sprint(e.remotePort)
+	remoteUrl := fmt.Sprintf("%s:%v", w.remoteHost, w.remotePort)
 
 	endpoint, endpointErr := utils.JoinUrls(remoteUrl, dataIn.Endpoint)
 	if endpointErr != nil {
@@ -100,16 +100,16 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 	}
 
 	// Now make a request to the endpoint given by the dataIn
-	e.logger.Infof("Making request for %s", endpoint)
+	w.logger.Infof("Making request for %s", endpoint)
 	req, err := BuildHttpRequest(endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
 	if err != nil {
 		return "", []byte{}, err
 	}
 
 	// Redefine the host header by parsing our the host from our remoteHost
-	remoteHostUrl, urlParseError := url.Parse(e.remoteHost)
+	remoteHostUrl, urlParseError := url.Parse(w.remoteHost)
 	if urlParseError != nil {
-		e.logger.Error(fmt.Errorf("error parsing url %s", e.remoteHost))
+		w.logger.Error(fmt.Errorf("error parsing url %s", w.remoteHost))
 		return "", []byte{}, err
 	}
 	req.Header.Set("Host", remoteHostUrl.Host)
@@ -126,9 +126,8 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 	var responsePayload WebDataOutActionPayload
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
-		e.logger.Error(rerr)
+		w.logger.Error(rerr)
 		// Do not quit, just return the user the info regarding the api request
-		// Now we need to send that data back to the client
 		responsePayload = WebDataOutActionPayload{
 			StatusCode: http.StatusInternalServerError,
 			RequestId:  dataIn.RequestId,
@@ -145,7 +144,17 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		}
 
 		// Parse out the body
-		bodyBytes, _ := ioutil.ReadAll(res.Body)
+		bodyBytes, readErr := ioutil.ReadAll(res.Body)
+		if readErr != nil {
+			w.logger.Errorf("bad read on response body: %s", err)
+			// Do not quit, just return the user the info regarding the api request
+			responsePayload = WebDataOutActionPayload{
+				StatusCode: http.StatusInternalServerError,
+				RequestId:  dataIn.RequestId,
+				Headers:    map[string][]string{},
+				Content:    []byte{},
+			}
+		}
 
 		// Now we need to send that data back to the client
 		responsePayload = WebDataOutActionPayload{
@@ -162,12 +171,12 @@ func (e *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 	str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
 	message := smsg.StreamMessage{
 		Type:           string(smsg.WebOut),
-		RequestId:      e.requestId,
+		RequestId:      w.requestId,
 		SequenceNumber: 0, // Always just 1 sequence
 		Content:        str,
 		LogId:          "", // No log id for web messages
 	}
-	e.streamOutputChan <- message
+	w.streamOutputChan <- message
 
 	return "", []byte{}, nil
 }
