@@ -101,12 +101,6 @@ func PostRegister(logger *logger.Logger, endpoint string, contentType string, bo
 }
 
 func (b *bzhttp) post() (*http.Response, error) {
-	// make sure we actually have a logger, because we might not (b/c errorreport)
-	log := true
-	if b.logger == nil {
-		log = false
-	}
-
 	// Default params
 	// Ref: https://github.com/cenkalti/backoff/blob/a78d3804c2c84f0a3178648138442c9b07665bda/exponential.go#L76
 	// DefaultInitialInterval     = 500 * time.Millisecond
@@ -133,9 +127,7 @@ func (b *bzhttp) post() (*http.Response, error) {
 			response, err = httpClient.Post(b.endpoint, b.contentType, bytes.NewBuffer(b.body))
 
 			if err != nil {
-				if log {
-					b.logger.Errorf("error making post request: %v", err)
-				}
+				b.logger.Errorf("error making post request: %v", err)
 				return nil, err
 			}
 		} else {
@@ -163,9 +155,7 @@ func (b *bzhttp) post() (*http.Response, error) {
 			response, err = httpClient.Do(req)
 
 			if err != nil {
-				if log {
-					b.logger.Errorf("error making post request: %v", err)
-				}
+				b.logger.Errorf("error making post request: %v", err)
 				return nil, err
 			}
 		}
@@ -180,13 +170,11 @@ func (b *bzhttp) post() (*http.Response, error) {
 			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
 			bodyBytes, err := io.ReadAll(response.Body)
-			if err != nil && log {
+			if err != nil {
 				b.logger.Error(err)
 			}
 			bodyString := string(bodyBytes)
-			if log {
-				b.logger.Infof("error: %s", bodyString)
-			}
+			b.logger.Infof("error: %s", bodyString)
 			continue
 		}
 
