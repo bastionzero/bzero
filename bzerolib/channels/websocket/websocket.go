@@ -467,7 +467,7 @@ func (w *Websocket) Connect() error {
 		}
 
 		// Define our reqest params
-		w.requestParams["daemon_websocket_id"] = w.params["daemon_websocket_id"]
+		w.requestParams["connection_id"] = w.params["connection_id"]
 		w.requestParams["token"] = w.params["token"]
 		w.requestParams["connectionType"] = w.params["connectionType"]
 	case AgentControl:
