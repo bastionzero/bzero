@@ -76,7 +76,7 @@ func New(parentTmb *tomb.Tomb,
 			case <-parentTmb.Dying(): // control channel is dying
 				return errors.New("agent was orphaned too young and can't be batman :'(")
 			case <-datachannel.tmb.Dying():
-				time.Sleep(30 * time.Second) // allow the datachannel to close gracefully TODO: Figure out a better way to gracefully die
+				time.Sleep(10 * time.Second) // allow the datachannel to close gracefully TODO: Figure out a better way to gracefully die
 				return nil
 			case agentMessage := <-datachannel.inputChan: // receive messages
 				datachannel.processInput(agentMessage)
