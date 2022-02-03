@@ -34,9 +34,8 @@ func MockLogger() *logger.Logger {
 	logger, err := logger.New(logger.Debug, "/dev/null")
 	if err == nil {
 		return logger
-	} else {
-		return nil
 	}
+	return nil
 }
 
 func GetRunAsUser(t *testing.T) string {
@@ -105,6 +104,23 @@ func SendResize(t *testing.T, plugin *ShellPlugin, rows uint32, cols uint32) {
 
 	assert.NotNil(t, respbytes)
 	assert.NotEmpty(t, respstr)
+}
+
+func SendReplay(t *testing.T, plugin *ShellPlugin) []byte {
+	action := "shell/replay"
+
+	replayPayload, _ := json.Marshal(bzshell.ShellReplayMessage{})
+	b64payload := b64Encode(replayPayload)
+
+	respstr, respbytes, err := plugin.Receive(action, b64payload)
+	if err != nil {
+		t.Errorf("Shell input threw error: %v", err)
+	}
+
+	assert.NotNil(t, respbytes)
+	assert.NotEmpty(t, respstr)
+
+	return respbytes
 }
 
 func SendClose(t *testing.T, plugin *ShellPlugin) {
@@ -180,6 +196,32 @@ func TestInputOutput(t *testing.T) {
 	outstr, err = ReadOutputOrTimeout(t, streamOutputChan)
 	assert.Nil(t, err)
 	assert.Contains(t, outstr, "total") // ls -l always returns total as the first line
+}
+
+func TestShelllReplay(t *testing.T) {
+
+	streamOutputChan := make(chan smsg.StreamMessage, 20)
+
+	plugin := SpawnTerminal(t, streamOutputChan)
+	stdoutreplay := SendReplay(t, plugin)
+
+	assert.NotNil(t, stdoutreplay)
+	assert.Equal(t, 16, len(stdoutreplay))
+	assert.Contains(t, string(stdoutreplay), "sh")
+
+	stdoutreplay = SendReplay(t, plugin)
+	assert.NotNil(t, stdoutreplay)
+	assert.Equal(t, 16, len(stdoutreplay))
+	assert.Contains(t, string(stdoutreplay), "sh")
+
+	SendToStdIn(t, plugin, "echo 'abcdeabcdeabcdeabcdeabcdeabcde'")
+	time.Sleep(100 * time.Millisecond)
+
+	stdoutreplay = SendReplay(t, plugin)
+	assert.NotNil(t, stdoutreplay)
+	assert.Equal(t, 53, len(stdoutreplay))
+	assert.Contains(t, string(stdoutreplay), "sh")
+	assert.Contains(t, string(stdoutreplay), "abcdeabcdeabcdeabcdeabcdeabcde")
 }
 
 func TestResize(t *testing.T) {

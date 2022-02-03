@@ -123,10 +123,10 @@ func StartPty(
 }
 
 // SetSize sets size of console terminal window.
-func SetSize(logger *logger.Logger, ws_col, ws_row uint32) (err error) {
+func SetSize(logger *logger.Logger, wsCol, wRow uint32) (err error) {
 	winSize := pty.Winsize{
-		Cols: uint16(ws_col),
-		Rows: uint16(ws_row),
+		Cols: uint16(wsCol),
+		Rows: uint16(wRow),
 	}
 
 	if err := pty.Setsize(ptyFile, &winSize); err != nil {
