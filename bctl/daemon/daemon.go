@@ -11,6 +11,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -247,9 +248,14 @@ func parseFlags() error {
 		targetGroups = strings.Split(targetGroupsRaw, ",")
 	}
 
-	return nil
-}
+	// Make sure our service url is correctly formatted
+	if !strings.HasPrefix(serviceUrl, "http") {
+		if url, err := bzhttp.BuildEndpoint("https://", serviceUrl); err != nil {
+			return fmt.Errorf("error adding scheme to serviceUrl %s: %s", serviceUrl, err)
+		} else {
+			serviceUrl = url
+		}
+	}
 
-func getLogFilePath() string {
-	return logPath
+	return nil
 }
