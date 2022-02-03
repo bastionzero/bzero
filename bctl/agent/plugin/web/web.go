@@ -47,7 +47,7 @@ func New(parentTmb *tomb.Tomb,
 	// Unmarshal the Syn payload
 	var synPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
-		return &WebPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
+		return nil, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
 	plugin := &WebPlugin{

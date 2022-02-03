@@ -21,7 +21,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/controllers/connectionnodecontroller"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 const (
@@ -353,15 +352,9 @@ func (w *Websocket) Connect() error {
 	// Switch based on the targetType
 	switch w.targetType {
 	case Cluster:
-		// Define our bastionURL
-		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
-		if err != nil {
-			return fmt.Errorf("error building bastionUrl")
-		}
-
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
-		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, bastionUrl, "", w.headers, w.params)
+		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, w.serviceUrl, "", w.headers, w.params)
 		if cnControllerErr != nil {
 			return fmt.Errorf("error creating cnController")
 		}
@@ -377,7 +370,7 @@ func (w *Websocket) Connect() error {
 		}
 
 		// Now we can build our connectionnode url
-		newBaseUrl, err := utils.JoinUrls(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
+		newBaseUrl, err := bzhttp.BuildEndpoint(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
 		if err != nil {
 			return err
 		}
@@ -391,15 +384,9 @@ func (w *Websocket) Connect() error {
 		connectionType := ConnectionType(w.params["websocketType"])
 		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
 	case Db:
-		// Define our bastionURL
-		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
-		if err != nil {
-			return fmt.Errorf("error building bastionUrl")
-		}
-
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
-		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, bastionUrl, "", w.headers, w.params)
+		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, w.serviceUrl, "", w.headers, w.params)
 		if cnControllerErr != nil {
 			return fmt.Errorf("error creating Connection Node Controller")
 		}
@@ -410,7 +397,7 @@ func (w *Websocket) Connect() error {
 		}
 
 		// Now we can build our connectionnode url
-		newBaseUrl, err := utils.JoinUrls(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
+		newBaseUrl, err := bzhttp.BuildEndpoint(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
 		if err != nil {
 			return err
 		}
@@ -425,15 +412,9 @@ func (w *Websocket) Connect() error {
 		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
 
 	case Web:
-		// Define our bastionURL
-		bastionUrl, err := utils.JoinUrls("https://", w.serviceUrl)
-		if err != nil {
-			return fmt.Errorf("error building bastionUrl")
-		}
-
 		// First hit Bastion in order to get the connectionNode information, build our controller
 		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
-		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, bastionUrl, "", w.headers, w.params)
+		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, w.serviceUrl, "", w.headers, w.params)
 		if cnControllerErr != nil {
 			return fmt.Errorf("error creating cnController")
 		}
@@ -444,7 +425,7 @@ func (w *Websocket) Connect() error {
 		}
 
 		// Now we can build our connectionnode url
-		newBaseUrl, err := utils.JoinUrls(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
+		newBaseUrl, err := bzhttp.BuildEndpoint(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
 		if err != nil {
 			return err
 		}
@@ -460,7 +441,7 @@ func (w *Websocket) Connect() error {
 
 	case AgentWebsocket:
 		// Build our connection node Url
-		if newBaseUrl, err := utils.JoinUrls(w.params["connection_service_url"], agentConnectionNodeHubEndpoint); err != nil {
+		if newBaseUrl, err := bzhttp.BuildEndpoint(w.params["connection_service_url"], agentConnectionNodeHubEndpoint); err != nil {
 			return err
 		} else {
 			w.baseUrl = newBaseUrl
@@ -474,7 +455,7 @@ func (w *Websocket) Connect() error {
 		// Default base url is just the service url and the hub endpoint
 		// This is because we hit bastion to initiate our control hub
 		// Now we can build our connectionnode url
-		if newBaseUrl, err := utils.JoinUrls(w.serviceUrl, controlHubEndpoint); err != nil {
+		if newBaseUrl, err := bzhttp.BuildEndpoint(w.serviceUrl, controlHubEndpoint); err != nil {
 			return err
 		} else {
 			w.baseUrl = newBaseUrl
@@ -487,15 +468,7 @@ func (w *Websocket) Connect() error {
 	}
 
 	// Make our POST request
-	if !strings.Contains(w.baseUrl, "https://") {
-		// Always make sure we have https:// in our baseUrl
-		if newBaseUrl, err := utils.JoinUrls("https://", w.baseUrl); err != nil {
-			return err
-		} else {
-			w.baseUrl = newBaseUrl
-		}
-	}
-	negotiateEndpoint, err := utils.JoinUrls(w.baseUrl, "/negotiate")
+	negotiateEndpoint, err := bzhttp.BuildEndpoint(w.baseUrl, "/negotiate")
 	if err != nil {
 		return err
 	}

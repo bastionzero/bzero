@@ -62,7 +62,7 @@ func New(parentTmb *tomb.Tomb,
 	// Unmarshal the Syn payload
 	var synPayload bzkube.KubeActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
-		return &KubePlugin{}, fmt.Errorf("malformed Kube plugin SYN payload %v", string(payload))
+		return nil, fmt.Errorf("malformed Kube plugin SYN payload %v", string(payload))
 	}
 
 	// First load in our Kube variables
@@ -70,7 +70,7 @@ func New(parentTmb *tomb.Tomb,
 	if err != nil {
 		cerr := fmt.Errorf("error getting incluser config: %s", err)
 		logger.Error(cerr)
-		return &KubePlugin{}, cerr
+		return nil, cerr
 	}
 
 	serviceAccountToken := config.BearerToken

@@ -7,10 +7,10 @@ import (
 	"net/http"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 
 	"gopkg.in/tomb.v2"
 )
@@ -77,10 +77,10 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	request.Header.Set("X-Forwarded-Host", request.Host)
 
 	// First extract the headers out of the request
-	headers := utils.GetHeaders(request.Header)
+	headers := bzhttp.GetHeaders(request.Header)
 
 	// Now extract the body
-	bodyInBytes, err := utils.GetBodyBytes(request.Body)
+	bodyInBytes, err := bzhttp.GetBodyBytes(request.Body)
 	if err != nil {
 		s.logger.Error(err)
 		return err

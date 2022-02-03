@@ -9,10 +9,10 @@ import (
 
 	kubestream "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/stream"
 	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 const (
@@ -79,10 +79,10 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	s.writer = writer
 
 	// First extract the headers out of the request
-	headers := utils.GetHeaders(request.Header)
+	headers := bzhttp.GetHeaders(request.Header)
 
 	// Now extract the body
-	bodyInBytes, err := utils.GetBodyBytes(request.Body)
+	bodyInBytes, err := bzhttp.GetBodyBytes(request.Body)
 	if err != nil {
 		s.logger.Error(err)
 		return err
