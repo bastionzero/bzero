@@ -53,7 +53,7 @@ func New(parentTmb *tomb.Tomb,
 	keysplitter, err := keysplitting.New()
 	if err != nil {
 		logger.Error(err)
-		return &DataChannel{}, err
+		return nil, err
 	}
 
 	datachannel := &DataChannel{
@@ -89,11 +89,11 @@ func New(parentTmb *tomb.Tomb,
 	if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
 		rerr := fmt.Errorf("malformed Keysplitting message")
 		logger.Error(rerr)
-		return &DataChannel{}, rerr
+		return nil, rerr
 	} else if synPayload.Type != ksmsg.Syn {
 		err := fmt.Errorf("datachannel must be started with a SYN message")
 		logger.Error(err)
-		return &DataChannel{}, err
+		return nil, err
 	}
 
 	// process our syn to startup the plugin

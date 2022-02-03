@@ -159,7 +159,7 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
 	if marshalErr != nil {
 		h.logger.Error(fmt.Errorf("error marshalling action params for db"))
-		return &datachannel.DataChannel{}, marshalErr
+		return nil, marshalErr
 	}
 
 	action = "db/" + action

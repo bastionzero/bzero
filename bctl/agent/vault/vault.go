@@ -34,15 +34,17 @@ type Vault struct {
 }
 
 type SecretData struct {
-	PublicKey   string
-	PrivateKey  string
-	OrgId       string
-	ServiceUrl  string
-	TargetName  string
-	Namespace   string
-	IdpProvider string
-	IdpOrgId    string
-	TargetId    string
+	PublicKey     string
+	PrivateKey    string
+	ServiceUrl    string
+	TargetName    string
+	Namespace     string
+	IdpProvider   string
+	IdpOrgId      string
+	TargetId      string
+	EnvironmentId string
+	AgentType     string
+	Version       string
 }
 
 func LoadVault() (*Vault, error) {
@@ -72,7 +74,7 @@ func systemdVault() (*Vault, error) {
 
 		// Now save the secret data
 		if err := store.Save(vaultPath, &secretData); err != nil {
-			return &Vault{}, fmt.Errorf("error saving vault information: %v", err.Error())
+			return nil, fmt.Errorf("error saving vault information: %v", err.Error())
 		}
 	}
 	return &Vault{
@@ -86,11 +88,11 @@ func clusterVault() (*Vault, error) {
 	// Create our api object
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return &Vault{}, fmt.Errorf("error grabbing cluster config: %v", err.Error())
+		return nil, fmt.Errorf("error grabbing cluster config: %v", err.Error())
 	}
 
 	if clientset, err := kubernetes.NewForConfig(config); err != nil {
-		return &Vault{}, fmt.Errorf("error creating new config: %v", err.Error())
+		return nil, fmt.Errorf("error creating new config: %v", err.Error())
 	} else {
 		secretName := "bctl-" + os.Getenv("TARGET_NAME") + "-secret"
 
@@ -107,7 +109,7 @@ func clusterVault() (*Vault, error) {
 			secret := &coreV1.Secret{Data: secretData, ObjectMeta: object}
 
 			if _, err := secretsClient.Create(context.TODO(), secret, metaV1.CreateOptions{}); err != nil {
-				return &Vault{}, fmt.Errorf("error creating secret: %v", err.Error())
+				return nil, fmt.Errorf("error creating secret: %v", err.Error())
 			}
 
 			return &Vault{
@@ -119,7 +121,7 @@ func clusterVault() (*Vault, error) {
 		} else {
 			if data, ok := secret.Data[keyConfig]; ok {
 				if secretData, err := DecodeToSecretConfig(data); err != nil {
-					return &Vault{}, err
+					return nil, err
 				} else {
 					return &Vault{
 						client: secretsClient,

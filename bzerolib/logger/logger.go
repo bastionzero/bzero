@@ -23,6 +23,9 @@ const (
 
 type Logger struct {
 	logger zerolog.Logger
+
+	// zerolog.Logger cannot == zerolog.Logger{}, so ready lets us tell if we can log or not
+	ready bool
 }
 
 func New(debugLevel DebugLevel, logFilePath string) (*Logger, error) {
@@ -35,7 +38,9 @@ func New(debugLevel DebugLevel, logFilePath string) (*Logger, error) {
 		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Printf("error: %s", err)
-			return nil, err
+			return &Logger{
+				ready: false,
+			}, err
 		}
 
 		consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
@@ -43,47 +48,68 @@ func New(debugLevel DebugLevel, logFilePath string) (*Logger, error) {
 
 		return &Logger{
 			logger: zerolog.New(multi).With().Timestamp().Logger(),
+			ready:  true,
 		}, nil
 	} else {
 		return &Logger{
 			logger: zerolog.New(os.Stdout).With().Timestamp().Logger(),
+			ready:  true,
 		}, nil
 	}
 }
 
 func (l *Logger) AddAgentVersion(version string) {
-	l.logger = l.logger.With().Str("agentVersion", version).Logger()
+	if l.ready {
+		l.logger = l.logger.With().Str("agentVersion", version).Logger()
+	}
 }
 
 func (l *Logger) AddDaemonVersion(version string) {
-	l.logger = l.logger.With().Str("daemonVersion", version).Logger()
+	if l.ready {
+		l.logger = l.logger.With().Str("daemonVersion", version).Logger()
+	}
 }
 
 func (l *Logger) GetControlChannelLogger(id string) *Logger {
+	if !l.ready {
+		return l
+	}
 	return &Logger{
 		logger: l.logger.With().Str("controlchannel", id).Logger(),
 	}
 }
 
 func (l *Logger) GetDatachannelLogger(id string) *Logger {
+	if !l.ready {
+		return l
+	}
 	return &Logger{
 		logger: l.logger.With().Str("datachannel", id).Logger(),
 	}
 }
 
 func (l *Logger) GetWebsocketLogger(id string) *Logger {
+	if !l.ready {
+		return l
+	}
 	return &Logger{
 		logger: l.logger.With().Str("websocket", id).Logger(),
 	}
 }
 
 func (l *Logger) GetPluginLogger(pluginName string) *Logger {
+	if !l.ready {
+		return l
+	}
 	return &Logger{
 		logger: l.logger.With().Str("plugin", string(pluginName)).Logger(),
 	}
 }
 
 func (l *Logger) GetActionLogger(actionName string) *Logger {
+	if !l.ready {
+		return l
+	}
 	return &Logger{
 		logger: l.logger.With().
 			Str("action", actionName).
@@ -92,6 +118,9 @@ func (l *Logger) GetActionLogger(actionName string) *Logger {
 }
 
 func (l *Logger) GetComponentLogger(component string) *Logger {
+	if !l.ready {
+		return l
+	}
 	return &Logger{
 		logger: l.logger.With().
 			Str("component", component).
@@ -100,50 +129,70 @@ func (l *Logger) GetComponentLogger(component string) *Logger {
 }
 
 func (l *Logger) AddRequestId(rid string) {
-	l.logger = l.logger.With().Str("requestId", rid).Logger()
+	if l.ready {
+		l.logger = l.logger.With().Str("requestId", rid).Logger()
+	}
 }
 
 func (l *Logger) AddField(key string, value string) {
-	l.logger = l.logger.With().Str(key, value).Logger()
+	if l.ready {
+		l.logger = l.logger.With().Str(key, value).Logger()
+	}
 }
 
 func (l *Logger) Info(msg string) {
-	l.logger.Info().
-		Msg(msg)
+	if l.ready {
+		l.logger.Info().
+			Msg(msg)
+	}
 }
 
 func (l *Logger) Infof(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	l.Info(msg)
+	if l.ready {
+		msg := fmt.Sprintf(format, a...)
+		l.Info(msg)
+	}
 }
 
 func (l *Logger) Debug(msg string) {
-	l.logger.Debug().
-		Msg(msg)
+	if l.ready {
+		l.logger.Debug().
+			Msg(msg)
+	}
 }
 
 func (l *Logger) Debugf(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	l.Debug(msg)
+	if l.ready {
+		msg := fmt.Sprintf(format, a...)
+		l.Debug(msg)
+	}
 }
 
 func (l *Logger) Error(err error) {
-	l.logger.Error().
-		Stack(). // stack trace for errors woot
-		Msg(err.Error())
+	if l.ready {
+		l.logger.Error().
+			Stack(). // stack trace for errors woot
+			Msg(err.Error())
+	}
 }
 
 func (l *Logger) Errorf(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	l.Error(errors.New(msg))
+	if l.ready {
+		msg := fmt.Sprintf(format, a...)
+		l.Error(errors.New(msg))
+	}
 }
 
 func (l *Logger) Trace(msg string) {
-	l.logger.Trace().
-		Msg(msg)
+	if l.ready {
+		l.logger.Trace().
+			Msg(msg)
+	}
 }
 
 func (l *Logger) Tracef(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	l.Trace(msg)
+	if l.ready {
+		msg := fmt.Sprintf(format, a...)
+		l.Trace(msg)
+	}
 }
