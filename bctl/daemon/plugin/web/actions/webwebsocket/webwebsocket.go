@@ -48,20 +48,20 @@ func New(logger *logger.Logger,
 	return stream, stream.outputChan
 }
 
-func (s *WebWebsocketAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error {
+func (s *WebWebsocketAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
 	// this action ends at the end of this function, in order to signal that to the parent plugin,
 	// we close the output channel which will close the go routine listening on it
 	defer close(s.outputChan)
 
 	// First extract the headers out of the request
-	headers := utils.GetHeaders(Request.Header)
+	headers := utils.GetHeaders(request.Header)
 
 	// Let the agent know to open up a websocket
 	payload := webwebsocket.WebWebsocketStartActionPayload{
 		RequestId: s.requestId,
 		Headers:   headers,
-		Endpoint:  Request.URL.String(),
-		Method:    Request.Method,
+		Endpoint:  request.URL.String(),
+		Method:    request.Method,
 	}
 
 	// Send payload to plugin output queue
@@ -71,13 +71,13 @@ func (s *WebWebsocketAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, R
 		ActionPayload: payloadBytes,
 	}
 
-	return s.handleWebsocketRequest(Writer, Request)
+	return s.handleWebsocketRequest(writer, request)
 }
 
-func (s *WebWebsocketAction) handleWebsocketRequest(Writer http.ResponseWriter, Request *http.Request) error {
+func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, request *http.Request) error {
 	// Upgrade the connection
 	var upgrader = websocket.Upgrader{}
-	conn, err := upgrader.Upgrade(Writer, Request, nil)
+	conn, err := upgrader.Upgrade(writer, request, nil)
 	if err != nil {
 		log.Print("upgrade failed: ", err)
 		return err

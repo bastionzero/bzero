@@ -71,16 +71,16 @@ func (s *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Reques
 	return s.handleHttpRequest(Writer, Request)
 }
 
-func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *http.Request) error {
+func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
 	// First modify the host header to reflect what we are trying to connect too
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
-	Request.Header.Set("X-Forwarded-Host", Request.Host)
+	request.Header.Set("X-Forwarded-Host", request.Host)
 
 	// First extract the headers out of the request
-	headers := utils.GetHeaders(Request.Header)
+	headers := utils.GetHeaders(request.Header)
 
 	// Now extract the body
-	bodyInBytes, err := utils.GetBodyBytes(Request.Body)
+	bodyInBytes, err := utils.GetBodyBytes(request.Body)
 	if err != nil {
 		s.logger.Error(err)
 		return err
@@ -90,9 +90,9 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 	dataInPayload := webdial.WebDataInActionPayload{
 		RequestId:      s.requestId,
 		SequenceNumber: s.sequenceNumber,
-		Endpoint:       Request.URL.String(),
+		Endpoint:       request.URL.String(),
 		Headers:        headers,
-		Method:         Request.Method,
+		Method:         request.Method,
 		Body:           string(bodyInBytes), // fix this
 	}
 
@@ -124,20 +124,20 @@ func (s *WebDialAction) handleHttpRequest(Writer http.ResponseWriter, Request *h
 				// extract and build our writer headers
 				for name, values := range response.Headers {
 					for _, value := range values {
-						Writer.Header().Add(name, value)
+						writer.Header().Add(name, value)
 					}
 				}
 
 				// write response to user
-				Writer.WriteHeader(response.StatusCode)
-				Writer.Write(response.Content)
+				writer.WriteHeader(response.StatusCode)
+				writer.Write(response.Content)
 
 				return nil
 
 			case smsg.WebAgentClose:
 				// The agent has closed the connection, close the local connection as well
 				s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-				Request.Body.Close()
+				request.Body.Close()
 				return nil
 			default:
 				s.logger.Errorf("unhandled stream type: %s", data.Type)
