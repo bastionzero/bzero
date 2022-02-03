@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
 	"sync"
 
@@ -49,16 +48,6 @@ func New(parentTmb *tomb.Tomb,
 	var synPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
 		return nil, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
-	}
-
-	// Determine if we are using target hostname or host:port
-	address := synPayload.RemoteHost + ":" + fmt.Sprint(synPayload.RemotePort)
-
-	// Open up a connection to the TCP addr we are trying to connect to
-	raddr, err := net.ResolveTCPAddr("tcp", address)
-	if err != nil {
-		logger.Errorf("Failed to resolve remote address: %s", err)
-		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
 	}
 
 	plugin := &WebPlugin{

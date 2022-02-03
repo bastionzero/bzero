@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 	"gopkg.in/tomb.v2"
 
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -94,7 +94,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 	// Build the endpoint given the remoteHost
 	remoteUrl := fmt.Sprintf("%s:%v", w.remoteHost, w.remotePort)
 
-	endpoint, endpointErr := utils.JoinUrls(remoteUrl, dataIn.Endpoint)
+	endpoint, endpointErr := bzhttp.BuildEndpoint(remoteUrl, dataIn.Endpoint)
 	if endpointErr != nil {
 		return "", []byte{}, endpointErr
 	}

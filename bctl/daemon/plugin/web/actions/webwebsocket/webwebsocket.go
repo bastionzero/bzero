@@ -8,10 +8,10 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
 	bzwebwebsocket "bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 	"github.com/gorilla/websocket"
 
 	"gopkg.in/tomb.v2"
@@ -54,7 +54,7 @@ func (s *WebWebsocketAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, r
 	defer close(s.outputChan)
 
 	// First extract the headers out of the request
-	headers := utils.GetHeaders(request.Header)
+	headers := bzhttp.GetHeaders(request.Header)
 
 	// Let the agent know to open up a websocket
 	payload := webwebsocket.WebWebsocketStartActionPayload{
