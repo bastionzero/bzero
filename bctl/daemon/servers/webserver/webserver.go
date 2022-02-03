@@ -52,8 +52,6 @@ func StartWebServer(logger *logger.Logger,
 	localHost string,
 	targetPort int,
 	targetHost string,
-	certPath string,
-	keyPath string,
 	refreshTokenCommand string,
 	configPath string,
 	serviceUrl string,
@@ -95,7 +93,7 @@ func StartWebServer(logger *logger.Logger,
 			listener.handleHttp(logger, w, r)
 		})
 
-		if err := http.ListenAndServeTLS(localHost+":"+localPort, certPath, keyPath, nil); err != nil {
+		if err := http.ListenAndServe(fmt.Sprintf("%s:%s", localHost, localPort), nil); err != nil {
 			logger.Error(err)
 		}
 	}()

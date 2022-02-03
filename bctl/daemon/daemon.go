@@ -94,8 +94,6 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 		localHost,
 		remotePort,
 		remoteHost,
-		certPath,
-		keyPath,
 		refreshTokenCommand,
 		configPath,
 		serviceUrl,
