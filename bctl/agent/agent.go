@@ -285,7 +285,7 @@ func handleRegistration(logger *logger.Logger) error {
 			}
 		}
 	} else {
-		logger.Infof("The agent already registered")
+		logger.Infof("Bzero Agent is already registered")
 	}
 
 	return nil

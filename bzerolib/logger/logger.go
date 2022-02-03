@@ -76,6 +76,7 @@ func (l *Logger) GetControlChannelLogger(id string) *Logger {
 	}
 	return &Logger{
 		logger: l.logger.With().Str("controlchannel", id).Logger(),
+		ready:  true,
 	}
 }
 
@@ -85,6 +86,7 @@ func (l *Logger) GetDatachannelLogger(id string) *Logger {
 	}
 	return &Logger{
 		logger: l.logger.With().Str("datachannel", id).Logger(),
+		ready:  true,
 	}
 }
 
@@ -94,6 +96,7 @@ func (l *Logger) GetWebsocketLogger(id string) *Logger {
 	}
 	return &Logger{
 		logger: l.logger.With().Str("websocket", id).Logger(),
+		ready:  true,
 	}
 }
 
@@ -103,6 +106,7 @@ func (l *Logger) GetPluginLogger(pluginName string) *Logger {
 	}
 	return &Logger{
 		logger: l.logger.With().Str("plugin", string(pluginName)).Logger(),
+		ready:  true,
 	}
 }
 
@@ -114,6 +118,7 @@ func (l *Logger) GetActionLogger(actionName string) *Logger {
 		logger: l.logger.With().
 			Str("action", actionName).
 			Logger(),
+		ready: true,
 	}
 }
 
@@ -125,6 +130,8 @@ func (l *Logger) GetComponentLogger(component string) *Logger {
 		logger: l.logger.With().
 			Str("component", component).
 			Logger(),
+
+		ready: true,
 	}
 }
 
