@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"os"
+	"net/http"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
-	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	"github.com/google/uuid"
@@ -24,7 +23,7 @@ const (
 
 type WebServer struct {
 	logger    *logger.Logger
-	websocket *websocket.Websocket
+	websocket *bzwebsocket.Websocket
 	tmb       tomb.Tomb
 
 	// Web connections only require a single datachannel
@@ -87,43 +86,36 @@ func StartWebServer(logger *logger.Logger,
 		return err
 	}
 
-	// Now create our local listener for TCP connections
-	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
-	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
-	if err != nil {
-		logger.Errorf("Failed to resolve TCP address %s", err)
-		os.Exit(1)
-	}
+	// Create HTTP Server listens for incoming kubectl commands
+	go func() {
+		// Define our http handlers
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			listener.handleHttp(logger, w, r)
+		})
 
-	logger.Infof("Setting up TCP lister")
-	localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
-	if err != nil {
-		logger.Errorf("Failed to open local port to listen: %s", err)
-		os.Exit(1)
-	}
-
-	// Always ensure we close the local tcp connection when we exit
-	defer localTcpListener.Close()
-
-	// Block and keep listening for new tcp events
-	for {
-		conn, err := localTcpListener.AcceptTCP()
-		if err != nil {
-			logger.Errorf("Failed to accept connection '%s'", err)
-			continue
+		if err := http.ListenAndServe(fmt.Sprintf("%s:%s", localHost, localPort), nil); err != nil {
+			logger.Error(err)
 		}
+	}()
 
-		// Always generate a requestId, each new proxy connection is its own request
-		requestId := uuid.New().String()
-
-		go listener.handleProxy(conn, logger, requestId)
-	}
+	return nil
 }
 
-func (h *WebServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, requestId string) {
+func (h *WebServer) handleHttp(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
+	// Determine if we are trying to upgrade the request
+	isWebsocketRequest := r.Header.Get("Upgrade")
+
+	action := bzweb.Dial
+	// This will work for http 1.1 and that is what we need to support
+	// Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Upgrade
+	// Ref: https://datatracker.ietf.org/doc/html/rfc6455#section-1.7
+	if isWebsocketRequest == "websocket" {
+		action = bzweb.Websocket
+	}
 	food := bzweb.WebFood{
-		Action: bzweb.Dial,
-		Conn:   lconn,
+		Action:  action,
+		Request: r,
+		Writer:  w,
 	}
 	// Start the dial plugin
 	h.datachannel.Feed(food)
@@ -132,7 +124,7 @@ func (h *WebServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, reque
 // for creating new websockets
 func (h *WebServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Web); err != nil {
+	if wsClient, err := bzwebsocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, bzwebsocket.Web); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient
@@ -141,7 +133,7 @@ func (h *WebServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (h *WebServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
+func (h *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websocket) (*datachannel.DataChannel, error) {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
 	subLogger := h.logger.GetDatachannelLogger(dcId)

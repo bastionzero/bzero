@@ -1,13 +1,16 @@
 package webdial
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net"
+	"io/ioutil"
+	"net/http"
+	"net/url"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/utils"
 	"gopkg.in/tomb.v2"
 
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -28,23 +31,25 @@ type WebDial struct {
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan chan smsg.StreamMessage
 
-	requestId     string
-	remoteAddress *net.TCPAddr
+	remoteHost string
+	remotePort int
 
-	remoteConnection *net.TCPConn
+	requestId string
 }
 
 func New(logger *logger.Logger,
+	remoteHost string,
+	remotePort int,
 	pluginTmb *tomb.Tomb,
-	ch chan smsg.StreamMessage,
-	raddr *net.TCPAddr) (*WebDial, error) {
+	ch chan smsg.StreamMessage) (*WebDial, error) {
 
 	return &WebDial{
 		logger:           logger,
 		tmb:              pluginTmb,
 		closed:           false,
 		streamOutputChan: ch,
-		remoteAddress:    raddr,
+		remoteHost:       remoteHost,
+		remotePort:       remotePort,
 	}, nil
 }
 
@@ -72,23 +77,7 @@ func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 			return "", []byte{}, rerr
 		}
 
-		// First validate the requestId
-		if err := e.validateRequestId(dataIn.RequestId); err != nil {
-			return "", []byte{}, err
-		}
-
-		// Then send the data to our remote connection, decode the data first
-		dataToWrite, _ := base64.StdEncoding.DecodeString(dataIn.Data)
-
-		// Send this data to our remote connection
-		e.logger.Info("Received data from bastion, forwarding to remote tcp connection")
-		_, err := e.remoteConnection.Write(dataToWrite)
-		if err != nil {
-			e.logger.Errorf("error writing to to remote connection: %v", err)
-			return "", []byte{}, err
-		}
-
-		return "", []byte{}, nil
+		return e.HandleNewHttpRequest(action, dataIn)
 	default:
 		rerr := fmt.Errorf("unhandled stream action: %v", action)
 		e.logger.Error(rerr)
@@ -96,67 +85,106 @@ func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 	}
 }
 
+func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayload) (string, []byte, error) {
+	// First validate the requestId
+	if err := w.validateRequestId(dataIn.RequestId); err != nil {
+		return "", []byte{}, err
+	}
+
+	// Build the endpoint given the remoteHost
+	remoteUrl := fmt.Sprintf("%s:%v", w.remoteHost, w.remotePort)
+
+	endpoint, endpointErr := utils.JoinUrls(remoteUrl, dataIn.Endpoint)
+	if endpointErr != nil {
+		return "", []byte{}, endpointErr
+	}
+
+	// Now make a request to the endpoint given by the dataIn
+	w.logger.Infof("Making request for %s", endpoint)
+	req, err := BuildHttpRequest(endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
+	if err != nil {
+		return "", []byte{}, err
+	}
+
+	// Redefine the host header by parsing our the host from our remoteHost
+	remoteHostUrl, urlParseError := url.Parse(w.remoteHost)
+	if urlParseError != nil {
+		w.logger.Error(fmt.Errorf("error parsing url %s", w.remoteHost))
+		return "", []byte{}, err
+	}
+	req.Header.Set("Host", remoteHostUrl.Host)
+
+	// We don't want to attempt to follow any redirect, we want to allow the browser/client to decided to
+	// redirect if they choose too
+	// Ref: https://stackoverflow.com/questions/23297520/how-can-i-make-the-go-http-client-not-follow-redirects-automatically
+	httpClient := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	res, err := httpClient.Do(req)
+	var responsePayload WebDataOutActionPayload
+	if err != nil {
+		rerr := fmt.Errorf("bad response to API request: %s", err)
+		w.logger.Error(rerr)
+		// Do not quit, just return the user the info regarding the api request
+		responsePayload = WebDataOutActionPayload{
+			StatusCode: http.StatusInternalServerError,
+			RequestId:  dataIn.RequestId,
+			Headers:    map[string][]string{},
+			Content:    []byte{},
+		}
+	} else {
+		defer res.Body.Close()
+
+		// Build the header response
+		header := make(map[string][]string)
+		for key, value := range res.Header {
+			header[key] = value
+		}
+
+		// Parse out the body
+		bodyBytes, readErr := ioutil.ReadAll(res.Body)
+		if readErr != nil {
+			w.logger.Errorf("bad read on response body: %s", err)
+			// Do not quit, just return the user the info regarding the api request
+			responsePayload = WebDataOutActionPayload{
+				StatusCode: http.StatusInternalServerError,
+				RequestId:  dataIn.RequestId,
+				Headers:    map[string][]string{},
+				Content:    []byte{},
+			}
+		}
+
+		// Now we need to send that data back to the client
+		responsePayload = WebDataOutActionPayload{
+			StatusCode: res.StatusCode,
+			RequestId:  dataIn.RequestId,
+			Headers:    header,
+			Content:    bodyBytes,
+		}
+	}
+
+	responsePayloadBytes, _ := json.Marshal(responsePayload)
+
+	// Now send this to bastion
+	str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
+	message := smsg.StreamMessage{
+		Type:           string(smsg.WebOut),
+		RequestId:      w.requestId,
+		SequenceNumber: 0, // Always just 1 sequence
+		Content:        str,
+		LogId:          "", // No log id for web messages
+	}
+	w.streamOutputChan <- message
+
+	return "", []byte{}, nil
+}
+
 func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action string) (string, []byte, error) {
 	// Set our requestId
 	e.requestId = dialActionRequest.RequestId
 
-	// For each start, call the dial the TCP address
-	remoteConnection, err := net.DialTCP("tcp", nil, e.remoteAddress)
-	if err != nil {
-		e.logger.Errorf("Failed to dial remote address: %s", err)
-		// Let the agent know that there was an error
-		return action, []byte{}, err
-	}
-
-	// Setup a go routine to listen for messages coming from this local connection and forward to the client
-	// TODO: Setup tomb for this to be cancelled?
-	sequenceNumber := 1
-
-	go func() {
-		buff := make([]byte, 0xffff)
-		for {
-			n, err := remoteConnection.Read(buff)
-			if err != nil {
-				if err != io.EOF {
-					e.logger.Errorf("Read failed '%s'\n", err)
-				}
-
-				// Let our daemon know that we have got the error and we need to close the connection
-				message := smsg.StreamMessage{
-					Type:           string(smsg.WebAgentClose),
-					RequestId:      e.requestId,
-					SequenceNumber: sequenceNumber,
-					Content:        "", // No content for webAgent Close
-					LogId:          "", // No log id for web messages
-				}
-				e.streamOutputChan <- message
-
-				// Ensure that we close the dial action
-				e.closed = true
-				return
-			}
-
-			tcpBytesBuffer := buff[:n]
-
-			e.logger.Infof("Received %d bytes from local tcp connection, sending to bastion", n)
-
-			// Now send this to bastion
-			str := base64.StdEncoding.EncodeToString(tcpBytesBuffer)
-			message := smsg.StreamMessage{
-				Type:           string(smsg.WebOut),
-				RequestId:      e.requestId,
-				SequenceNumber: sequenceNumber,
-				Content:        str,
-				LogId:          "", // No log id for web messages
-			}
-			e.streamOutputChan <- message
-
-			sequenceNumber += 1
-		}
-	}()
-
-	// Update our remote connection
-	e.remoteConnection = remoteConnection
 	return action, []byte{}, nil
 }
 
@@ -167,4 +195,20 @@ func (e *WebDial) validateRequestId(requestId string) error {
 		return rerr
 	}
 	return nil
+}
+
+func BuildHttpRequest(endpoint string, body string, method string, headers map[string][]string) (*http.Request, error) {
+	bodyBytesReader := bytes.NewReader([]byte(body))
+	req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
+
+	// Add any headers
+	for name, values := range headers {
+		// Loop over all values for the name.
+		for _, value := range values {
+			req.Header.Set(name, value)
+		}
+
+	}
+
+	return req, nil
 }

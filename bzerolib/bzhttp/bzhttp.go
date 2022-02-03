@@ -222,11 +222,6 @@ func (b *bzhttp) get() (*http.Response, error) {
 			req.URL.RawQuery = q.Encode()
 
 			response, err = httpClient.Do(req)
-
-			if err != nil {
-				b.logger.Errorf("error making post request: %v", err)
-				return nil, err
-			}
 		}
 
 		// If the status code is unauthorized, do not attempt to retry

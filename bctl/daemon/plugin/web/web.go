@@ -3,13 +3,14 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"net"
+	"net/http"
 	"sync"
 
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web/actions/webdial"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web/actions/webwebsocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
@@ -20,7 +21,7 @@ import (
 type IWebDaemonAction interface {
 	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
+	Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error
 }
 
 type WebDaemonPlugin struct {
@@ -35,8 +36,8 @@ type WebDaemonPlugin struct {
 	actionMapLock sync.RWMutex // for keeping the action map thread-safe
 
 	// Web-specific vars
-	targetHost     string
-	targetPort     string
+	remoteHost     string
+	remotePort     int
 	sequenceNumber int
 }
 
@@ -48,8 +49,8 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActi
 		sequenceNumber:  0,
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
 		actions:         make(map[string]IWebDaemonAction),
-		targetHost:      "",
-		targetPort:      "",
+		remoteHost:      actionParams.RemoteHost,
+		remotePort:      actionParams.RemotePort,
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
@@ -141,6 +142,8 @@ func (k *WebDaemonPlugin) Feed(food interface{}) error {
 	switch webFood.Action {
 	case bzweb.Dial:
 		act, actOutputChan = webdial.New(actLogger, requestId)
+	case bzweb.Websocket:
+		act, actOutputChan = webwebsocket.New(actLogger, requestId)
 	default:
 		rerr := fmt.Errorf("unrecognized web action: %v", string(webFood.Action))
 		k.logger.Error(rerr)
@@ -170,7 +173,7 @@ func (k *WebDaemonPlugin) Feed(food interface{}) error {
 	k.logger.Infof("Created %s action with requestId %v", string(webFood.Action), requestId)
 
 	// send local tcp connection to action
-	if err := act.Start(k.tmb, webFood.Conn); err != nil {
+	if err := act.Start(k.tmb, webFood.Writer, webFood.Request); err != nil {
 		k.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
 	}
 
