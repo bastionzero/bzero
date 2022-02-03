@@ -468,7 +468,7 @@ func (w *Websocket) Connect() error {
 	}
 
 	// Make our POST request
-	negotiateEndpoint, err := bzhttp.BuildEndpoint(w.baseUrl, "/negotiate")
+	negotiateEndpoint, err := bzhttp.BuildEndpoint(w.baseUrl, "negotiate")
 	if err != nil {
 		return err
 	}

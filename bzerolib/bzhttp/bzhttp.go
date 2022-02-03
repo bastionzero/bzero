@@ -34,16 +34,21 @@ func BuildEndpoint(base string, toAdd string) (string, error) {
 	}
 	urlObject.Path = path.Join(urlObject.Path, toAdd)
 
+	// Now undo any url encoding that might have happened in UrlObject.String()
+	decodedUrl, err := url.QueryUnescape(urlObject.String())
+	if err != nil {
+		return "", err
+	}
+
 	// There is a problem with path.Join where it interally calls a Clean(..) function
 	// which will remove any trailing slashes, this causes issues when proxying requests
 	// that are expecting the trailing slash.
 	// Ref: https://forum.golangbridge.org/t/how-to-concatenate-paths-for-api-request/5791
-	toReturn := urlObject.String()
-	if strings.HasSuffix(toAdd, "/") {
-		toReturn += "/"
+	if strings.HasSuffix(toAdd, "/") && !strings.HasSuffix(decodedUrl, "/") {
+		decodedUrl += "/"
 	}
 
-	return toReturn, nil
+	return decodedUrl, nil
 }
 
 // Helper function to extract the body of a http request
