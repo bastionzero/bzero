@@ -17,6 +17,7 @@ type ErrorReport struct {
 	Timestamp string      `json:"timestamp"`
 	State     interface{} `json:"state"`
 	Message   string      `json:"message"`
+	Logs      string      `json:"logs"`
 }
 
 func ReportError(logger *logger.Logger, serviceUrl string, errReport ErrorReport) {
