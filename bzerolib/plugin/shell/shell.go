@@ -26,6 +26,8 @@ type ShellResizeMessage struct {
 	Rows uint32 `json:"rows"`
 }
 
+type ShellReplayMessage struct{}
+
 type ShellConfigParams struct {
 	RunAsUser string `json:"runasuser"`
 }
@@ -33,8 +35,9 @@ type ShellConfigParams struct {
 type ShellAction string
 
 const (
-	ShellOpen   ShellAction = "open"
-	ShellClose  ShellAction = "close"
-	ShellResize ShellAction = "resize"
-	ShellInput  ShellAction = "input"
+	ShellOpen    ShellAction = "open"
+	ShellClose   ShellAction = "close"
+	ShellResize  ShellAction = "resize"
+	ShellInput   ShellAction = "input"
+	ShelllReplay ShellAction = "replay"
 )
