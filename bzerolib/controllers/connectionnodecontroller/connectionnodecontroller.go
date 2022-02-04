@@ -29,7 +29,7 @@ const (
 	createWebConnectionEndpoint = "/api/v2/connections/web"
 
 	// General endpoints
-	getAuthDetailsEndpoint = "/api/v2/connections/$TYPE/$ID/$VERSION/connection-auth-details"
+	getAuthDetailsEndpoint = "/api/v2/connections/$ID/$VERSION/connection-auth-details"
 )
 
 func New(logger *logger.Logger,
@@ -120,15 +120,14 @@ func (c *ConnectionNodeController) createConnection(request interface{}, connect
 		return ConnectionDetailsResponse{}, fmt.Errorf("error un-marshalling create connection response")
 	}
 
-	return c.createCnConnection(createConnectionResponse.ConnectionId, connectionType)
+	return c.createCnConnection(createConnectionResponse.ConnectionId)
 }
 
-func (c *ConnectionNodeController) createCnConnection(connectionId string, typeOfConnection string) (ConnectionDetailsResponse, error) {
+func (c *ConnectionNodeController) createCnConnection(connectionId string) (ConnectionDetailsResponse, error) {
 	// Now use the connectionId to get the connectionNodeId and AuthToken
 
 	// Add our ID and type and version
 	getAuthDetailsEndpointFormatted := strings.Replace(getAuthDetailsEndpoint, "$ID", connectionId, -1)
-	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpointFormatted, "$TYPE", typeOfConnection, -1)
 	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpointFormatted, "$VERSION", c.params["version"], -1)
 
 	// Build our endpoint
