@@ -31,8 +31,3 @@ type CloseDataChannelMessage struct {
 	DataChannelId string `json:"dataChannelId"`
 	ConnectionId  string `json:"connectionId"`
 }
-
-type DataChannelReadyMessage struct {
-	DataChannelId string `json:"dataChannelId"`
-	ConnectionId  string `json:"connectionId"`
-}

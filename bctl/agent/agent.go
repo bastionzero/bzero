@@ -184,8 +184,6 @@ func ccTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 // data channel's function to select SignalR hubs base on agent message message type
 func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	switch am.MessageType(agentMessage.MessageType) {
-	case am.DataChannelReady:
-		return "DataChannelReadyV1", nil
 	case am.CloseDaemonWebsocket:
 		return "CloseDaemonWebsocketV1", nil
 	case am.Keysplitting:
