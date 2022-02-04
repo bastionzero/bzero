@@ -189,11 +189,11 @@ func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	case am.CloseDaemonWebsocket:
 		return "CloseDaemonWebsocketV1", nil
 	case am.Keysplitting:
-		return "ResponseClusterToBastionV1", nil
+		return "ResponseAgentToBastionV1", nil
 	case am.Stream:
-		return "ResponseClusterToBastionV1", nil
+		return "ResponseAgentToBastionV1", nil
 	case am.Error:
-		return "ResponseClusterToBastionV1", nil
+		return "ResponseAgentToBastionV1", nil
 	default:
 		return "", fmt.Errorf("unable to determine SignalR endpoint for message type: %s", agentMessage.MessageType)
 	}
