@@ -50,7 +50,7 @@ func main() {
 	if logger, err := setupLogger(); err != nil {
 		reportError(logger, err)
 	} else {
-		if err := parseFlags(logger * logger.Logger); err != nil {
+		if err := parseFlags(logger); err != nil {
 			reportError(logger, err)
 		}
 
