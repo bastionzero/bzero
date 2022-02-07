@@ -40,14 +40,20 @@ const (
 )
 
 func main() {
-	parseErr := parseFlags()
+	// determine agent type
+	if vault.InCluster() {
+		agentType = Cluster
+	} else {
+		agentType = Bzero
+	}
 
 	if logger, err := setupLogger(); err != nil {
 		reportError(logger, err)
-	} else if parseErr != nil {
-		// catch our parser errors now that we have a logger to print them
-		reportError(logger, parseErr)
 	} else {
+		if err := parseFlags(logger * logger.Logger); err != nil {
+			reportError(logger, err)
+		}
+
 		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
 
 		// Check if the agent is registered or not.  If not, generate signing keys,
@@ -203,7 +209,8 @@ func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	}
 }
 
-func parseFlags() error {
+func parseFlags(logger *logger.Logger) error {
+	logger.Infof("parsing flags")
 	// Our required registration flags
 	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
 	flag.StringVar(&apiKey, "apiKey", "", "API Key used to register the agent")
@@ -219,6 +226,8 @@ func parseFlags() error {
 	// Parse any flag
 	flag.Parse()
 
+	logger.Infof("flags parsed wtf serviceUrl: %s, apiKey: %s", serviceUrl, apiKey)
+
 	// The environment will overwrite any flags passed
 	serviceUrl = os.Getenv("SERVICE_URL")
 	activationToken = os.Getenv("ACTIVATION_TOKEN")
@@ -231,12 +240,7 @@ func parseFlags() error {
 	namespace = os.Getenv("NAMESPACE")
 	apiKey = os.Getenv("API_KEY")
 
-	// determine agent type
-	if vault.InCluster() {
-		agentType = Cluster
-	} else {
-		agentType = Bzero
-	}
+	logger.Infof("after our get env calls serviceUrl: %s, apiKey: %s", serviceUrl, apiKey)
 
 	// Make sure our service url is correctly formatted
 	if !strings.HasPrefix(serviceUrl, "http") {
@@ -246,6 +250,7 @@ func parseFlags() error {
 			serviceUrl = url
 		}
 	}
+	logger.Infof("at the very end serviceUrl: %s, apiKey: %s", serviceUrl, apiKey)
 	return nil
 }
 
