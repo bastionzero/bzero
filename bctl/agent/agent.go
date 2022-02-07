@@ -40,13 +40,18 @@ const (
 )
 
 func main() {
-	parseErr := parseFlags()
+	// determine agent type
+	if vault.InCluster() {
+		agentType = Cluster
+	} else {
+		agentType = Bzero
+	}
 
 	if logger, err := setupLogger(); err != nil {
 		reportError(logger, err)
-	} else if parseErr != nil {
+	} else if err := parseFlags(); err != nil {
 		// catch our parser errors now that we have a logger to print them
-		reportError(logger, parseErr)
+		reportError(logger, err)
 	} else {
 		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
 
@@ -83,8 +88,14 @@ func main() {
 }
 
 func setupLogger() (*logger.Logger, error) {
+	// if this is systemd, output files
+	logFile := ""
+	if agentType == Bzero {
+		logFile = "/var/log/$BZERO_PKG_NAME.log"
+	}
+
 	// setup our loggers
-	if logger, err := logger.New(logger.Debug, ""); err != nil {
+	if logger, err := logger.New(logger.Debug, logFile); err != nil {
 		return logger, err
 	} else {
 		logger.AddAgentVersion(getAgentVersion())
@@ -214,22 +225,16 @@ func parseFlags() error {
 	flag.Parse()
 
 	// The environment will overwrite any flags passed
-	serviceUrl = os.Getenv("SERVICE_URL")
-	activationToken = os.Getenv("ACTIVATION_TOKEN")
-	orgId = os.Getenv("ORG_ID")
-	targetName = os.Getenv("TARGET_NAME")
-	targetId = os.Getenv("TARGET_ID")
-	environmentId = os.Getenv("ENVIRONMENT")
-	idpProvider = os.Getenv("IDP_PROVIDER")
-	idpOrgId = os.Getenv("IDP_ORG_ID")
-	namespace = os.Getenv("NAMESPACE")
-	apiKey = os.Getenv("API_KEY")
-
-	// determine agent type
-	if vault.InCluster() {
-		agentType = Cluster
-	} else {
-		agentType = Bzero
+	if agentType == Cluster {
+		serviceUrl = os.Getenv("SERVICE_URL")
+		activationToken = os.Getenv("ACTIVATION_TOKEN")
+		targetName = os.Getenv("TARGET_NAME")
+		targetId = os.Getenv("TARGET_ID")
+		environmentId = os.Getenv("ENVIRONMENT")
+		idpProvider = os.Getenv("IDP_PROVIDER")
+		idpOrgId = os.Getenv("IDP_ORG_ID")
+		namespace = os.Getenv("NAMESPACE")
+		apiKey = os.Getenv("API_KEY")
 	}
 
 	// Make sure our service url is correctly formatted
