@@ -192,7 +192,7 @@ func (r *Registration) getRegistrationResponse(activationToken string) (Registra
 		TargetName:     r.config.Data.TargetName,
 		TargetHostName: hostname,
 		TargetId:       activationToken,
-		AwsRegion:      region,
+		Region:         region,
 	}
 
 	// Build the endpoint we want to hit
