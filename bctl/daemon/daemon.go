@@ -220,7 +220,7 @@ func parseFlags() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requiredFlags := []string{"sessionId", "authHeader", "serviceURL", "logPath", "configPath", "localPort"}
+	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort"}
 	switch plugin {
 	case "kube":
 		requiredFlags = append(requiredFlags, "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
