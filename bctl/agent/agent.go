@@ -60,20 +60,7 @@ func main() {
 		if err := handleRegistration(logger); err != nil {
 			reportError(logger, err)
 		} else {
-
-			// Connect the control channel to BastionZero
-			logger.Info("Creating connection to BastionZero...")
-			if control, err := startControlChannel(logger, getAgentVersion()); err != nil {
-				reportError(logger, err)
-			} else {
-				logger.Info("Connection created successfully. Listening for incoming commands...")
-
-				// If this is this agent uses systemd, then we wait until we recieve a kill signal
-				if agentType == Bzero {
-					signal := blockUntilSignaled()
-					control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
-				}
-			}
+			run(logger)
 		}
 	}
 
@@ -84,6 +71,38 @@ func main() {
 		select {}
 	case Bzero:
 		os.Exit(1)
+	}
+}
+
+func run(logger *logger.Logger) {
+	defer func() {
+		// recover in case the agent panics
+		// this should handle some kind of seg fault errors.
+		if msg := recover(); msg != nil {
+			reportError(logger, fmt.Errorf("bzero agent crashed with panic: %+v", msg))
+			if agentType == Bzero {
+				os.Exit(1)
+			} else {
+				select {}
+			}
+		}
+	}()
+
+	// Connect the control channel to BastionZero
+	logger.Info("Creating connection to BastionZero...")
+	if control, err := startControlChannel(logger, getAgentVersion()); err != nil {
+		reportError(logger, err)
+	} else {
+		logger.Info("Connection created successfully. Listening for incoming commands...")
+
+		// If this is this agent uses systemd, then we wait until we recieve a kill signal
+		if agentType == Bzero {
+			signal := blockUntilSignaled()
+			control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
+			os.Exit(1)
+		} else {
+			select {}
+		}
 	}
 }
 
