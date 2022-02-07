@@ -33,7 +33,8 @@ var (
 )
 
 const (
-	version = "$DAEMON_VERSION"
+	version        = "$DAEMON_VERSION"
+	prodServiceUrl = "https://cloud.bastionzero.com"
 )
 
 func main() {
@@ -76,17 +77,12 @@ func reportError(logger *logger.Logger, errorReport error) {
 		logger.Error(errorReport)
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = ""
-	}
-
 	errReport := errorreport.ErrorReport{
 		Reporter:  "daemon-" + version,
 		Timestamp: fmt.Sprint(time.Now().Unix()),
 		Message:   errorReport.Error(),
 		State: map[string]string{
-			"targetHostName": hostname,
+			"targetHostName": "",
 			"goos":           runtime.GOOS,
 			"goarch":         runtime.GOARCH,
 		},
@@ -191,7 +187,7 @@ func parseFlags() error {
 	flag.StringVar(&authHeader, "authHeader", "", "Auth Header From Zli")
 
 	// Our expected flags we need to start
-	flag.StringVar(&serviceUrl, "serviceURL", "", "Service URL to use")
+	flag.StringVar(&serviceUrl, "serviceURL", prodServiceUrl, "Service URL to use")
 	flag.StringVar(&targetId, "targetId", "", "Kube Cluster Id to Connect to")
 	flag.StringVar(&plugin, "plugin", "", "Plugin to activate (kube, db, web)")
 	flag.StringVar(&localPort, "localPort", "", "Daemon Port To Use")
@@ -212,6 +208,15 @@ func parseFlags() error {
 	flag.StringVar(&remoteHost, "remoteHost", "", "Remote target host to connect to")
 
 	flag.Parse()
+
+	// Make sure our service url is correctly formatted
+	if !strings.HasPrefix(serviceUrl, "http") {
+		if url, err := bzhttp.BuildEndpoint("https://", serviceUrl); err != nil {
+			return fmt.Errorf("error adding scheme to serviceUrl %s: %s", serviceUrl, err)
+		} else {
+			serviceUrl = url
+		}
+	}
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
@@ -246,15 +251,6 @@ func parseFlags() error {
 	targetGroups = []string{}
 	if targetGroupsRaw != "" {
 		targetGroups = strings.Split(targetGroupsRaw, ",")
-	}
-
-	// Make sure our service url is correctly formatted
-	if !strings.HasPrefix(serviceUrl, "http") {
-		if url, err := bzhttp.BuildEndpoint("https://", serviceUrl); err != nil {
-			return fmt.Errorf("error adding scheme to serviceUrl %s: %s", serviceUrl, err)
-		} else {
-			serviceUrl = url
-		}
 	}
 
 	return nil
