@@ -27,7 +27,7 @@ import (
 var (
 	serviceUrl, orgId                string
 	environmentId, environmentName   string
-	activationToken, apiKey          string
+	activationToken, registrationKey string
 	idpProvider, namespace, idpOrgId string
 	targetId, targetName, agentType  string
 )
@@ -120,7 +120,7 @@ func reportError(logger *logger.Logger, errorReport error) {
 		Message:   errorReport.Error(),
 		State: map[string]string{
 			"activationToken": activationToken,
-			"registrationKey": apiKey,
+			"registrationKey": registrationKey,
 			"targetName":      targetName,
 			"targetHostName":  hostname,
 			"goos":            runtime.GOOS,
@@ -211,7 +211,7 @@ func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 func parseFlags() error {
 	// Our required registration flags
 	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
-	flag.StringVar(&apiKey, "apiKey", "", "API Key used to register the agent")
+	flag.StringVar(&registrationKey, "registrationKey", "", "API Key used to register the agent")
 
 	// All optional flags
 	flag.StringVar(&serviceUrl, "serviceUrl", prodServiceUrl, "Service URL to use")
@@ -234,7 +234,7 @@ func parseFlags() error {
 		idpProvider = os.Getenv("IDP_PROVIDER")
 		idpOrgId = os.Getenv("IDP_ORG_ID")
 		namespace = os.Getenv("NAMESPACE")
-		apiKey = os.Getenv("API_KEY")
+		registrationKey = os.Getenv("API_KEY")
 	}
 
 	// Make sure our service url is correctly formatted
@@ -264,8 +264,8 @@ func handleRegistration(logger *logger.Logger) error {
 
 	// Check if there is a public key in the vault, if not then agent is not registered
 	if config.Data.PublicKey == "" {
-		// we need either an activation token or an apikey to register the agent
-		if activationToken == "" && apiKey == "" {
+		// we need either an activation token or an registration key to register the agent
+		if activationToken == "" && registrationKey == "" {
 			return fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
 		} else {
 			// Save flags passed to our config
@@ -283,7 +283,7 @@ func handleRegistration(logger *logger.Logger) error {
 			}
 
 			// register the agent with bastion, if not already registered
-			if err := registration.Register(logger, serviceUrl, activationToken, apiKey); err != nil {
+			if err := registration.Register(logger, serviceUrl, activationToken, registrationKey); err != nil {
 				return err
 			}
 		}
