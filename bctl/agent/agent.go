@@ -83,8 +83,14 @@ func main() {
 }
 
 func setupLogger() (*logger.Logger, error) {
+	// if we're in kube, we only want stdout, if we're
+	logFile := ""
+	if agentType == Bzero {
+		logFile = "/var/log/bzero/bzero-agent.log"
+	}
+
 	// setup our loggers
-	if logger, err := logger.New(logger.Debug, ""); err != nil {
+	if logger, err := logger.New(logger.Debug, logFile); err != nil {
 		return logger, err
 	} else {
 		logger.AddAgentVersion(getAgentVersion())
