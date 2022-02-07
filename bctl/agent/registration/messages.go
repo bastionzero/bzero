@@ -19,7 +19,7 @@ type RegistrationRequest struct {
 	TargetHostName  string `json:"targetHostName"`
 	TargetType      string `json:"agentType"`
 	TargetId        string `json:"targetId"`
-	AwsRegion       string `json:"awsRegion"`
+	Region          string `json:"region"`
 }
 
 type RegistrationResponse struct {
