@@ -204,6 +204,14 @@ func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 }
 
 func parseFlags() error {
+	// determine agent type
+	if vault.InCluster() {
+		agentType = Cluster
+	} else {
+		agentType = Bzero
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	}
+
 	// Our required registration flags
 	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
 	flag.StringVar(&apiKey, "apiKey", "", "API Key used to register the agent")
@@ -230,13 +238,6 @@ func parseFlags() error {
 	idpOrgId = os.Getenv("IDP_ORG_ID")
 	namespace = os.Getenv("NAMESPACE")
 	apiKey = os.Getenv("API_KEY")
-
-	// determine agent type
-	if vault.InCluster() {
-		agentType = Cluster
-	} else {
-		agentType = Bzero
-	}
 
 	// Make sure our service url is correctly formatted
 	if !strings.HasPrefix(serviceUrl, "http") {
