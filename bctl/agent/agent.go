@@ -91,7 +91,7 @@ func setupLogger() (*logger.Logger, error) {
 	// if this is systemd, output files
 	logFile := ""
 	if agentType == Bzero {
-		logFile = "/var/log/$BZERO_PKG_NAME.log"
+		logFile = "/var/log/bzero/bzero-agent.log" // bzero-agent is protect here because we replace at build with name at build
 	}
 
 	// setup our loggers
@@ -286,6 +286,8 @@ func handleRegistration(logger *logger.Logger) error {
 			if err := registration.Register(logger, serviceUrl, activationToken, registrationKey); err != nil {
 				return err
 			}
+
+			os.Exit(0) // restart our agent
 		}
 	} else {
 		logger.Infof("Bzero Agent is already registered")
