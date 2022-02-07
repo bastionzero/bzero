@@ -48,50 +48,53 @@ func main() {
 	}
 
 	if logger, err := setupLogger(); err != nil {
-		reportError(logger, err)
+		handleError(logger, err)
 	} else if err := parseFlags(); err != nil {
 		// catch our parser errors now that we have a logger to print them
-		reportError(logger, err)
+		handleError(logger, err)
 	} else {
 		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
 
 		// Check if the agent is registered or not.  If not, generate signing keys,
 		// check kube permissions and setup, and register with the Bastion.
 		if err := handleRegistration(logger); err != nil {
-			reportError(logger, err)
+			handleError(logger, err)
 		} else {
 
 			// Connect the control channel to BastionZero
 			logger.Info("Creating connection to BastionZero...")
 			if control, err := startControlChannel(logger, getAgentVersion()); err != nil {
-				reportError(logger, err)
+				handleError(logger, err)
 			} else {
 				logger.Info("Connection created successfully. Listening for incoming commands...")
-
-				// If this is this agent uses systemd, then we wait until we recieve a kill signal
-				if agentType == Bzero {
-					signal := blockUntilSignaled()
-					control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
-				}
+				run(control)
 			}
 		}
 	}
+}
 
+func run(control *controlchannel.ControlChannel) {
 	switch agentType {
 	case Cluster:
 		// Sleep forever because otherwise kube will endlessly try restarting
 		// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
 		select {}
 	case Bzero:
+		// If this is this agent uses systemd, then we wait until we recieve a kill signal
+		signal := blockUntilSignaled()
+
+		// shut down all of our go subroutines
+		control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
 		os.Exit(1)
 	}
+
 }
 
 func setupLogger() (*logger.Logger, error) {
 	// if this is systemd, output files
 	logFile := ""
 	if agentType == Bzero {
-		logFile = "/var/log/$BZERO_PKG_NAME.log"
+		logFile = "/var/log/bzero/bzero-agent.log" // bzero-agent is protect here because we replace at build with name at build
 	}
 
 	// setup our loggers
@@ -104,16 +107,17 @@ func setupLogger() (*logger.Logger, error) {
 }
 
 // report early errors to the bastion so we have greater visibility
-func reportError(logger *logger.Logger, errorReport error) {
-	if logger != nil {
-		logger.Error(errorReport)
-	}
+func handleError(logger *logger.Logger, errorReport error) {
+	// log the error
+	logger.Error(errorReport)
 
+	// grab our agent's host name
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = ""
 	}
 
+	// report our error back to the bastion
 	errReport := errorreport.ErrorReport{
 		Reporter:  "agent-" + getAgentVersion(),
 		Timestamp: fmt.Sprint(time.Now().Unix()),
@@ -127,8 +131,17 @@ func reportError(logger *logger.Logger, errorReport error) {
 			"goarch":          runtime.GOARCH,
 		},
 	}
-
 	errorreport.ReportError(logger, serviceUrl, errReport)
+
+	// decide how to proceed after hitting error
+	switch agentType {
+	case Cluster:
+		// Sleep forever because otherwise kube will endlessly try restarting
+		// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
+		select {}
+	case Bzero:
+		os.Exit(1)
+	}
 }
 
 // ref: https://github.com/bastionzero/bzero-ssm-agent/blob/76d133c565bb7e11683f63fbc23d39fa0840df14/core/agent.go#L89
