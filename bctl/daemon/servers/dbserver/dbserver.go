@@ -94,7 +94,7 @@ func StartDbServer(logger *logger.Logger,
 		os.Exit(1)
 	}
 
-	logger.Infof("Setting up TCP lister")
+	logger.Infof("Setting up TCP listener")
 	localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
 	if err != nil {
 		logger.Errorf("Failed to open local port to listen: %s", err)
