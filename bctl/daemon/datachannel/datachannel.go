@@ -53,7 +53,7 @@ type DataChannel struct {
 	ready        bool
 	plugin       plugin.IPlugin
 	keysplitting keysplitting.IKeysplitting
-	handshook    bool // aka whether we need to send a syn
+	handshook    bool // bool to indicate if we have received a valid syn ack (initally set to false)
 
 	// channels for incoming messages
 	inputChan chan am.AgentMessage
