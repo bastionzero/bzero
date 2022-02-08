@@ -134,7 +134,7 @@ func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, reques
 // for creating new websockets
 func (h *DbServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Db); err != nil {
+	if wsClient, err := websocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Db); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient

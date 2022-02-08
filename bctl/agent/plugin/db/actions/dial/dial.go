@@ -57,7 +57,7 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			break
 		}
 
-		return d.StartDial(dialActionRequest, action)
+		return d.startDial(dialActionRequest, action)
 	case dial.DialInput:
 		// Deserialize the action payload, the only action passed is DataIn
 		var dataIn dial.DialInputActionPayload
@@ -90,7 +90,7 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 	return "", []byte{}, err
 }
 
-func (d *Dial) StartDial(dialActionRequest dial.DialActionPayload, action string) (string, []byte, error) {
+func (d *Dial) startDial(dialActionRequest dial.DialActionPayload, action string) (string, []byte, error) {
 	// Set our requestId
 	d.requestId = dialActionRequest.RequestId
 

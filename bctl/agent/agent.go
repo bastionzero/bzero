@@ -54,7 +54,6 @@ func main() {
 		reportError(logger, err)
 	} else {
 		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
-		logger.Infof("ServiceUrl: %s", serviceUrl)
 
 		// Check if the agent is registered or not.  If not, generate signing keys,
 		// check kube permissions and setup, and register with the Bastion.
@@ -96,14 +95,9 @@ func run(logger *logger.Logger) {
 	} else {
 		logger.Info("Connection created successfully. Listening for incoming commands...")
 
-		// If this is this agent uses systemd, then we wait until we recieve a kill signal
-		if agentType == Bzero {
-			signal := blockUntilSignaled()
-			control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
-			os.Exit(1)
-		} else {
-			select {}
-		}
+		// wait until we recieve a kill signal and quit
+		signal := blockUntilSignaled()
+		control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
 	}
 }
 
@@ -190,7 +184,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 	// create a websocket
 	wsId := uuid.New().String()
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
-	websocket, err := websocket.New(wsLogger, wsId, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.AgentControl)
+	websocket, err := websocket.New(wsLogger, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.AgentControl)
 	if err != nil {
 		return nil, err
 	}
@@ -284,13 +278,16 @@ func handleRegistration(logger *logger.Logger) error {
 
 		// we need either an activation token or an registration key to register the agent
 		if activationToken == "" && registrationKey == "" {
-			return fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
+			// we're likely to get this error when first starting up, and it's not something bzero cares about
+			logger.Errorf("in order to register the agent, user must provide either an activation token or api key")
+			return nil
 		} else {
 
 			// Only check RBAC permissions if we are inside a cluster
 			if vault.InCluster() {
 				if err := rbac.CheckPermissions(logger, namespace); err != nil {
-					return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
+					logger.Errorf("error verifying agent kubernetes setup: %s", err)
+					return nil // same as above
 				} else {
 					logger.Info("Namespace and service account permissions verified")
 				}
@@ -305,9 +302,6 @@ func handleRegistration(logger *logger.Logger) error {
 		}
 	} else {
 		logger.Infof("Bzero Agent is already registered {serviceUrl: %s, targetName: %s", serviceUrl, targetName)
-		if config, err := vault.LoadVault(); err == nil {
-			logger.Infof("Config: %+v", config)
-		}
 	}
 
 	return nil
@@ -335,7 +329,6 @@ func isRegistered() (bool, error) {
 		if err := config.Save(); err != nil {
 			return registered, fmt.Errorf("error saving vault: %s", err)
 		}
-		time.Sleep(1 * time.Second)
 	} else {
 		registered = true
 

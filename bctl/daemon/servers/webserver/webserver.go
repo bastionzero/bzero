@@ -124,7 +124,7 @@ func (h *WebServer) handleHttp(logger *logger.Logger, w http.ResponseWriter, r *
 // for creating new websockets
 func (h *WebServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := bzwebsocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, bzwebsocket.Web); err != nil {
+	if wsClient, err := bzwebsocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, bzwebsocket.Web); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient

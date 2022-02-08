@@ -90,6 +90,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		// Check BZCert matches one we have stored
 		if certMetadata, ok := k.bzCerts[dataPayload.BZCertHash]; !ok {
 			return fmt.Errorf("could not match BZCert hash to one previously received")
+		} else if time.Now().After(certMetadata.Exp) {
+			return fmt.Errorf("BZCert is expired")
 		} else {
 
 			// Verify the Signature

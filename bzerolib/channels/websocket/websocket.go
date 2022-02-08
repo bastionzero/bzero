@@ -104,7 +104,6 @@ type Websocket struct {
 
 // Constructor to create a new common websocket client object that can be shared by the daemon and server
 func New(logger *logger.Logger,
-	id string,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
@@ -230,9 +229,6 @@ func (w *Websocket) receive() error {
 					rerr := errors.New("closing message received; websocket closed")
 					w.Close(rerr)
 					return rerr
-				case "ReadyBastionToClient": // Bastion letting client know the websocket's ready
-					w.logger.Info("Connection Ready")
-					w.ready = true
 				default:
 					w.ready = true
 
@@ -556,13 +552,4 @@ func (w *Websocket) getChannel(id string) (IChannel, bool) {
 
 	channel, ok := w.channels[id]
 	return channel, ok
-}
-
-// Helper function to build connection node Url from our base url
-func (w *Websocket) buildConnectionNodeUrl(connectionNodeId string) string {
-	// Determine the prefix of the url (i.e. cloud.bastionzero.com -> cloud)
-	urlPrefix := strings.Split(w.serviceUrl, ".bastionzero.com")[0]
-
-	// Build the connect url
-	return urlPrefix + "-connect.bastionzero.com/" + connectionNodeId
 }

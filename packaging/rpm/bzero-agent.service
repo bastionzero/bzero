@@ -5,8 +5,8 @@ Description=$BZERO_PKG_NAME
 After=network-online.target
 
 # Only try to restart thrice (v230 and above).
-# StartLimitBurst=3
-# StartLimitIntervalSec=400
+StartLimitBurst=3
+StartLimitIntervalSec=20
 
 [Install]
 WantedBy=multi-user.target
@@ -26,5 +26,5 @@ RestartPreventExitStatus=194 234
 RestartSec=5
 
 # Only try to restart thrice (v229 and below).
-# StartLimitInterval=400
-# StartLimitBurst=3
+StartLimitInterval=20
+StartLimitBurst=3

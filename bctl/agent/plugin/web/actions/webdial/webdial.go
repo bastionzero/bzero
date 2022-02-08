@@ -67,7 +67,7 @@ func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 			return action, []byte{}, rerr
 		}
 
-		return e.StartDial(webDialActionRequest, action)
+		return e.startDial(webDialActionRequest, action)
 	case WebDialDataIn:
 		// Deserialize the action payload, the only action passed is DataIn
 		var dataIn WebDataInActionPayload
@@ -181,7 +181,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 	return "", []byte{}, nil
 }
 
-func (e *WebDial) StartDial(dialActionRequest WebDialActionPayload, action string) (string, []byte, error) {
+func (e *WebDial) startDial(dialActionRequest WebDialActionPayload, action string) (string, []byte, error) {
 	// Set our requestId
 	e.requestId = dialActionRequest.RequestId
 

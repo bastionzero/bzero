@@ -71,6 +71,7 @@ func Start(logger *logger.Logger,
 	// The ChannelId is mostly for distinguishing multiple channels over a single websocket but the control channel has
 	// its own dedicated websocket.  This also makes it so there can only ever be one control channel associated with a
 	// given websocket at any time.
+	// TODO: figure out a way to let control channel know its own id before it subscribes
 	websocket.Subscribe("", control)
 
 	// Set up our handler to deal with incoming messages
@@ -145,7 +146,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	params["connectionType"] = message.Type
 	params["connection_service_url"] = message.ConnectionServiceUrl
 
-	if ws, err := websocket.New(subLogger, message.ConnectionId, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
+	if ws, err := websocket.New(subLogger, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary

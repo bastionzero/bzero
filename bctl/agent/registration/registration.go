@@ -43,9 +43,6 @@ func Register(logger *logger.Logger, serviceUrl string, activationToken string, 
 		if activationToken == "" && apiKey == "" {
 			return fmt.Errorf("in order to register, we need either an api or activation token")
 		}
-		if serviceUrl == "" {
-			return fmt.Errorf("serviceUrl can't be empty")
-		}
 
 		logger.Infof("Agent is not yet registered, starting registration process!")
 
@@ -70,8 +67,6 @@ func Register(logger *logger.Logger, serviceUrl string, activationToken string, 
 		if err := reg.config.Save(); err != nil {
 			return fmt.Errorf("error saving vault: %s", err)
 		}
-
-		logger.Infof("Saved vault: %+v", reg.config)
 
 		logger.Info("Registration complete!")
 		return nil
