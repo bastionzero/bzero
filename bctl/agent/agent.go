@@ -301,7 +301,7 @@ func handleRegistration(logger *logger.Logger) error {
 			os.Exit(0) // restart our agent
 		}
 	} else {
-		logger.Infof("Bzero Agent is already registered {serviceUrl: %s, targetName: %s", serviceUrl, targetName)
+		logger.Infof("Bzero Agent is already registered with %s", serviceUrl)
 	}
 
 	return nil
@@ -313,7 +313,7 @@ func isRegistered() (bool, error) {
 	// load out config
 	if config, err := vault.LoadVault(); err != nil {
 		return registered, fmt.Errorf("could not load vault: %s", err)
-	} else if config.Data.PublicKey == "" { // no public key means unregistered
+	} else if config.Data.PublicKey == "" && flag.NFlag() > 0 { // no public key means unregistered
 
 		// Save flags passed to our config so registration can access them
 		config.Data = vault.SecretData{
