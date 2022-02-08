@@ -23,7 +23,7 @@ KillMode=process
 # requested) or 234 (Bzero reg error), don't restart at all.
 Restart=always
 RestartPreventExitStatus=194 234
-RestartSec=90
+RestartSec=5
 
 # Only try to restart thrice (v229 and below).
 # StartLimitInterval=400
