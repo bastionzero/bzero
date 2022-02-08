@@ -70,7 +70,7 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 			return "", []byte{}, rerr
 		}
 
-		return e.StartWebsocket(webWebsocketStartRequest, action)
+		return e.startWebsocket(webWebsocketStartRequest, action)
 	case DataIn:
 		// Deserialize the action payload, the only action passed is DataIn
 		var webWebsocketDataIn WebWebsocketDataInActionPayload
@@ -85,7 +85,7 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 			return "", []byte{}, err
 		}
 
-		return e.DataInWebsocket(webWebsocketDataIn, action)
+		return e.dataInWebsocket(webWebsocketDataIn, action)
 	case DaemonStop:
 		// The daemon has closed the websocket, close this one as well
 		// Deserialize the action payload, the only action passed is DataIn
@@ -115,7 +115,7 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 	}
 }
 
-func (e *WebWebsocket) DataInWebsocket(webWebsocketDataIn WebWebsocketDataInActionPayload, action string) (string, []byte, error) {
+func (e *WebWebsocket) dataInWebsocket(webWebsocketDataIn WebWebsocketDataInActionPayload, action string) (string, []byte, error) {
 	// Decode the message
 	messageDecoded, err := base64.StdEncoding.DecodeString(webWebsocketDataIn.Message)
 	if err != nil {
@@ -131,7 +131,7 @@ func (e *WebWebsocket) DataInWebsocket(webWebsocketDataIn WebWebsocketDataInActi
 	return action, []byte{}, nil
 }
 
-func (e *WebWebsocket) StartWebsocket(webWebsocketStartRequest WebWebsocketStartActionPayload, action string) (string, []byte, error) {
+func (e *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStartActionPayload, action string) (string, []byte, error) {
 	// Set our requestId
 	e.requestId = webWebsocketStartRequest.RequestId
 
