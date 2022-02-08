@@ -45,14 +45,14 @@ func New(parentTmb *tomb.Tomb,
 	payload []byte) (*WebPlugin, error) {
 
 	// Unmarshal the Syn payload
-	var synPayload bzweb.WebActionParams
-	if err := json.Unmarshal(payload, &synPayload); err != nil {
+	var actionPayload bzweb.WebActionParams
+	if err := json.Unmarshal(payload, &actionPayload); err != nil {
 		return nil, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
 	plugin := &WebPlugin{
-		remotePort:       synPayload.RemotePort,
-		remoteHost:       synPayload.RemoteHost,
+		remotePort:       actionPayload.RemotePort,
+		remoteHost:       actionPayload.RemoteHost,
 		logger:           logger,
 		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,
