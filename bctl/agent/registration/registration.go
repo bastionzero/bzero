@@ -71,7 +71,9 @@ func Register(logger *logger.Logger, serviceUrl string, activationToken string, 
 			return fmt.Errorf("error saving vault: %s", err)
 		}
 
-		logger.Info("Registration complete!  Starting Agent")
+		logger.Infof("Saved vault: %+v", reg.config)
+
+		logger.Info("Registration complete!")
 		return nil
 	}
 }

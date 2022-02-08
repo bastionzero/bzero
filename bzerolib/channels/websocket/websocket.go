@@ -131,7 +131,7 @@ func New(logger *logger.Logger,
 		baseUrl:             "",
 	}
 
-	// Connect to the websocket in a go routine incase it takes a long time
+	// Connect to the websocket in a go routine in case it takes a long time
 	go func() {
 		if err := ws.Connect(); err != nil {
 			logger.Error(err)

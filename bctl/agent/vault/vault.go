@@ -74,7 +74,7 @@ func systemdVault() (*Vault, error) {
 
 		// Now save the secret data
 		if err := store.Save(vaultPath, &secretData); err != nil {
-			return nil, fmt.Errorf("error saving vault information: %v", err.Error())
+			return nil, fmt.Errorf("error saving vault information: %s", err)
 		}
 	}
 	return &Vault{

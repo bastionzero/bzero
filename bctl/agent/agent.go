@@ -54,6 +54,7 @@ func main() {
 		reportError(logger, err)
 	} else {
 		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
+		logger.Infof("ServiceUrl: %s", serviceUrl)
 
 		// Check if the agent is registered or not.  If not, generate signing keys,
 		// check kube permissions and setup, and register with the Bastion.
@@ -303,7 +304,10 @@ func handleRegistration(logger *logger.Logger) error {
 			os.Exit(0) // restart our agent
 		}
 	} else {
-		logger.Infof("Bzero Agent is already registered")
+		logger.Infof("Bzero Agent is already registered {serviceUrl: %s, targetName: %s", serviceUrl, targetName)
+		if config, err := vault.LoadVault(); err == nil {
+			logger.Infof("Config: %+v", config)
+		}
 	}
 
 	return nil
@@ -315,7 +319,7 @@ func isRegistered() (bool, error) {
 	// load out config
 	if config, err := vault.LoadVault(); err != nil {
 		return registered, fmt.Errorf("could not load vault: %s", err)
-	} else if config.Data.PublicKey == "" && flag.NFlag() > 0 { // no public key means unregistered
+	} else if config.Data.PublicKey == "" { // no public key means unregistered
 
 		// Save flags passed to our config so registration can access them
 		config.Data = vault.SecretData{
@@ -331,6 +335,7 @@ func isRegistered() (bool, error) {
 		if err := config.Save(); err != nil {
 			return registered, fmt.Errorf("error saving vault: %s", err)
 		}
+		time.Sleep(1 * time.Second)
 	} else {
 		registered = true
 
