@@ -55,7 +55,7 @@ type DataChannel struct {
 	keysplitting keysplitting.IKeysplitting
 	handshook    bool // aka whether we need to send a syn
 
-	// channels for incoming and outgoing messages
+	// channels for incoming messages
 	inputChan chan am.AgentMessage
 
 	// input channel for keysplitting messages only.  This allows for keysplitting messages to be
