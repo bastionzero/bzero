@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
+	"sync"
 
-	"github.com/tucnak/store"
 	coreV1 "k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -22,15 +25,16 @@ const (
 	inClusterEnvVar = "BASTIONZERO_IN_CLUSTER"
 
 	// Vault systemd consts
-	vaultPath = "bzero.vault.json" // This can be found uin ~/.config/bzero-config/bzero.vault.json
+	vaultPath = "/etc/bzero/vault.json" // This can be found uin ~/.config/bzero-config/bzero.vault.json
 )
 
 type Vault struct {
 	Data SecretData
 
 	// Kube secret related
-	client coreV1Types.SecretInterface
-	secret *coreV1.Secret
+	client   coreV1Types.SecretInterface
+	secret   *coreV1.Secret
+	fileLock sync.Mutex
 }
 
 type SecretData struct {
@@ -67,21 +71,43 @@ func InCluster() bool {
 func systemdVault() (*Vault, error) {
 	var secretData SecretData
 
-	store.Init("bzero-config")
+	// check if file exists
+	if _, err := os.Stat(vaultPath); os.IsNotExist(err) {
 
-	// First check if we've created the vault before
-	if err := store.Load(vaultPath, &secretData); err != nil {
+		// make our directory, if it doesn't exit
+		if err := os.MkdirAll(filepath.Dir(vaultPath), os.ModePerm); err != nil {
+			return nil, err
+		}
 
-		// Now save the secret data
-		if err := store.Save(vaultPath, &secretData); err != nil {
-			return nil, fmt.Errorf("error saving vault information: %s", err)
+		// make our file
+		if _, err := os.Create(vaultPath); err != nil {
+			return nil, err
+		} else {
+			vault := Vault{
+				client: nil,
+				secret: nil,
+				Data:   secretData,
+			}
+
+			vault.Save()
+
+			// return our newly created, and empty vault
+			return &vault, nil
 		}
 	}
-	return &Vault{
-		client: nil, // systemd vault does not have a client
-		secret: nil, // systemd vault does not have a secret
-		Data:   secretData,
-	}, nil
+
+	// if the file does exist, read it into memory
+	if file, err := ioutil.ReadFile(vaultPath); err != nil {
+		return nil, err
+	} else if err := json.Unmarshal([]byte(file), &secretData); err != nil {
+		return nil, err
+	} else {
+		return &Vault{
+			client: nil,
+			secret: nil,
+			Data:   secretData,
+		}, nil
+	}
 }
 
 func clusterVault() (*Vault, error) {
@@ -159,10 +185,24 @@ func (v *Vault) Save() error {
 	}
 }
 
+// There is no selective saving, saving the vault will overwrite anything existing
 func (v *Vault) saveSystemd() error {
-	if err := store.Save(vaultPath, v.Data); err != nil {
-		return fmt.Errorf("error saving vault information: %v", err.Error())
+	v.fileLock.Lock()
+	defer v.fileLock.Unlock()
+
+	// overwrite entire file every time
+	dataBytes, _ := json.Marshal(v.Data)
+
+	// empty out our file
+	if err := os.Truncate(vaultPath, 0); err != nil {
+		return err
 	}
+
+	// replace it with our new vault
+	if err := ioutil.WriteFile(vaultPath, dataBytes, 0644); err != nil {
+		return err
+	}
+
 	return nil
 }
 
