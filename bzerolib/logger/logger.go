@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -35,6 +36,11 @@ func New(debugLevel DebugLevel, logFilePath string) (*Logger, error) {
 
 	// If the log file doesn't exist, create it, or append to the file
 	if logFilePath != "" {
+		// make our directory if it doesn't exist already
+		// TODO: do this in our install process
+		err := os.MkdirAll(filepath.Dir(logFilePath), os.ModePerm)
+
+		// create or open our file
 		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Printf("error: %s", err)
