@@ -310,9 +310,24 @@ func handleRegistration(logger *logger.Logger) error {
 		}
 	} else {
 		logger.Infof("Bzero Agent is already registered")
+
+		// if we've already registered, we should load any relevant values from the config
+		if err := loadFromConfig(); err != nil {
+			return fmt.Errorf("error loading config: %s", err)
+		}
 	}
 
 	return nil
+}
+
+func loadFromConfig() error {
+	if config, err := vault.LoadVault(); err != nil {
+		return fmt.Errorf("could not load vault: %s", err)
+	} else {
+		serviceUrl = config.Data.ServiceUrl
+		targetName = config.Data.TargetName
+		return nil
+	}
 }
 
 func saveConfig(config *vault.Vault) error {
