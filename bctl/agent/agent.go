@@ -71,7 +71,7 @@ func main() {
 		// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
 		select {}
 	case Bzero:
-		os.Exit(1)
+		os.Exit(0)
 	}
 }
 
