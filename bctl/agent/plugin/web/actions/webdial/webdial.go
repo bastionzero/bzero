@@ -101,7 +101,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 
 	// Now make a request to the endpoint given by the dataIn
 	w.logger.Infof("Making request for %s", endpoint)
-	req, err := BuildHttpRequest(endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
+	req, err := buildHttpRequest(endpoint, dataIn.Body, dataIn.Method, dataIn.Headers)
 	if err != nil {
 		return "", []byte{}, err
 	}
@@ -197,7 +197,7 @@ func (e *WebDial) validateRequestId(requestId string) error {
 	return nil
 }
 
-func BuildHttpRequest(endpoint string, body string, method string, headers map[string][]string) (*http.Request, error) {
+func buildHttpRequest(endpoint string, body string, method string, headers map[string][]string) (*http.Request, error) {
 	bodyBytesReader := bytes.NewReader([]byte(body))
 	req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
 
