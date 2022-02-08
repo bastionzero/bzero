@@ -276,24 +276,18 @@ func getAgentVersion() string {
 }
 
 func handleRegistration(logger *logger.Logger) error {
-	config, err := vault.LoadVault()
-	if err != nil {
-		return fmt.Errorf("could not load vault: %s", err)
-	}
-
 	// Check if there is a public key in the vault, if not then agent is not registered
-	if config.Data.PublicKey == "" {
+	if registered, err := isRegistered(); err != nil {
+		return err
+	} else if !registered {
+
 		// we need either an activation token or an registration key to register the agent
 		if activationToken == "" && registrationKey == "" {
 			return fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
 		} else {
-			// Save flags passed to our config
-			if err := saveConfig(config); err != nil {
-				return err
-			}
 
+			// Only check RBAC permissions if we are inside a cluster
 			if vault.InCluster() {
-				// Only check RBAC permissions if we are inside a cluster
 				if err := rbac.CheckPermissions(logger, namespace); err != nil {
 					return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
 				} else {
@@ -310,41 +304,40 @@ func handleRegistration(logger *logger.Logger) error {
 		}
 	} else {
 		logger.Infof("Bzero Agent is already registered")
-
-		// if we've already registered, we should load any relevant values from the config
-		if err := loadFromConfig(); err != nil {
-			return fmt.Errorf("error loading config: %s", err)
-		}
 	}
 
 	return nil
 }
 
-func loadFromConfig() error {
+func isRegistered() (bool, error) {
+	registered := false
+
+	// load out config
 	if config, err := vault.LoadVault(); err != nil {
-		return fmt.Errorf("could not load vault: %s", err)
+		return registered, fmt.Errorf("could not load vault: %s", err)
+	} else if config.Data.PublicKey == "" && flag.NFlag() > 0 { // no public key means unregistered
+
+		// Save flags passed to our config so registration can access them
+		config.Data = vault.SecretData{
+			ServiceUrl:    serviceUrl,
+			Namespace:     namespace,
+			IdpProvider:   idpProvider,
+			IdpOrgId:      idpOrgId,
+			EnvironmentId: environmentId,
+			AgentType:     agentType,
+			TargetName:    targetName,
+			Version:       getAgentVersion(),
+		}
+		if err := config.Save(); err != nil {
+			return registered, fmt.Errorf("error saving vault: %s", err)
+		}
 	} else {
+		registered = true
+
+		// load any variables we might need
 		serviceUrl = config.Data.ServiceUrl
 		targetName = config.Data.TargetName
-		return nil
-	}
-}
-
-func saveConfig(config *vault.Vault) error {
-	config.Data = vault.SecretData{
-		ServiceUrl:    serviceUrl,
-		Namespace:     namespace,
-		IdpProvider:   idpProvider,
-		IdpOrgId:      idpOrgId,
-		EnvironmentId: environmentId,
-		AgentType:     agentType,
-		TargetName:    targetName,
-		Version:       getAgentVersion(),
 	}
 
-	if err := config.Save(); err != nil {
-		return fmt.Errorf("error saving vault: %s", err)
-	} else {
-		return nil
-	}
+	return registered, nil
 }
