@@ -29,7 +29,7 @@ type Registration struct {
 	serviceUrl string
 }
 
-func Register(logger *logger.Logger, serviceUrl string, activationToken string, apiKey string) error {
+func Register(logger *logger.Logger, serviceUrl string, activationToken string, apiKey string, targetId string) error {
 	if config, err := vault.LoadVault(); err != nil {
 		return fmt.Errorf("could not load vault: %s", err)
 
@@ -54,7 +54,7 @@ func Register(logger *logger.Logger, serviceUrl string, activationToken string, 
 		}
 
 		// Complete registration with the Bastion
-		if err := reg.phoneHome(activationToken, apiKey); err != nil {
+		if err := reg.phoneHome(activationToken, apiKey, targetId); err != nil {
 			return err
 		}
 
@@ -81,7 +81,7 @@ func (r *Registration) generateKeys() error {
 	return nil
 }
 
-func (r *Registration) phoneHome(activationToken string, apiKey string) error {
+func (r *Registration) phoneHome(activationToken string, apiKey string, targetId string) error {
 	// If we don't have an activation token, use api key to get one
 	if activationToken == "" {
 		if token, err := r.getActivationToken(apiKey); err != nil {
@@ -94,7 +94,7 @@ func (r *Registration) phoneHome(activationToken string, apiKey string) error {
 	// Register with Bastion
 	r.logger.Info("Phoning home to BastionZero...")
 
-	if resp, err := r.getRegistrationResponse(activationToken); err != nil {
+	if resp, err := r.getRegistrationResponse(activationToken, targetId); err != nil {
 		return err
 	} else {
 		// only replace, if values were undefined by user
@@ -107,7 +107,7 @@ func (r *Registration) phoneHome(activationToken string, apiKey string) error {
 
 		// set our remaining values
 		r.config.Data.TargetName = resp.TargetName
-		r.config.Data.TargetId = activationToken // We can save this now because it's already been used to activate
+		r.config.Data.TargetId = targetId
 
 		r.logger.Info("Agent successfully Registered.  BastionZero says hi.")
 		return nil
@@ -159,7 +159,7 @@ func (r *Registration) getActivationToken(apiKey string) (string, error) {
 	}
 }
 
-func (r *Registration) getRegistrationResponse(activationToken string) (RegistrationResponse, error) {
+func (r *Registration) getRegistrationResponse(activationToken string, targetId string) (RegistrationResponse, error) {
 	var regResponse RegistrationResponse
 
 	// if the target name was never previously set, then we default to hostname, but only Bastion knows
@@ -183,7 +183,7 @@ func (r *Registration) getRegistrationResponse(activationToken string) (Registra
 		EnvironmentId:  r.config.Data.EnvironmentId,
 		TargetName:     r.config.Data.TargetName,
 		TargetHostName: hostname,
-		TargetId:       activationToken,
+		TargetId:       targetId,
 		Region:         region,
 	}
 

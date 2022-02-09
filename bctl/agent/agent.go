@@ -288,7 +288,7 @@ func handleRegistration(logger *logger.Logger) error {
 		}
 
 		// register the agent with bastion, if not already registered
-		if err := registration.Register(logger, serviceUrl, activationToken, registrationKey); err != nil {
+		if err := registration.Register(logger, serviceUrl, activationToken, registrationKey, targetId); err != nil {
 			// TODO: this will call the error to be reported twice, but they're the only errors in this function we're currently concerned with
 			reportError(logger, err)
 			return err
