@@ -25,7 +25,6 @@ type WebWebsocketAction struct {
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
 
 	sequenceNumber int
 }
@@ -40,7 +39,6 @@ func New(logger *logger.Logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		ksInputChan:     make(chan plugin.ActionWrapper, 10),
 
 		sequenceNumber: 0,
 	}
@@ -171,7 +169,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 }
 
 func (s *WebWebsocketAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	s.ksInputChan <- wrappedAction
+	// We do not need to receive any keysplitting messages
 }
 
 func (s *WebWebsocketAction) ReceiveStream(smessage smsg.StreamMessage) {
