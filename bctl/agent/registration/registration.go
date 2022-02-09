@@ -59,7 +59,7 @@ func Register(logger *logger.Logger, serviceUrl string, activationToken string, 
 		}
 
 		// Complete registration with the Bastion
-		if err := reg.phoneHome(activationToken, targetId, apiKey); err != nil {
+		if err := reg.phoneHome(activationToken, apiKey, targetId); err != nil {
 			return err
 		}
 
@@ -112,7 +112,7 @@ func (r *Registration) phoneHome(activationToken string, apiKey string, targetId
 
 		// set our remaining values
 		r.config.Data.TargetName = resp.TargetName
-		r.config.Data.TargetId = activationToken // We can save this now because it's already been used to activate
+		r.config.Data.TargetId = targetId
 
 		r.logger.Info("Agent successfully Registered.  BastionZero says hi.")
 		return nil
