@@ -28,8 +28,6 @@ type WebDialAction struct {
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-
-	sequenceNumber int
 }
 
 func New(logger *logger.Logger,
@@ -42,8 +40,6 @@ func New(logger *logger.Logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-
-		sequenceNumber: 0,
 	}
 
 	return stream, stream.outputChan
@@ -87,7 +83,7 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	// Build the action payload
 	dataInPayload := webdial.WebDataInActionPayload{
 		RequestId:      s.requestId,
-		SequenceNumber: s.sequenceNumber,
+		SequenceNumber: 0, // currently do not implement sequence number
 		Endpoint:       request.URL.String(),
 		Headers:        headers,
 		Method:         request.Method,
