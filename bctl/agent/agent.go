@@ -41,16 +41,11 @@ const (
 )
 
 func main() {
-	// determine agent type
-	if vault.InCluster() {
-		agentType = Cluster
-	} else {
-		agentType = Bzero
-	}
-
+	setAgentType()
 	if logger, err := setupLogger(); err != nil {
 		reportError(logger, err)
 	} else if err := parseFlags(); err != nil {
+
 		// catch our parser errors now that we have a logger to print them
 		reportError(logger, err)
 	} else {
@@ -58,15 +53,14 @@ func main() {
 
 		// Check if the agent is registered or not.  If not, generate signing keys,
 		// check kube permissions and setup, and register with the Bastion.
-		if err := handleRegistration(logger); err != nil {
-			logger.Error(err)
-		} else {
+		if err := handleRegistration(logger); err == nil {
 			run(logger)
 		}
 	}
 
 	switch agentType {
 	case Cluster:
+
 		// Sleep forever because otherwise kube will endlessly try restarting
 		// Ref: https://stackoverflow.com/questions/36419054/go-projects-main-goroutine-sleep-forever
 		select {}
@@ -77,15 +71,11 @@ func main() {
 
 func run(logger *logger.Logger) {
 	defer func() {
+
 		// recover in case the agent panics
-		// this should handle some kind of seg fault errors.
 		if msg := recover(); msg != nil {
 			reportError(logger, fmt.Errorf("bzero agent crashed with panic: %+v", msg))
-			if agentType == Bzero {
-				os.Exit(1)
-			} else {
-				select {}
-			}
+			os.Exit(1)
 		}
 	}()
 
@@ -99,6 +89,7 @@ func run(logger *logger.Logger) {
 		// wait until we recieve a kill signal and quit
 		signal := blockUntilSignaled()
 		control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
+		os.Exit(1)
 	}
 }
 
@@ -264,24 +255,19 @@ func parseFlags() error {
 	return nil
 }
 
-func getAgentVersion() string {
-	if os.Getenv("DEV") == "true" {
-		return "1.0"
-	} else {
-		return "$AGENT_VERSION"
-	}
-}
-
 func handleRegistration(logger *logger.Logger) error {
 	// Check if there is a public key in the vault, if not then agent is not registered
 	if registered, err := isRegistered(); err != nil {
+		logger.Error(err)
 		return err
 	} else if !registered || forceReRegistration {
 
 		// Only check RBAC permissions if we are inside a cluster
 		if vault.InCluster() {
 			if err := rbac.CheckPermissions(logger, namespace); err != nil {
-				return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
+				rerr := fmt.Errorf("error verifying agent kubernetes setup: %s", err)
+				logger.Error(rerr)
+				return rerr
 			} else {
 				logger.Info("Namespace and service account permissions verified")
 			}
@@ -289,7 +275,6 @@ func handleRegistration(logger *logger.Logger) error {
 
 		// register the agent with bastion, if not already registered
 		if err := registration.Register(logger, serviceUrl, activationToken, registrationKey, targetId); err != nil {
-			// TODO: this will call the error to be reported twice, but they're the only errors in this function we're currently concerned with
 			reportError(logger, err)
 			return err
 		}
@@ -338,4 +323,21 @@ func isRegistered() (bool, error) {
 	}
 
 	return registered, nil
+}
+
+func getAgentVersion() string {
+	if os.Getenv("DEV") == "true" {
+		return "1.0"
+	} else {
+		return "$AGENT_VERSION"
+	}
+}
+
+func setAgentType() {
+	// determine agent type
+	if vault.InCluster() {
+		agentType = Cluster
+	} else {
+		agentType = Bzero
+	}
 }
