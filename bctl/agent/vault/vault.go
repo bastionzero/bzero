@@ -73,8 +73,7 @@ func systemdVault() (*Vault, error) {
 	var secretData SecretData
 
 	// check if file exists
-	if f, err := os.Stat(vaultPath); err != nil {
-	} else if os.IsNotExist(err) { // our file does not exist
+	if f, err := os.Stat(vaultPath); os.IsNotExist(err) { // our file does not exist
 
 		// make our directory, if it doesn't exit
 		if err := os.MkdirAll(filepath.Dir(vaultPath), os.ModePerm); err != nil {
@@ -95,6 +94,8 @@ func systemdVault() (*Vault, error) {
 			// return our newly created, and empty vault
 			return &vault, nil
 		}
+	} else if err != nil {
+		return nil, err
 	} else if f.Size() == 0 { // our file exists, but is empty
 		vault := Vault{
 			client: nil,
