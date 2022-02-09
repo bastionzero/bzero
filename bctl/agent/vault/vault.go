@@ -19,7 +19,8 @@ import (
 )
 
 const (
-	keyConfig = "keyConfig"
+	vaultKey          = "secret"
+	defaultValueValue = "coolbeans"
 
 	// Env var to flag if we are in a kube cluster
 	inClusterEnvVar = "BASTIONZERO_IN_CLUSTER"
@@ -129,7 +130,7 @@ func clusterVault() (*Vault, error) {
 		if secret, err := secretsClient.Get(context.Background(), secretName, metaV1.GetOptions{}); err != nil {
 			// If there is no secret there, create it
 			secretData := map[string][]byte{
-				"secret": []byte("coolbeans"),
+				"secret": []byte(defaultValueValue),
 			}
 			object := metaV1.ObjectMeta{Name: secretName}
 			secret := &coreV1.Secret{Data: secretData, ObjectMeta: object}
@@ -145,7 +146,15 @@ func clusterVault() (*Vault, error) {
 			}, nil
 
 		} else {
-			if data, ok := secret.Data[keyConfig]; ok {
+			if data, ok := secret.Data[vaultKey]; ok {
+				if bytes.Equal(data, []byte(defaultValueValue)) {
+					// This is a fresh secret, retrun an empty secrets data
+					return &Vault{
+						client: secretsClient,
+						secret: secret,
+						Data:   SecretData{},
+					}, nil
+				}
 				if secretData, err := DecodeToSecretConfig(data); err != nil {
 					return nil, err
 				} else {
@@ -214,7 +223,7 @@ func (v *Vault) saveCluster() error {
 	}
 
 	// Now update the kube secret object
-	v.secret.Data[keyConfig] = encodedSecretConfig
+	v.secret.Data[vaultKey] = encodedSecretConfig
 
 	// Update the secret
 	if _, err := v.client.Update(context.Background(), v.secret, metaV1.UpdateOptions{}); err != nil {

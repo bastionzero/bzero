@@ -28,7 +28,6 @@ type WebDialAction struct {
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
 
 	sequenceNumber int
 }
@@ -43,7 +42,6 @@ func New(logger *logger.Logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		ksInputChan:     make(chan plugin.ActionWrapper, 10),
 
 		sequenceNumber: 0,
 	}
@@ -147,7 +145,7 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 }
 
 func (s *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	s.ksInputChan <- wrappedAction
+	// We dont get any keysplitting messages
 }
 
 func (s *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {
