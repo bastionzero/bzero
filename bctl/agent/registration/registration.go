@@ -33,18 +33,13 @@ func Register(logger *logger.Logger, serviceUrl string, activationToken string, 
 	if config, err := vault.LoadVault(); err != nil {
 		return fmt.Errorf("could not load vault: %s", err)
 
-	} else if config.Data.PublicKey != "" {
-		// If there's already a public key agent is already registered so don't do anything
-		logger.Infof("This Agent is already registered with public key: %s", config.Data.PublicKey)
-		return nil
-
 	} else {
 		// Check we have all our requried args
 		if activationToken == "" && apiKey == "" {
 			return fmt.Errorf("in order to register, we need either an api or activation token")
 		}
 
-		logger.Infof("Agent is not yet registered, starting registration process!")
+		logger.Infof("Registering agent with %s", serviceUrl)
 
 		// Create our registration struct and actually register
 		reg := Registration{

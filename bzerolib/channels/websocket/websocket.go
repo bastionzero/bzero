@@ -130,13 +130,11 @@ func New(logger *logger.Logger,
 		baseUrl:             "",
 	}
 
-	// Connect to the websocket in a go routine in case it takes a long time
-	go func() {
-		if err := ws.Connect(); err != nil {
-			logger.Error(err)
-			return
-		}
-	}()
+	// Make sure we can connect to BastionZero before making our go routines
+	if err := ws.Connect(); err != nil {
+		logger.Error(err)
+		return nil, fmt.Errorf("could not connect to BastionZero: %s", err)
+	}
 
 	// Listener for any incoming messages
 	ws.tmb.Go(func() error {

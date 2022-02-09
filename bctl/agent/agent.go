@@ -30,6 +30,7 @@ var (
 	activationToken, registrationKey string
 	idpProvider, namespace, idpOrgId string
 	targetId, targetName, agentType  string
+	forceReRegistration              bool
 )
 
 const (
@@ -58,7 +59,7 @@ func main() {
 		// Check if the agent is registered or not.  If not, generate signing keys,
 		// check kube permissions and setup, and register with the Bastion.
 		if err := handleRegistration(logger); err != nil {
-			reportError(logger, err)
+			logger.Error(err)
 		} else {
 			run(logger)
 		}
@@ -105,7 +106,7 @@ func setupLogger() (*logger.Logger, error) {
 	// if this is systemd, output files
 	logFile := ""
 	if agentType == Bzero {
-		logFile = "/var/log/bzero/bzero-agent.log" // bzero-agent is protect here because we replace at build with name at build
+		logFile = "/var/log/bzero/bzero-agent.log" // bzero-agent is protect here because we replace at build with process name
 	}
 
 	// setup our loggers
@@ -226,6 +227,7 @@ func parseFlags() error {
 	// Our required registration flags
 	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
 	flag.StringVar(&registrationKey, "registrationKey", "", "API Key used to register the agent")
+	flag.BoolVar(&forceReRegistration, "f", false, "Boolean flag if you want to force the agent to re-register")
 
 	// All optional flags
 	flag.StringVar(&serviceUrl, "serviceUrl", prodServiceUrl, "Service URL to use")
@@ -274,34 +276,27 @@ func handleRegistration(logger *logger.Logger) error {
 	// Check if there is a public key in the vault, if not then agent is not registered
 	if registered, err := isRegistered(); err != nil {
 		return err
-	} else if !registered {
+	} else if !registered || forceReRegistration {
 
-		// we need either an activation token or an registration key to register the agent
-		if activationToken == "" && registrationKey == "" {
-			// we're likely to get this error when first starting up, and it's not something bzero cares about
-			logger.Errorf("in order to register the agent, user must provide either an activation token or api key")
-			return nil
-		} else {
-
-			// Only check RBAC permissions if we are inside a cluster
-			if vault.InCluster() {
-				if err := rbac.CheckPermissions(logger, namespace); err != nil {
-					logger.Errorf("error verifying agent kubernetes setup: %s", err)
-					return nil // same as above
-				} else {
-					logger.Info("Namespace and service account permissions verified")
-				}
+		// Only check RBAC permissions if we are inside a cluster
+		if vault.InCluster() {
+			if err := rbac.CheckPermissions(logger, namespace); err != nil {
+				return fmt.Errorf("error verifying agent kubernetes setup: %s", err)
+			} else {
+				logger.Info("Namespace and service account permissions verified")
 			}
-
-			// register the agent with bastion, if not already registered
-			if err := registration.Register(logger, serviceUrl, activationToken, registrationKey, targetId); err != nil {
-				return err
-			}
-
-			os.Exit(0) // restart our agent
 		}
+
+		// register the agent with bastion, if not already registered
+		if err := registration.Register(logger, serviceUrl, activationToken, registrationKey, targetId); err != nil {
+			// TODO: this will call the error to be reported twice, but they're the only errors in this function we're currently concerned with
+			reportError(logger, err)
+			return err
+		}
+
+		os.Exit(0) // restart our agent
 	} else {
-		logger.Infof("Bzero Agent is already registered {serviceUrl: %s, targetName: %s", serviceUrl, targetName)
+		logger.Infof("Bzero Agent is already registered with %s", serviceUrl)
 	}
 
 	return nil
@@ -313,7 +308,11 @@ func isRegistered() (bool, error) {
 	// load out config
 	if config, err := vault.LoadVault(); err != nil {
 		return registered, fmt.Errorf("could not load vault: %s", err)
-	} else if config.Data.PublicKey == "" { // no public key means unregistered
+	} else if (config.Data.PublicKey == "" || forceReRegistration) && flag.NFlag() > 0 { // no public key means unregistered
+		// we need either an activation token or an registration key to register the agent
+		if activationToken == "" && registrationKey == "" {
+			return registered, fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
+		}
 
 		// Save flags passed to our config so registration can access them
 		config.Data = vault.SecretData{
