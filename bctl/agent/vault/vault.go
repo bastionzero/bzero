@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"github.com/fsnotify/fsnotify"
 	coreV1 "k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -69,18 +71,65 @@ func InCluster() bool {
 	}
 }
 
+func WaitForNewRegistration(logger *logger.Logger) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("error starting new file watcher: %s", err)
+	}
+	defer watcher.Close()
+
+	done := make(chan error)
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					done <- fmt.Errorf("file watcher closed events channel")
+				}
+
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					var config SecretData
+					if file, err := ioutil.ReadFile(vaultPath); err != nil {
+						continue
+					} else if err := json.Unmarshal([]byte(file), &config); err != nil {
+						continue
+					} else {
+						// if we haven't completed registration yet, continue waiting
+						if config.PublicKey == "" {
+							continue
+						} else {
+							done <- nil
+						}
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					done <- fmt.Errorf("file watcher closed errors channel")
+				}
+				done <- fmt.Errorf("file watcher caught error: %s", err)
+			}
+		}
+	}()
+
+	if err := watcher.Add(vaultPath); err != nil {
+		return fmt.Errorf("unable to watch file: %s, error: %s", vaultPath, err)
+	}
+
+	return <-done
+}
+
 func systemdVault() (*Vault, error) {
 	var secretData SecretData
 
 	// check if file exists
 	if f, err := os.Stat(vaultPath); os.IsNotExist(err) { // our file does not exist
 
-		// make our directory, if it doesn't exit
+		// create our directory, if it doesn't exit
 		if err := os.MkdirAll(filepath.Dir(vaultPath), os.ModePerm); err != nil {
 			return nil, err
 		}
 
-		// make our file
+		// create our file
 		if _, err := os.Create(vaultPath); err != nil {
 			return nil, err
 		} else {

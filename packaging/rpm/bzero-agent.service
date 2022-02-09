@@ -14,7 +14,7 @@ WantedBy=multi-user.target
 [Service]
 Type=simple
 WorkingDirectory=/usr/bin
-ExecStart=/usr/bin/$BZERO_PKG_NAME
+ExecStart=/usr/bin/$BZERO_PKG_NAME -w
 KillMode=process
 
 # Restart the agent regardless of whether it crashes (and returns a non-zero result code) or if

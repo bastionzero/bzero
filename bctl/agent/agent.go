@@ -31,6 +31,7 @@ var (
 	idpProvider, namespace, idpOrgId string
 	targetId, targetName, agentType  string
 	forceReRegistration              bool
+	wait                             bool
 )
 
 const (
@@ -53,7 +54,19 @@ func main() {
 
 		// Check if the agent is registered or not.  If not, generate signing keys,
 		// check kube permissions and setup, and register with the Bastion.
-		if err := handleRegistration(logger); err == nil {
+		if err := handleRegistration(logger); err != nil {
+
+			// our systemd agent waits for a successful new registration
+			if wait {
+				vault.WaitForNewRegistration(logger)
+				logger.Infof("New registration detected. Loading registration information!")
+
+				// double check and set our local variables
+				if registered, err := isRegistered(); err != nil && registered {
+					run(logger)
+				}
+			}
+		} else {
 			run(logger)
 		}
 	}
@@ -220,6 +233,9 @@ func parseFlags() error {
 	flag.StringVar(&registrationKey, "registrationKey", "", "API Key used to register the agent")
 	flag.BoolVar(&forceReRegistration, "f", false, "Boolean flag if you want to force the agent to re-register")
 
+	// Our flag to determine if this is systemd and will therefore wait for successful registration
+	flag.BoolVar(&wait, "w", false, "Mode for background processes to wait for successful registration")
+
 	// All optional flags
 	flag.StringVar(&serviceUrl, "serviceUrl", prodServiceUrl, "Service URL to use")
 	flag.StringVar(&orgId, "orgId", "", "OrgID to use")
@@ -260,6 +276,9 @@ func handleRegistration(logger *logger.Logger) error {
 	if registered, err := isRegistered(); err != nil {
 		logger.Error(err)
 		return err
+	} else if !registered && wait {
+		logger.Info("Agent waiting for registration...")
+		return fmt.Errorf("")
 	} else if !registered || forceReRegistration {
 
 		// Only check RBAC permissions if we are inside a cluster
@@ -278,8 +297,6 @@ func handleRegistration(logger *logger.Logger) error {
 			reportError(logger, err)
 			return err
 		}
-
-		os.Exit(0) // restart our agent
 	} else {
 		logger.Infof("Bzero Agent is already registered with %s", serviceUrl)
 	}

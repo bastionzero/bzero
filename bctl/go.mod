@@ -18,4 +18,5 @@ require (
 	k8s.io/api v0.21.3
 	k8s.io/apimachinery v0.21.3
 	k8s.io/client-go v0.21.3
+	github.com/fsnotify/fsnotify v1.5.1
 )
