@@ -309,6 +309,7 @@ func isRegistered() (bool, error) {
 	if config, err := vault.LoadVault(); err != nil {
 		return registered, fmt.Errorf("could not load vault: %s", err)
 	} else if (config.Data.PublicKey == "" || forceReRegistration) && flag.NFlag() > 0 { // no public key means unregistered
+
 		// we need either an activation token or an registration key to register the agent
 		if activationToken == "" && registrationKey == "" {
 			return registered, fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
