@@ -30,6 +30,7 @@ var (
 	activationToken, registrationKey string
 	idpProvider, namespace, idpOrgId string
 	targetId, targetName, agentType  string
+	forceReRegistration              bool
 )
 
 const (
@@ -226,6 +227,7 @@ func parseFlags() error {
 	// Our required registration flags
 	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
 	flag.StringVar(&registrationKey, "registrationKey", "", "API Key used to register the agent")
+	flag.BoolVar(&forceReRegistration, "f", false, "Boolean flag if you want to force the agent to re-register")
 
 	// All optional flags
 	flag.StringVar(&serviceUrl, "serviceUrl", prodServiceUrl, "Service URL to use")
@@ -274,7 +276,7 @@ func handleRegistration(logger *logger.Logger) error {
 	// Check if there is a public key in the vault, if not then agent is not registered
 	if registered, err := isRegistered(); err != nil {
 		return err
-	} else if !registered {
+	} else if !registered || forceReRegistration {
 
 		// we need either an activation token or an registration key to register the agent
 		if activationToken == "" && registrationKey == "" {
@@ -313,7 +315,7 @@ func isRegistered() (bool, error) {
 	// load out config
 	if config, err := vault.LoadVault(); err != nil {
 		return registered, fmt.Errorf("could not load vault: %s", err)
-	} else if config.Data.PublicKey == "" && flag.NFlag() > 0 { // no public key means unregistered
+	} else if (config.Data.PublicKey == "" || forceReRegistration) && flag.NFlag() > 0 { // no public key means unregistered
 
 		// Save flags passed to our config so registration can access them
 		config.Data = vault.SecretData{
