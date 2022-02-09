@@ -294,7 +294,7 @@ func handleRegistration(logger *logger.Logger) error {
 			}
 
 			// register the agent with bastion, if not already registered
-			if err := registration.Register(logger, serviceUrl, activationToken, registrationKey); err != nil {
+			if err := registration.Register(logger, serviceUrl, activationToken, registrationKey, targetId); err != nil {
 				return err
 			}
 
