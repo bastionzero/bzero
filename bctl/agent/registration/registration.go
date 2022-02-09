@@ -175,6 +175,11 @@ func (r *Registration) getRegistrationResponse(activationToken string, targetId 
 		return regResponse, fmt.Errorf("failed to get agent region: %s", err)
 	}
 
+	// If we pass no targetId to the container, this means that our Id is the same as our activationToken
+	if targetId == "" {
+		targetId = activationToken
+	}
+
 	// Create our request
 	req := RegistrationRequest{
 		PublicKey:      r.config.Data.PublicKey,
