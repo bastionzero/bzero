@@ -68,16 +68,13 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		// Verify the BZCert
 		if hash, exp, err := synPayload.BZCert.Verify(k.idpProvider, k.idpOrgId); err != nil {
 			return err
+		} else if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
+			return err
 		} else {
 			k.bzCerts[hash] = BZCertMetadata{
 				Cert: synPayload.BZCert,
 				Exp:  exp,
 			}
-		}
-
-		// Verify the Signature
-		if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
-			return err
 		}
 
 		// Make sure targetId matches
