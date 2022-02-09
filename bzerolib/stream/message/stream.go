@@ -28,6 +28,5 @@ const (
 	DbOut        StreamType = "db/dataout"
 	DbAgentClose StreamType = "db/agentClose"
 
-	WebOut        StreamType = "web/dataout"
-	WebAgentClose StreamType = "web/agentClose"
+	WebOut StreamType = "web/dataout"
 )

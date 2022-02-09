@@ -131,12 +131,6 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				writer.Write(response.Content)
 
 				return nil
-
-			case smsg.WebAgentClose:
-				// The agent has closed the connection, close the local connection as well
-				s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-				request.Body.Close()
-				return nil
 			default:
 				s.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
