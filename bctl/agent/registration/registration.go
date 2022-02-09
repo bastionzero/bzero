@@ -107,6 +107,11 @@ func (r *Registration) phoneHome(activationToken string, apiKey string, targetId
 
 		// set our remaining values
 		r.config.Data.TargetName = resp.TargetName
+
+		// If targetId is empty, that means to use the activationToken as the id of the target
+		if targetId == "" {
+			targetId = activationToken
+		}
 		r.config.Data.TargetId = targetId
 
 		r.logger.Info("Agent successfully Registered.  BastionZero says hi.")

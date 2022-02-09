@@ -87,7 +87,7 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 		Endpoint:       request.URL.String(),
 		Headers:        headers,
 		Method:         request.Method,
-		Body:           string(bodyInBytes), // fix this
+		Body:           bodyInBytes,
 	}
 
 	// Send payload to plugin output queue

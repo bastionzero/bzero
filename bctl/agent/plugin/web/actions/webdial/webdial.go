@@ -197,8 +197,8 @@ func (e *WebDial) validateRequestId(requestId string) error {
 	return nil
 }
 
-func buildHttpRequest(endpoint string, body string, method string, headers map[string][]string) (*http.Request, error) {
-	bodyBytesReader := bytes.NewReader([]byte(body))
+func buildHttpRequest(endpoint string, body []byte, method string, headers map[string][]string) (*http.Request, error) {
+	bodyBytesReader := bytes.NewReader(body)
 	req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
 
 	// Add any headers

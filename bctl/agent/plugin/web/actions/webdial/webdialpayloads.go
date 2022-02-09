@@ -5,7 +5,7 @@ type WebDialActionPayload struct {
 }
 
 type WebDataInActionPayload struct {
-	Body           string              `json:"body"`
+	Body           []byte              `json:"body"`
 	Endpoint       string              `json:"endpoint"`
 	Headers        map[string][]string `json:"headers"`
 	Method         string              `json:"method"`
