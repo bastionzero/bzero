@@ -148,7 +148,7 @@ func clusterVault() (*Vault, error) {
 		} else {
 			if data, ok := secret.Data[vaultKey]; ok {
 				if bytes.Equal(data, []byte(defaultValueValue)) {
-					// This is a fresh secret, retrun an empty secrets data
+					// This is a fresh secret, return an empty secrets data
 					return &Vault{
 						client: secretsClient,
 						secret: secret,
