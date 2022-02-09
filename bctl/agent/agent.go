@@ -62,7 +62,9 @@ func main() {
 				logger.Infof("New registration detected. Loading registration information!")
 
 				// double check and set our local variables
-				if registered, err := isRegistered(); err != nil && registered {
+				if registered, err := isRegistered(); err != nil {
+					logger.Error(err)
+				} else if registered {
 					run(logger)
 				}
 			}
@@ -297,6 +299,8 @@ func handleRegistration(logger *logger.Logger) error {
 			reportError(logger, err)
 			return err
 		}
+
+		os.Exit(0)
 	} else {
 		logger.Infof("Bzero Agent is already registered with %s", serviceUrl)
 	}
@@ -311,25 +315,27 @@ func isRegistered() (bool, error) {
 	if config, err := vault.LoadVault(); err != nil {
 		return registered, fmt.Errorf("could not load vault: %s", err)
 	} else if (config.Data.PublicKey == "" || forceReRegistration) && flag.NFlag() > 0 { // no public key means unregistered
+		if !wait {
 
-		// we need either an activation token or an registration key to register the agent
-		if activationToken == "" && registrationKey == "" {
-			return registered, fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
-		}
+			// we need either an activation token or an registration key to register the agent
+			if activationToken == "" && registrationKey == "" {
+				return registered, fmt.Errorf("in order to register the agent, user must provide either an activation token or api key")
+			}
 
-		// Save flags passed to our config so registration can access them
-		config.Data = vault.SecretData{
-			ServiceUrl:    serviceUrl,
-			Namespace:     namespace,
-			IdpProvider:   idpProvider,
-			IdpOrgId:      idpOrgId,
-			EnvironmentId: environmentId,
-			AgentType:     agentType,
-			TargetName:    targetName,
-			Version:       getAgentVersion(),
-		}
-		if err := config.Save(); err != nil {
-			return registered, fmt.Errorf("error saving vault: %s", err)
+			// Save flags passed to our config so registration can access them
+			config.Data = vault.SecretData{
+				ServiceUrl:    serviceUrl,
+				Namespace:     namespace,
+				IdpProvider:   idpProvider,
+				IdpOrgId:      idpOrgId,
+				EnvironmentId: environmentId,
+				AgentType:     agentType,
+				TargetName:    targetName,
+				Version:       getAgentVersion(),
+			}
+			if err := config.Save(); err != nil {
+				return registered, fmt.Errorf("error saving vault: %s", err)
+			}
 		}
 	} else {
 		registered = true

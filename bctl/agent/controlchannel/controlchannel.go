@@ -233,7 +233,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 		if err := json.Unmarshal(agentMessage.MessagePayload, &cdRequest); err != nil {
 			return fmt.Errorf("malformed close datachannel request: %s", err)
 		} else {
-			if websocket, ok := c.connections[cdRequest.ConnectionId]; ok {
+			if websocket, ok := c.getConnectionMap(cdRequest.ConnectionId); ok {
 				if datachannel, ok := websocket.DataChannels[cdRequest.DataChannelId]; ok {
 					datachannel.Close(errors.New("formal datachannel request received"))
 					delete(websocket.DataChannels, cdRequest.DataChannelId)
