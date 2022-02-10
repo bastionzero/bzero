@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tomb "gopkg.in/tomb.v2"
@@ -67,6 +68,11 @@ type DataChannel struct {
 	onDeck      bzplugin.ActionWrapper
 	lastMessage bzplugin.ActionWrapper
 	retry       int
+
+	// locks for our ondeck and lastmessage
+	// TODO: Requiring these mutexes is probably indicative of a design/architecture failure
+	onDeckLock      sync.Mutex
+	lastMessageLock sync.Mutex
 }
 
 func New(logger *logger.Logger,
@@ -346,11 +352,11 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 			rerr = fmt.Errorf("goodbye. retried too many times to fix error: %s", errMessage.Message)
 		} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError && d.handshook {
 			d.retry++
-			d.onDeck = d.lastMessage
+			d.setOnDeck(d.getLastMessage())
 
 			// In order to get back on the keysplitting train, we need to resend the syn, get the synack
 			// so that our input message handler is pointing to the right thing.
-			if err := d.sendSyn(d.onDeck.Action); err != nil {
+			if err := d.sendSyn(d.getOnDeck().Action); err != nil {
 				return err
 			} else {
 				return rerr
@@ -403,12 +409,12 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 		d.ready = true
 
 		// If there is a message that wasn't sent because we got a keysplitting validation error on it, send it now
-		if d.onDeck.Action != "" {
-			return d.sendKeysplitting(&ksMessage, d.onDeck.Action, d.onDeck.ActionPayload)
+		if next := d.getOnDeck(); next.Action != "" {
+			return d.sendKeysplitting(&ksMessage, next.Action, next.ActionPayload)
 		}
 	case ksmsg.DataAck:
 		// If we had something on deck, then this was the ack for it and we can remove it
-		d.onDeck = bzplugin.ActionWrapper{}
+		d.setOnDeck(bzplugin.ActionWrapper{})
 
 		// If we're here, it means that the previous data message that caused the error was accepted
 		d.retry = 0
@@ -425,10 +431,10 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 		if action, returnPayload, err := d.plugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
 
 			// We need to know the last message for invisible response to keysplitting validation errors
-			d.lastMessage = bzplugin.ActionWrapper{
+			d.setLastMessage(bzplugin.ActionWrapper{
 				Action:        action,
 				ActionPayload: returnPayload,
-			}
+			})
 
 			return d.sendKeysplitting(&ksMessage, action, returnPayload)
 
@@ -450,4 +456,32 @@ func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMe
 		d.send(am.Keysplitting, respKSMessage)
 		return nil
 	}
+}
+
+func (d *DataChannel) getOnDeck() bzplugin.ActionWrapper {
+	d.onDeckLock.Lock()
+	defer d.onDeckLock.Unlock()
+
+	return d.onDeck
+}
+
+func (d *DataChannel) setOnDeck(msg bzplugin.ActionWrapper) {
+	d.onDeckLock.Lock()
+	defer d.onDeckLock.Unlock()
+
+	d.onDeck = msg
+}
+
+func (d *DataChannel) getLastMessage() bzplugin.ActionWrapper {
+	d.lastMessageLock.Lock()
+	defer d.lastMessageLock.Unlock()
+
+	return d.lastMessage
+}
+
+func (d *DataChannel) setLastMessage(msg bzplugin.ActionWrapper) {
+	d.lastMessageLock.Lock()
+	defer d.lastMessageLock.Unlock()
+
+	d.lastMessage = msg
 }
