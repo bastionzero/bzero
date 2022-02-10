@@ -140,12 +140,12 @@ func reportError(logger *logger.Logger, errorReport error) {
 		Timestamp: fmt.Sprint(time.Now().Unix()),
 		Message:   errorReport.Error(),
 		State: map[string]string{
-			"activationToken": activationToken,
-			"registrationKey": registrationKey,
-			"targetName":      targetName,
-			"targetHostName":  hostname,
-			"goos":            runtime.GOOS,
-			"goarch":          runtime.GOARCH,
+			"activationToken":       activationToken,
+			"registrationKeyLength": fmt.Sprintf("%v", (len(registrationKey))),
+			"targetName":            targetName,
+			"targetHostName":        hostname,
+			"goos":                  runtime.GOOS,
+			"goarch":                runtime.GOARCH,
 		},
 	}
 
