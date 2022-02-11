@@ -129,7 +129,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		w.logger.Error(rerr)
 		// Do not quit, just return the user the info regarding the api request
 		responsePayload = WebDataOutActionPayload{
-			StatusCode: http.StatusInternalServerError,
+			StatusCode: http.StatusBadGateway,
 			RequestId:  dataIn.RequestId,
 			Headers:    map[string][]string{},
 			Content:    []byte{},
@@ -149,7 +149,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 			w.logger.Errorf("bad read on response body: %s", err)
 			// Do not quit, just return the user the info regarding the api request
 			responsePayload = WebDataOutActionPayload{
-				StatusCode: http.StatusInternalServerError,
+				StatusCode: http.StatusBadGateway,
 				RequestId:  dataIn.RequestId,
 				Headers:    map[string][]string{},
 				Content:    []byte{},
