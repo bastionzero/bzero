@@ -1,4 +1,4 @@
-package httpserver
+package kubeserver
 
 import (
 	"encoding/json"
@@ -16,6 +16,7 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 )
 
 const (
@@ -33,12 +34,11 @@ type StatusMessage struct {
 	ExitMessage string `json:"ExitMessage"`
 }
 
-type HTTPServer struct {
+type KubeServer struct {
 	logger      *logger.Logger
 	websocket   *websocket.Websocket // TODO: This will need to be a dictionary for when we have multiple
 	tmb         tomb.Tomb
 	exitMessage string
-	ready       bool
 
 	// RestApi is a special case where we want to be able to constantly retrieve it so we can feed any new RestApi
 	// requests that come in and skip the overhead of asking for a new datachannel and sending a Syn
@@ -49,7 +49,6 @@ type HTTPServer struct {
 
 	// fields for opening websockets
 	serviceUrl          string
-	hubEndpoint         string
 	params              map[string]string
 	headers             map[string]string
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
@@ -61,8 +60,9 @@ type HTTPServer struct {
 	targetGroups        []string
 }
 
-func StartHTTPServer(logger *logger.Logger,
-	daemonPort string,
+func StartKubeServer(logger *logger.Logger,
+	localPort string,
+	localHost string,
 	certPath string,
 	keyPath string,
 	refreshTokenCommand string,
@@ -71,18 +71,15 @@ func StartHTTPServer(logger *logger.Logger,
 	targetGroups []string,
 	localhostToken string,
 	serviceUrl string,
-	hubEndpoint string,
 	params map[string]string,
 	headers map[string]string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
-	listener := &HTTPServer{
+	listener := &KubeServer{
 		logger:              logger,
 		exitMessage:         "",
-		ready:               false,
 		localhostToken:      localhostToken,
 		serviceUrl:          serviceUrl,
-		hubEndpoint:         hubEndpoint,
 		params:              params,
 		headers:             headers,
 		targetSelectHandler: targetSelectHandler,
@@ -99,7 +96,7 @@ func StartHTTPServer(logger *logger.Logger,
 	}
 
 	// Create a single datachannel for all of our rest api calls to reduce overhead
-	if datachannel, err := listener.newDataChannel(string(kube.RestApi), listener.websocket); err == nil {
+	if datachannel, err := listener.newDataChannel(string(bzkube.RestApi), listener.websocket); err == nil {
 		listener.restApiDatachannel = datachannel
 	} else {
 		return err
@@ -120,7 +117,7 @@ func StartHTTPServer(logger *logger.Logger,
 			listener.statusCallback(w, r)
 		})
 
-		if err := http.ListenAndServeTLS(":"+daemonPort, certPath, keyPath, nil); err != nil {
+		if err := http.ListenAndServeTLS(localHost+":"+localPort, certPath, keyPath, nil); err != nil {
 			logger.Error(err)
 		}
 	}()
@@ -128,7 +125,7 @@ func StartHTTPServer(logger *logger.Logger,
 	return nil
 }
 
-func (k *HTTPServer) isReadyCallback(w http.ResponseWriter, r *http.Request) {
+func (k *KubeServer) isReadyCallback(w http.ResponseWriter, r *http.Request) {
 	if k.restApiDatachannel.Ready() {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -138,7 +135,7 @@ func (k *HTTPServer) isReadyCallback(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (k *HTTPServer) statusCallback(w http.ResponseWriter, r *http.Request) {
+func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 	// Build our status message
 	statusMessage := StatusMessage{
 		ExitMessage: k.exitMessage,
@@ -156,9 +153,9 @@ func (k *HTTPServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // for creating new websockets
-func (h *HTTPServer) newWebsocket(wsId string) error {
+func (h *KubeServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.hubEndpoint, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand); err != nil {
+	if wsClient, err := websocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Cluster); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient
@@ -167,21 +164,27 @@ func (h *HTTPServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
+func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
 	subLogger := h.logger.GetDatachannelLogger(dcId)
 
 	h.logger.Infof("Creating new datachannel id: %v", dcId)
-	// send new datachannel message to agent
-	odMessage := am.AgentMessage{
-		ChannelId:   dcId,
-		MessageType: string(am.OpenDataChannel),
+
+	// Build the actionParams to send to the datachannel to start the plugin
+	actionParams := bzkube.KubeActionParams{
+		TargetUser:   h.targetUser,
+		TargetGroups: h.targetGroups,
 	}
-	h.websocket.Send(odMessage)
+
+	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
+	if marshalErr != nil {
+		h.logger.Error(fmt.Errorf("error marshalling action params for kube"))
+		return nil, marshalErr
+	}
 
 	action = "kube/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, h.targetUser, h.targetGroups); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {
@@ -191,7 +194,7 @@ func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocke
 			for {
 				select {
 				case <-h.tmb.Dying():
-					datachannel.Close(errors.New("http server closing"))
+					datachannel.Close(errors.New("kube server closing"))
 					return
 				case <-dcTmb.Dying():
 					// Wait until everything is dead and any close processes are sent before killing the datachannel
@@ -211,7 +214,7 @@ func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocke
 					h.websocket.Send(cdMessage)
 
 					// close our websocket if the datachannel we closed was the last and it's not rest api
-					if kube.KubeDaemonAction(action) != kube.RestApi && h.websocket.SubscriberCount() == 0 {
+					if bzkube.KubeAction(action) != bzkube.RestApi && h.websocket.SubscriberCount() == 0 {
 						h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
 					}
 					return
@@ -222,13 +225,13 @@ func (h *HTTPServer) newDataChannel(action string, websocket *websocket.Websocke
 	}
 }
 
-func (h *HTTPServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
+func (h *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
 	w.WriteHeader(statusCode)
 	h.logger.Error(errors.New(msg))
 	w.Write([]byte(msg))
 }
 
-func (h *HTTPServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
+func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
 	h.logger.Infof("Handling %s - %s\n", r.URL.Path, r.Method)
 
 	// Before processing, check if we're ready to process or if there's been an error
@@ -263,31 +266,44 @@ func (h *HTTPServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 		logId = tokensSplit[2]
 	}
 
+	// Determine the action
+	action := getAction(r)
+
+	// Make food
+	food := kube.KubeFood{
+		Action:  action,
+		LogId:   logId,
+		Command: command,
+		Writer:  w,
+		Reader:  r,
+	}
+
+	// feed our restapi datachannel
+	if action == bzkube.RestApi {
+		h.restApiDatachannel.Feed(food)
+
+		// create new datachannel and feed it kubectl handlers
+	} else if datachannel, err := h.newDataChannel(string(action), h.websocket); err == nil {
+		datachannel.Feed(food)
+	}
+}
+
+func getAction(req *http.Request) bzkube.KubeAction {
 	// parse action from incoming request
 	switch {
 	// interactive commands that require both stdin and stdout
-	case isExecRequest(r):
-		// create new datachannel and feed it kubectl handlers
-		if datachannel, err := h.newDataChannel(string(kube.Exec), h.websocket); err == nil {
-			datachannel.Feed(string(kube.Exec), logId, command, w, r)
-		}
-	// Similar to exec it's interactive but instead has a input and error stream
-	case isPortForwardRequest(r):
-		// create new datachannel and feed it kubectl handlers
-		if datachannel, err := h.newDataChannel(string(kube.Stream), h.websocket); err == nil {
-			datachannel.Feed(string(kube.PortForward), logId, command, w, r)
-		}
-	// persistent, yet not interactive commands that serve continual output but only listen for a single, request-cancelling input
-	case isStreamRequest(r):
-		// create new datachannel and feed it kubectl handlers
-		if datachannel, err := h.newDataChannel(string(kube.Stream), h.websocket); err == nil {
-			datachannel.Feed(string(kube.Stream), logId, command, w, r)
-		}
+	case isExecRequest(req):
+		return bzkube.Exec
+
+	// Persistent, yet not interactive commands that serve continual output but only listen for a single, request-cancelling input
+	case isPortForwardRequest(req):
+		return bzkube.Stream
+	case isStreamRequest(req):
+		return bzkube.Stream
 
 	// simple call and response aka restapi requests
 	default:
-		// grab our existing rest api datachannel and feed it new handlers
-		h.restApiDatachannel.Feed(string(kube.RestApi), logId, command, w, r)
+		return bzkube.RestApi
 	}
 }
 

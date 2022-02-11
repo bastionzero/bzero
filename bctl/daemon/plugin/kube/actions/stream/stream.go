@@ -9,6 +9,7 @@ import (
 
 	kubestream "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/stream"
 	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -65,7 +66,7 @@ func (s *StreamAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
 }
 
 func (s *StreamAction) ReceiveStream(smessage smsg.StreamMessage) {
-	s.logger.Debugf("Stream action recieved %v stream", smessage.Type)
+	s.logger.Debugf("Stream action received %v stream", smessage.Type)
 	s.streamInputChan <- smessage
 }
 
@@ -78,10 +79,10 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	s.writer = writer
 
 	// First extract the headers out of the request
-	headers := kubeutils.GetHeaders(request.Header)
+	headers := bzhttp.GetHeaders(request.Header)
 
 	// Now extract the body
-	bodyInBytes, err := kubeutils.GetBodyBytes(request.Body)
+	bodyInBytes, err := bzhttp.GetBodyBytes(request.Body)
 	if err != nil {
 		s.logger.Error(err)
 		return err

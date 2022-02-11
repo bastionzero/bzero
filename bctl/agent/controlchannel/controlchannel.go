@@ -32,11 +32,12 @@ type ControlChannel struct {
 
 	// variables for opening websockets
 	serviceUrl            string
-	hubEndpoint           string
 	dcTargetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	// These are all the types of channels we have available
 	inputChan chan am.AgentMessage
+
+	targetType string
 
 	// struct for keeping track of all connections key'ed with connectionId (websockets with associated datachannels)
 	connections     map[string]wsMeta
@@ -49,8 +50,8 @@ func Start(logger *logger.Logger,
 	id string,
 	websocket *websocket.Websocket, // control channel websocket
 	serviceUrl string,
-	hubEndpoint string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	targetType string,
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) (*ControlChannel, error) {
 
 	control := &ControlChannel{
 		websocket: websocket,
@@ -58,8 +59,9 @@ func Start(logger *logger.Logger,
 		id:        id,
 
 		serviceUrl:            serviceUrl,
-		hubEndpoint:           hubEndpoint,
 		dcTargetSelectHandler: targetSelectHandler,
+
+		targetType: targetType,
 
 		inputChan: make(chan am.AgentMessage, 25),
 
@@ -69,6 +71,7 @@ func Start(logger *logger.Logger,
 	// The ChannelId is mostly for distinguishing multiple channels over a single websocket but the control channel has
 	// its own dedicated websocket.  This also makes it so there can only ever be one control channel associated with a
 	// given websocket at any time.
+	// TODO: figure out a way to let control channel know its own id before it subscribes
 	websocket.Subscribe("", control)
 
 	// Set up our handler to deal with incoming messages
@@ -77,6 +80,21 @@ func Start(logger *logger.Logger,
 		for {
 			select {
 			case <-control.tmb.Dying():
+				// We need to close all open client connections if the control channel has been closed
+				logger.Info("Closing all agent connections since control channel has been closed")
+
+				for _, wsMetadata := range control.connections {
+					// First send a close message over the agent websocket
+					wsMetadata.Client.Send(am.AgentMessage{
+						MessageType:    string(am.CloseDaemonWebsocket),
+						MessagePayload: []byte{},
+						SchemaVersion:  am.SchemaVersion,
+						ChannelId:      "-1", // Channel Id does not since this applies to all datachannels
+					})
+
+					// Then close the websocket
+					wsMetadata.Client.Close(fmt.Errorf("control channel has been closed"))
+				}
 				return nil
 			case agentMessage := <-control.inputChan:
 				if err := control.processInput(agentMessage); err != nil {
@@ -86,7 +104,7 @@ func Start(logger *logger.Logger,
 		}
 	})
 
-	return nil
+	return control, nil
 }
 
 func (c *ControlChannel) Close(reason error) {
@@ -122,10 +140,13 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 
 	// Add our token to our params
 	params := make(map[string]string)
-	params["daemon_connection_id"] = message.ConnectionId
+	params["connection_id"] = message.ConnectionId
+	params["connection_node_id"] = message.ConnectionNodeId
 	params["token"] = message.Token
+	params["connectionType"] = message.Type
+	params["connection_service_url"] = message.ConnectionServiceUrl
 
-	if ws, err := websocket.New(subLogger, message.ConnectionId, c.serviceUrl, c.hubEndpoint, params, headers, c.dcTargetSelectHandler, false, false, ""); err != nil {
+	if ws, err := websocket.New(subLogger, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary
@@ -140,26 +161,20 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 }
 
 func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
-	wsId := message.ConnectionId
+	connectionId := message.ConnectionId
 	dcId := message.DataChannelId
 
 	subLogger := c.logger.GetDatachannelLogger(dcId)
 
 	// grab the websocket
-	if websocketMeta, ok := c.getConnectionMap(wsId); !ok {
-		return fmt.Errorf("agent does not have a websocket associated with id %s", wsId)
+	if websocketMeta, ok := c.getConnectionMap(connectionId); !ok {
+		return fmt.Errorf("agent does not have a websocket associated with id %s", connectionId)
 	} else {
-		if datachannel, err := datachannel.New(subLogger, &c.tmb, websocketMeta.Client, message.TargetUser, message.TargetGroups, dcId); err != nil {
+		if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn); err != nil {
 			return err
 		} else {
 			// add our new datachannel to our connections dictionary
 			websocketMeta.DataChannels[dcId] = datachannel
-
-			// let the daemon know the datachannel is ready
-			websocketMeta.Client.Send(am.AgentMessage{
-				ChannelId:   dcId,
-				MessageType: string(am.DataChannelReady),
-			})
 		}
 	}
 	return nil
@@ -176,7 +191,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 			return fmt.Errorf("malformed check health request: %s", err)
 		} else {
 			// send message to be processed
-			if msg, err := checkHealth(healthCheckMessage); err != nil {
+			if msg, err := c.checkHealth(healthCheckMessage); err != nil {
 				return fmt.Errorf("error processing health check message: %s", err)
 			} else {
 				c.send(am.HealthCheck, msg)
@@ -218,7 +233,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 		if err := json.Unmarshal(agentMessage.MessagePayload, &cdRequest); err != nil {
 			return fmt.Errorf("malformed close datachannel request: %s", err)
 		} else {
-			if websocket, ok := c.connections[cdRequest.ConnectionId]; ok {
+			if websocket, ok := c.getConnectionMap(cdRequest.ConnectionId); ok {
 				if datachannel, ok := websocket.DataChannels[cdRequest.DataChannelId]; ok {
 					datachannel.Close(errors.New("formal datachannel request received"))
 					delete(websocket.DataChannels, cdRequest.DataChannelId)
@@ -236,32 +251,43 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 	return nil
 }
 
-func checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckClusterToBastionMessage, error) {
+func (c *ControlChannel) checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckAgentToBastionMessage, error) {
 	// Load in our saved config
 	secretData, err := vault.LoadVault()
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 
 	// Update the vault value
-	secretData.Data.ClusterName = healthCheckMessage.ClusterName
+	secretData.Data.TargetName = healthCheckMessage.TargetName
 	secretData.Save()
 
 	// Also let bastion know a list of valid cluster roles
 	// Create our api object
+	if vault.InCluster() {
+		return checkInClusterHealth()
+	}
+
+	return AliveCheckAgentToBastionMessage{
+		Alive:        true,
+		ClusterUsers: []string{},
+	}, nil
+}
+
+func checkInClusterHealth() (AliveCheckAgentToBastionMessage, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 
 	// Then get all cluster roles
 	clusterRoleBindings, err := clientset.RbacV1().ClusterRoleBindings().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 
 	clusterUsers := make(map[string]bool)
@@ -282,7 +308,7 @@ func checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckClusterToBast
 	// Then get all roles
 	roleBindings, err := clientset.RbacV1().RoleBindings("").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
-		return AliveCheckClusterToBastionMessage{}, err
+		return AliveCheckAgentToBastionMessage{}, err
 	}
 
 	for _, roleBindings := range roleBindings.Items {
@@ -304,7 +330,7 @@ func checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckClusterToBast
 		users = append(users, key)
 	}
 
-	return AliveCheckClusterToBastionMessage{
+	return AliveCheckAgentToBastionMessage{
 		Alive:        true,
 		ClusterUsers: users,
 	}, nil

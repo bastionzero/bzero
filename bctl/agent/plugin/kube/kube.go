@@ -14,6 +14,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/restapi"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/stream"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 
@@ -25,10 +26,6 @@ type IKubeAction interface {
 	Closed() bool
 }
 
-type JustRequestId struct {
-	RequestId string `json:"requestId"`
-}
-
 type KubeAction string
 
 const (
@@ -38,10 +35,15 @@ const (
 	PortForward KubeAction = "portforward"
 )
 
+type JustRequestId struct {
+	RequestId string `json:"requestId"`
+}
+
 type KubePlugin struct {
+	tmb *tomb.Tomb // datachannel's tomb
+
 	logger         *logger.Logger
 	actionsMapLock sync.Mutex
-	tmb            *tomb.Tomb
 
 	streamOutputChan chan smsg.StreamMessage
 	actions          map[string]IKubeAction
@@ -55,30 +57,35 @@ type KubePlugin struct {
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
-	targetUser string,
-	targetGroups []string) *KubePlugin {
+	payload []byte) (*KubePlugin, error) {
+
+	// Unmarshal the Syn payload
+	var synPayload bzkube.KubeActionParams
+	if err := json.Unmarshal(payload, &synPayload); err != nil {
+		return nil, fmt.Errorf("malformed Kube plugin SYN payload %v", string(payload))
+	}
 
 	// First load in our Kube variables
 	config, err := kuberest.InClusterConfig()
 	if err != nil {
 		cerr := fmt.Errorf("error getting incluser config: %s", err)
 		logger.Error(cerr)
-		return &KubePlugin{}
+		return nil, cerr
 	}
 
 	serviceAccountToken := config.BearerToken
 	kubeHost := "https://" + os.Getenv("KUBERNETES_SERVICE_HOST")
 
 	return &KubePlugin{
-		targetUser:          targetUser,
-		targetGroups:        targetGroups,
+		targetUser:          synPayload.TargetUser,
+		targetGroups:        synPayload.TargetGroups,
 		logger:              logger,
 		tmb:                 parentTmb, // if datachannel dies, so should we
 		streamOutputChan:    ch,
 		actions:             make(map[string]IKubeAction),
 		serviceAccountToken: serviceAccountToken,
 		kubeHost:            kubeHost,
-	}
+	}, nil
 }
 
 func (k *KubePlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {

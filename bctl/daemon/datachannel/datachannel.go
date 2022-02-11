@@ -4,20 +4,26 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	tomb "gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
+	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
+	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
+	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -26,22 +32,31 @@ const (
 	maxRetries = 3
 )
 
+// Plugins this datachannel accepts
+type PluginName string
+
+const (
+	Kube PluginName = "kube"
+	Db   PluginName = "db"
+	Web  PluginName = "web"
+)
+
+type OpenDataChannelPayload struct {
+	Syn    []byte `json:"syn"`
+	Action string `json:"action"`
+}
+
 type DataChannel struct {
-	websocket *websocket.Websocket
-	logger    *logger.Logger
-	id        string // DataChannel's ID
-	tmb       tomb.Tomb
-	ready     bool
-
-	plugin       *kube.KubeDaemonPlugin
+	logger       *logger.Logger
+	tmb          tomb.Tomb
+	websocket    *websocket.Websocket
+	id           string // DataChannel's ID
+	ready        bool
+	plugin       plugin.IPlugin
 	keysplitting keysplitting.IKeysplitting
-	handshook    bool // aka whether we need to send a syn
+	handshook    bool // bool to indicate if we have received a valid syn ack (initally set to false)
 
-	// Kube-specific vars
-	targetUser   string
-	targetGroups []string
-
-	// channels for incoming and outgoing messages
+	// channels for incoming messages
 	inputChan chan am.AgentMessage
 
 	// input channel for keysplitting messages only.  This allows for keysplitting messages to be
@@ -50,9 +65,14 @@ type DataChannel struct {
 
 	// If we need to send a SYN, then we need a way to keep
 	// track of whatever message that triggered the send SYN
-	onDeck      plugin.ActionWrapper
-	lastMessage plugin.ActionWrapper
+	onDeck      bzplugin.ActionWrapper
+	lastMessage bzplugin.ActionWrapper
 	retry       int
+
+	// locks for our ondeck and lastmessage
+	// TODO: Requiring these mutexes is probably indicative of a design/architecture failure
+	onDeckLock      sync.Mutex
+	lastMessageLock sync.Mutex
 }
 
 func New(logger *logger.Logger,
@@ -62,13 +82,12 @@ func New(logger *logger.Logger,
 	refreshTokenCommand string,
 	configPath string,
 	action string,
-	targetUser string,
-	targetGroups []string) (*DataChannel, *tomb.Tomb, error) {
+	actionParams []byte) (*DataChannel, *tomb.Tomb, error) {
 
 	keysplitter, err := keysplitting.New("", configPath, refreshTokenCommand)
 	if err != nil {
 		logger.Error(err)
-		return &DataChannel{}, &tomb.Tomb{}, err
+		return nil, &tomb.Tomb{}, err
 	}
 
 	dc := &DataChannel{
@@ -80,18 +99,27 @@ func New(logger *logger.Logger,
 		keysplitting: keysplitter,
 		handshook:    false,
 
-		targetUser:   targetUser,
-		targetGroups: targetGroups,
-
 		inputChan:   make(chan am.AgentMessage, 25),
 		ksInputChan: make(chan am.AgentMessage, 25),
 
-		onDeck: plugin.ActionWrapper{},
+		onDeck: bzplugin.ActionWrapper{},
 		retry:  0,
 	}
 
 	// register with websocket so datachannel can send a receive messages
 	websocket.Subscribe(id, dc)
+
+	// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
+	if err := dc.openDataChannel(action, actionParams); err != nil {
+		logger.Error(err)
+		return nil, &tomb.Tomb{}, err
+	}
+
+	// start our plugin
+	if err := dc.startPlugin(action, actionParams); err != nil {
+		logger.Error(err)
+		return nil, &tomb.Tomb{}, err
+	}
 
 	// listener for incoming messages
 	dc.tmb.Go(func() error {
@@ -127,12 +155,6 @@ func New(logger *logger.Logger,
 		}
 	}()
 
-	// start plugin based on action, currently we only have one tho
-	if err := dc.startKubeDaemonPlugin(action); err != nil {
-		logger.Error(err)
-		return &DataChannel{}, &dc.tmb, err
-	}
-
 	return dc, &dc.tmb, nil
 }
 
@@ -145,26 +167,101 @@ func (d *DataChannel) Close(reason error) {
 	d.tmb.Wait()
 }
 
-func (d *DataChannel) startKubeDaemonPlugin(action string) error {
-	subLogger := d.logger.GetPluginLogger("KubeDaemon")
-	if plugin, err := kube.New(&d.tmb, subLogger); err != nil {
-		rerr := fmt.Errorf("could not start kube daemon plugin: %s", err)
-		d.logger.Error(rerr)
-		return rerr
-	} else {
-		d.plugin = plugin
+func (d *DataChannel) openDataChannel(action string, actionParams []byte) error {
+	synMessage, err := d.keysplitting.BuildSyn(action, actionParams)
+	if err != nil {
+		return fmt.Errorf("error building syn: %s", err)
 	}
 
-	go func() {
-		d.sendSyn(action)
-	}()
+	// Marshal the syn
+	synBytes, err := json.Marshal(synMessage)
+	if err != nil {
+		return fmt.Errorf("error marshalling syn: %s", err)
+	}
+
+	messagePayload := OpenDataChannelPayload{
+		Syn:    synBytes,
+		Action: action,
+	}
+
+	// Marshall the messagePayload
+	messagePayloadBytes, err := json.Marshal(messagePayload)
+	if err != nil {
+		return fmt.Errorf("error marshalling OpenDataChannelPayload: %s", err)
+	}
+
+	// send new datachannel message to agent, as we can build the syn here
+	odMessage := am.AgentMessage{
+		ChannelId:      d.id,
+		MessagePayload: messagePayloadBytes,
+		MessageType:    string(am.OpenDataChannel),
+	}
+	d.websocket.Send(odMessage)
 
 	return nil
 }
 
-func (d *DataChannel) Feed(action string, logId string, command string, w http.ResponseWriter, r *http.Request) error {
+func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
+	// parse our plugin name
+	parsedAction := strings.Split(action, "/")
+	if len(parsedAction) == 0 {
+		return fmt.Errorf("malformed action: %s", action)
+	}
+	pluginName := parsedAction[0]
+
+	// start plugin based on name
+	subLogger := d.logger.GetPluginLogger(pluginName)
+	switch PluginName(pluginName) {
+	case Kube:
+		// Deserialize the action params
+		var kubeParams bzkube.KubeActionParams
+		if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
+			return fmt.Errorf("error deserializing actions params")
+		}
+
+		// start kube plugin
+		if plugin, err := kube.New(&d.tmb, subLogger, kubeParams); err != nil {
+			return fmt.Errorf("could not start kube daemon plugin: %s", err)
+		} else {
+			d.plugin = plugin
+		}
+	case Db:
+		// Deserialize the action params
+		var dbParams bzdb.DbActionParams
+		if err := json.Unmarshal(actionParams, &dbParams); err != nil {
+			return fmt.Errorf("error deserializing actions params")
+		}
+
+		// start db plugin
+		if plugin, err := db.New(&d.tmb, subLogger, dbParams); err != nil {
+			return fmt.Errorf("could not start db daemon plugin: %s", err)
+		} else {
+			d.plugin = plugin
+		}
+	case Web:
+		// Deserialize the action params
+		var webParams bzweb.WebActionParams
+		if err := json.Unmarshal(actionParams, &webParams); err != nil {
+			return fmt.Errorf("error deserializing actions params")
+		}
+
+		// start web plugin
+		subLogger := d.logger.GetPluginLogger("WebDaemon")
+		if plugin, err := web.New(&d.tmb, subLogger, webParams); err != nil {
+			return fmt.Errorf("could not start db daemon plugin: %s", err)
+		} else {
+			d.plugin = plugin
+		}
+	default:
+		return fmt.Errorf("unrecognized plugin passed to datachannel: %s", pluginName)
+	}
+
+	return nil
+}
+
+func (d *DataChannel) Feed(data interface{}) error {
 	if d.plugin != nil {
-		d.plugin.Feed(action, logId, command, w, r)
+		d.plugin.Feed(data)
 		return nil
 	} else {
 		rerr := fmt.Errorf("no plugin is associated with this datachannel")
@@ -205,8 +302,8 @@ func (d *DataChannel) sendSyn(action string) error {
 
 	d.handshook = false
 	payload := map[string]string{
-		"TargetUser":   d.targetUser,
-		"TargetGroups": strings.Join(d.targetGroups, ","),
+		// "TargetUser":   d.targetUser,
+		// "TargetGroups": strings.Join(d.targetGroups, ","),
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
@@ -229,8 +326,6 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) error {
 
 	var err error
 	switch am.MessageType(agentMessage.MessageType) {
-	case am.DataChannelReady:
-		d.ready = true
 	case am.Keysplitting:
 		d.ksInputChan <- agentMessage
 	case am.Stream:
@@ -246,26 +341,22 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) error {
 func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 	var errMessage rrr.ErrorMessage
 	if err := json.Unmarshal(agentMessage.MessagePayload, &errMessage); err != nil {
-		rerr := fmt.Errorf("malformed Error message")
-		d.logger.Error(rerr)
-		return rerr
+		return fmt.Errorf("malformed Error message")
 	} else {
 		rerr := fmt.Errorf("received error from agent: %s", errMessage.Message)
-		d.logger.Error(rerr)
 
 		// Keysplitting validation errors are probably going to be mostly bzcert renewals and
 		// we don't want to break every time that happens so we need to get back on the ks train
 		// executive decision: we don't retry if we get an error on a syn aka d.handshook == false
 		if d.retry > maxRetries {
-			rerr = fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
+			rerr = fmt.Errorf("goodbye. retried too many times to fix error: %s", errMessage.Message)
 		} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError && d.handshook {
 			d.retry++
-			d.onDeck = d.lastMessage
+			d.setOnDeck(d.getLastMessage())
 
 			// In order to get back on the keysplitting train, we need to resend the syn, get the synack
 			// so that our input message handler is pointing to the right thing.
-			if err := d.sendSyn(d.onDeck.Action); err != nil {
-				d.logger.Error(err)
+			if err := d.sendSyn(d.getOnDeck().Action); err != nil {
 				return err
 			} else {
 				return rerr
@@ -280,12 +371,14 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 func (d *DataChannel) handleStream(agentMessage am.AgentMessage) error {
 	var sMessage smsg.StreamMessage
 	if err := json.Unmarshal(agentMessage.MessagePayload, &sMessage); err != nil {
-		rerr := fmt.Errorf("malformed Stream message")
-		d.logger.Error(rerr)
-		return rerr
+		return fmt.Errorf("malformed Stream message")
 	}
 
-	d.plugin.ReceiveStream(sMessage)
+	if d.plugin != nil {
+		d.plugin.ReceiveStream(sMessage)
+	} else {
+		return fmt.Errorf("no active plugin")
+	}
 	return nil
 }
 
@@ -294,22 +387,18 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 	// unmarshal the keysplitting message
 	var ksMessage ksmsg.KeysplittingMessage
 	if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
-		rerr := fmt.Errorf("malformed Keysplitting message")
-		d.logger.Error(rerr)
-		return rerr
+		return fmt.Errorf("malformed Keysplitting message")
 	}
 
 	// validate keysplitting message
 	if err := d.keysplitting.Validate(&ksMessage); err != nil {
-		rerr := fmt.Errorf("invalid keysplitting message: %s", err)
-		d.logger.Error(rerr)
-		return rerr
+		return fmt.Errorf("invalid keysplitting message: %s", err)
 	}
 
 	// processInput message
 	var action string
 	var actionResponsePayload []byte
-	d.logger.Infof("%v", ksMessage.Type)
+
 	switch ksMessage.Type {
 	case ksmsg.SynAck:
 		synAckPayload := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
@@ -317,15 +406,15 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 		actionResponsePayload = synAckPayload.ActionResponsePayload
 
 		d.handshook = true
+		d.ready = true
 
 		// If there is a message that wasn't sent because we got a keysplitting validation error on it, send it now
-		if d.onDeck.Action != "" {
-			err := d.sendKeysplitting(&ksMessage, d.onDeck.Action, d.onDeck.ActionPayload)
-			return err
+		if next := d.getOnDeck(); next.Action != "" {
+			return d.sendKeysplitting(&ksMessage, next.Action, next.ActionPayload)
 		}
 	case ksmsg.DataAck:
 		// If we had something on deck, then this was the ack for it and we can remove it
-		d.onDeck = plugin.ActionWrapper{}
+		d.setOnDeck(bzplugin.ActionWrapper{})
 
 		// If we're here, it means that the previous data message that caused the error was accepted
 		d.retry = 0
@@ -334,25 +423,26 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 		action = dataAckPayload.Action
 		actionResponsePayload = dataAckPayload.ActionResponsePayload
 	default:
-		rerr := fmt.Errorf("unhandled Keysplitting type")
-		d.logger.Error(rerr)
-		return rerr
+		return fmt.Errorf("unhandled Keysplitting type")
 	}
 
 	// Send message to plugin's input message handler
-	if action, returnPayload, err := d.plugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
+	if d.plugin != nil {
+		if action, returnPayload, err := d.plugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
 
-		// We need to know the last message for invisible response to keysplitting validation errors
-		d.lastMessage = plugin.ActionWrapper{
-			Action:        action,
-			ActionPayload: returnPayload,
+			// We need to know the last message for invisible response to keysplitting validation errors
+			d.setLastMessage(bzplugin.ActionWrapper{
+				Action:        action,
+				ActionPayload: returnPayload,
+			})
+
+			return d.sendKeysplitting(&ksMessage, action, returnPayload)
+
+		} else {
+			return err
 		}
-
-		return d.sendKeysplitting(&ksMessage, action, returnPayload)
-
 	} else {
-		d.logger.Error(err)
-		return err
+		return fmt.Errorf("no plugin")
 	}
 }
 
@@ -366,4 +456,32 @@ func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMe
 		d.send(am.Keysplitting, respKSMessage)
 		return nil
 	}
+}
+
+func (d *DataChannel) getOnDeck() bzplugin.ActionWrapper {
+	d.onDeckLock.Lock()
+	defer d.onDeckLock.Unlock()
+
+	return d.onDeck
+}
+
+func (d *DataChannel) setOnDeck(msg bzplugin.ActionWrapper) {
+	d.onDeckLock.Lock()
+	defer d.onDeckLock.Unlock()
+
+	d.onDeck = msg
+}
+
+func (d *DataChannel) getLastMessage() bzplugin.ActionWrapper {
+	d.lastMessageLock.Lock()
+	defer d.lastMessageLock.Unlock()
+
+	return d.lastMessage
+}
+
+func (d *DataChannel) setLastMessage(msg bzplugin.ActionWrapper) {
+	d.lastMessageLock.Lock()
+	defer d.lastMessageLock.Unlock()
+
+	d.lastMessage = msg
 }

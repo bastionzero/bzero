@@ -11,7 +11,9 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin"
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
+	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
@@ -25,6 +27,8 @@ type PluginName string
 
 const (
 	Kube PluginName = "kube"
+	Db   PluginName = "db"
+	Web  PluginName = "web"
 )
 
 type DataChannel struct {
@@ -38,31 +42,24 @@ type DataChannel struct {
 
 	// incoming and outgoing message channels
 	inputChan chan am.AgentMessage
-
-	// Kube-specific vars
-	targetUser   string
-	targetGroups []string
 }
 
-func New(logger *logger.Logger,
-	parentTmb *tomb.Tomb,
+func New(parentTmb *tomb.Tomb,
+	logger *logger.Logger,
 	websocket *websocket.Websocket,
-	targetUser string,
-	targetGroups []string,
-	id string) (*DataChannel, error) {
+	id string,
+	syn []byte) (*DataChannel, error) {
 
 	keysplitter, err := keysplitting.New()
 	if err != nil {
 		logger.Error(err)
-		return &DataChannel{}, err
+		return nil, err
 	}
 
 	datachannel := &DataChannel{
 		websocket:    websocket,
 		logger:       logger,
 		keysplitting: keysplitter,
-		targetUser:   targetUser,
-		targetGroups: targetGroups,
 		inputChan:    make(chan am.AgentMessage, 50),
 		id:           id,
 	}
@@ -79,13 +76,28 @@ func New(logger *logger.Logger,
 			case <-parentTmb.Dying(): // control channel is dying
 				return errors.New("agent was orphaned too young and can't be batman :'(")
 			case <-datachannel.tmb.Dying():
-				time.Sleep(30 * time.Second) // allow the datachannel to close gracefully
+				time.Sleep(10 * time.Second) // allow the datachannel to close gracefully TODO: Figure out a better way to gracefully die
 				return nil
 			case agentMessage := <-datachannel.inputChan: // receive messages
-				datachannel.process(agentMessage)
+				datachannel.processInput(agentMessage)
 			}
 		}
 	})
+
+	// validate the Syn message
+	var synPayload ksmsg.KeysplittingMessage
+	if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
+		rerr := fmt.Errorf("malformed Keysplitting message")
+		logger.Error(rerr)
+		return nil, rerr
+	} else if synPayload.Type != ksmsg.Syn {
+		err := fmt.Errorf("datachannel must be started with a SYN message")
+		logger.Error(err)
+		return nil, err
+	}
+
+	// process our syn to startup the plugin
+	datachannel.handleKeysplittingMessage(&synPayload)
 
 	return datachannel, nil
 }
@@ -135,7 +147,7 @@ func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 	d.inputChan <- agentMessage
 }
 
-func (d *DataChannel) process(agentMessage am.AgentMessage) {
+func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 	d.logger.Info("received message type: " + agentMessage.MessageType)
 
 	switch am.MessageType(agentMessage.MessageType) {
@@ -173,12 +185,12 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 				return
 			}
 
-			// Start plugin
-			if err := d.startPlugin(PluginName(parsedAction[0])); err != nil {
+			// Start plugin based on action
+			actionPrefix := parsedAction[0]
+			if err := d.startPlugin(PluginName(actionPrefix), synPayload.ActionPayload); err != nil {
 				d.sendError(rrr.ComponentStartupError, err)
 				return
 			}
-
 			d.sendKeysplitting(keysplittingMessage, "", []byte{}) // empty payload
 		}
 	case ksmsg.Data:
@@ -199,31 +211,46 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	}
 }
 
-func (d *DataChannel) startPlugin(pluginName PluginName) error {
+func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
+
+	// create channel and listener and pass it to the new plugin
+	streamOutputChan := make(chan smsg.StreamMessage, 20)
+	go func() {
+		for {
+			select {
+			case <-d.tmb.Dying():
+				return
+			case streamMessage := <-streamOutputChan:
+				d.logger.Infof("Sending %s stream message", streamMessage.Type)
+				d.send(am.Stream, streamMessage)
+			}
+		}
+	}()
+
+	subLogger := d.logger.GetPluginLogger(string(pluginName))
+
+	var plugin plugin.IPlugin
+	var err error
 
 	switch pluginName {
 	case Kube:
-
-		// create channel and listener and pass it to the new plugin
-		streamOutputChan := make(chan smsg.StreamMessage, 20)
-		go func() {
-			for {
-				select {
-				case <-d.tmb.Dying():
-					return
-				case streamMessage := <-streamOutputChan:
-					d.logger.Infof("Sending %s stream message", streamMessage.Type)
-					d.send(am.Stream, streamMessage)
-				}
-			}
-		}()
-
-		subLogger := d.logger.GetPluginLogger(string(pluginName))
-		d.plugin = kube.New(&d.tmb, subLogger, streamOutputChan, d.targetUser, d.targetGroups)
-		d.logger.Infof("%s plugin started!", pluginName)
+		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
+	case Db:
+		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, payload)
+	case Web:
+		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, payload)
 	default:
-		return fmt.Errorf("tried to start an unhandled plugin")
+		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)
 	}
+
+	if err != nil {
+		return err
+	} else {
+		d.plugin = plugin
+	}
+
+	d.logger.Infof("%s plugin started!", pluginName)
+
 	return nil
 }

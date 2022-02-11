@@ -1,28 +1,20 @@
 package controlchannel
 
-type AliveCheckClusterToBastionMessage struct {
+type AliveCheckAgentToBastionMessage struct {
 	Alive        bool     `json:"alive"`
 	ClusterUsers []string `json:"clusterUsers"`
 }
-
-type RegisterAgentMessage struct {
-	PublicKey      string `json:"publicKey"`
-	ActivationCode string `json:"activationCode"`
-	AgentVersion   string `json:"agentVersion"`
-	OrgId          string `json:"orgId"`
-	EnvironmentId  string `json:"environmentId"`
-	ClusterName    string `json:"clusterName"`
-	ClusterId      string `json:"clusterId"`
-}
-
 type HealthCheckMessage struct {
-	ClusterName string `json:"clusterName"`
+	TargetName string `json:"targetName"`
 }
 
 // websocket and datachannel management payloads
 type OpenWebsocketMessage struct {
-	ConnectionId string `json:"connectionId"`
-	Token        string `json:"token"`
+	ConnectionId         string `json:"connectionId"`
+	ConnectionNodeId     string `json:"connectionNodeId"`
+	ConnectionServiceUrl string `json:"connectionServiceUrl"`
+	Token                string `json:"token"`
+	Type                 string `json:"type"`
 }
 
 type CloseWebsocketMessage struct {
@@ -30,18 +22,12 @@ type CloseWebsocketMessage struct {
 }
 
 type OpenDataChannelMessage struct {
-	DataChannelId string   `json:"dataChannelId"`
-	ConnectionId  string   `json:"connectionId"`
-	TargetUser    string   `json:"targetUser"`
-	TargetGroups  []string `json:"targetGroups"`
+	ConnectionId  string `json:"connectionId"`
+	DataChannelId string `json:"dataChannelId"`
+	Syn           []byte `json:"syn"`
 }
 
 type CloseDataChannelMessage struct {
-	DataChannelId string `json:"dataChannelId"`
-	ConnectionId  string `json:"connectionId"`
-}
-
-type DataChannelReadyMessage struct {
 	DataChannelId string `json:"dataChannelId"`
 	ConnectionId  string `json:"connectionId"`
 }

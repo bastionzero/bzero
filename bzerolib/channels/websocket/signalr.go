@@ -27,17 +27,6 @@ type CloseMessage struct {
 	Message string `json:"message"`
 }
 
-// Message definitions for challenge request/response
-type GetChallengeMessage struct {
-	OrgId       string `json:"orgId"`
-	ClusterId   string `json:"clusterId"`
-	ClusterName string `json:"clusterName"`
-}
-
-type GetChallengeResponse struct {
-	Challenge string `json:"challenge"`
-}
-
 // Message definitions for provisioning websocket
 type ProvisionDataChannel struct {
 	DataChannelId string `json:"dataChannelId"`

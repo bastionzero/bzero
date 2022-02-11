@@ -10,7 +10,7 @@ const (
 )
 
 type AgentMessage struct {
-	ChannelId      string `json:"ChannelId"` // acts like a session id to tie messages to a keysplitting hash chain
+	ChannelId      string `json:"channelId"` // acts like a session id to tie messages to a keysplitting hash chain
 	MessageType    string `json:"messageType"`
 	SchemaVersion  string `json:"schemaVersion" default:"1.0"`
 	MessagePayload []byte `json:"messagePayload"`
@@ -31,13 +31,13 @@ const (
 
 	// datachannel controller messages
 	OpenDataChannel  MessageType = "openDataChannel"
-	DataChannelReady MessageType = "dataChannelReady"
 	CloseDataChannel MessageType = "closeDataChannel"
 
 	// websocket controller messages
-	OpenWebsocket      MessageType = "openWebsocket"
-	CloseWebsocket     MessageType = "closeWebsocket"
-	ReconnectWebsocket MessageType = "reconnectWebsocket"
+	OpenWebsocket        MessageType = "openWebsocket"
+	CloseWebsocket       MessageType = "closeWebsocket"
+	CloseDaemonWebsocket MessageType = "closeDaemonWebsocket"
+	ReconnectWebsocket   MessageType = "reconnectWebsocket"
 
 	// message for force closing all connections an agent has
 	CloseAllConnections MessageType = "closeAllConnections"

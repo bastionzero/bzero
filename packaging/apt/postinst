@@ -1,0 +1,10 @@
+echo "Starting agent"
+if [ $(cat /proc/1/comm) = init ]
+then
+    start $BZERO_PKG_NAME || true
+elif [ $(cat /proc/1/comm) = systemd ]
+then
+    systemctl enable $BZERO_PKG_NAME
+    systemctl start $BZERO_PKG_NAME
+    systemctl daemon-reload
+fi
