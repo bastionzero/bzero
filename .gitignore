@@ -4,6 +4,7 @@
 bctl/daemon/daemon-windows
 bctl/daemon/daemon-linux
 bctl/daemon/daemon-macos
+bctl/daemon/daemon
 bctl/agent/agent
 
 # Macos fluff
