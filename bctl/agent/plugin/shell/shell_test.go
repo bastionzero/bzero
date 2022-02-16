@@ -22,29 +22,12 @@ import (
 
 	"testing"
 
-	"bastionzero.com/bctl/v1/bctl/agent/utility"
-	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
-
-func MockLogger() *logger.Logger {
-	logger, err := logger.New(logger.Debug, "/dev/null")
-	if err == nil {
-		return logger
-	}
-	return nil
-}
-
-func GetRunAsUser(t *testing.T) string {
-	username, err := utility.WhoAmI()
-	if err != nil {
-		t.Errorf("Could not resolve username: %v", err)
-	}
-	return username
-}
 
 func StreamMessageToString(t *testing.T, msg smsg.StreamMessage) string {
 	msgbyte, err := base64.StdEncoding.DecodeString(string(msg.Content))
@@ -55,11 +38,11 @@ func StreamMessageToString(t *testing.T, msg smsg.StreamMessage) string {
 }
 
 func SpawnTerminal(t *testing.T, streamOutputChan chan smsg.StreamMessage) *ShellPlugin {
-	subLogger := MockLogger().GetPluginLogger(string("unittest shell"))
-	testshelluser := GetRunAsUser(t)
+	subLogger := testutils.MockLogger().GetPluginLogger(string("unittest shell"))
+	testshelluser := testutils.GetRunAsUser(t)
 
 	var tmb tomb.Tomb
-	synPayload, _ := json.Marshal(bzshell.ShellConfigParams{
+	synPayload, _ := json.Marshal(bzshell.ShellOpenMessage{
 		RunAsUser: testshelluser,
 	})
 	plugin, err := New(&tmb, subLogger, streamOutputChan, synPayload)
@@ -271,12 +254,12 @@ func TestNoUserExistsErr(t *testing.T) {
 
 	streamOutputChan := make(chan smsg.StreamMessage, 20)
 
-	subLogger := MockLogger().GetPluginLogger(string("unittest shell"))
+	subLogger := testutils.MockLogger().GetPluginLogger(string("unittest shell"))
 	var tmb tomb.Tomb
 
 	userThatDoesNotExist := "NoSuchUser"
 
-	synPayload, _ := json.Marshal(bzshell.ShellConfigParams{
+	synPayload, _ := json.Marshal(bzshell.ShellOpenMessage{
 		RunAsUser: userThatDoesNotExist,
 	})
 	plugin, err := New(&tmb, subLogger, streamOutputChan, synPayload)
@@ -289,7 +272,7 @@ func TestNoUserExistsErr(t *testing.T) {
 	var action = "shell/open"
 
 	openPayload, _ := json.Marshal(bzshell.ShellOpenMessage{})
-	b64payload := b64Encode(openPayload)
+	b64payload := testutils.B64Encode(openPayload)
 
 	_, _, err = plugin.Receive(action, b64payload)
 

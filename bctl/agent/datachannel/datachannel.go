@@ -9,10 +9,11 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin"
+	plgn "bastionzero.com/bctl/v1/bctl/agent/plugin"
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -39,7 +40,7 @@ type IKeysplitting interface {
 }
 
 type DataChannel struct {
-	websocket *websocket.Websocket
+	websocket websocket.IWebsocket
 	logger    *logger.Logger
 	tmb       tomb.Tomb
 	id        string
@@ -53,16 +54,10 @@ type DataChannel struct {
 
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
-	websocket *websocket.Websocket,
+	websocket websocket.IWebsocket,
 	id string,
 	syn []byte,
-	ksConfig keysplitting.IKeysplittingConfig) (*DataChannel, error) {
-
-	// Init keysplitter
-	keysplitter, err := keysplitting.New(ksConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init keysplitter: %w", err)
-	}
+	keysplitter IKeysplitting) (*DataChannel, error) {
 
 	datachannel := &DataChannel{
 		websocket:    websocket,
@@ -211,6 +206,12 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	case ksmsg.Data:
 		dataPayload := keysplittingMessage.KeysplittingPayload.(ksmsg.DataPayload)
 
+		if d.plugin == nil { // Can't process data message if no plugin created
+			rerr := fmt.Errorf("plugin does not exist")
+			d.sendError(rrr.ComponentProcessingError, rerr)
+			return
+		}
+
 		// Send message to plugin and catch response action payload
 		// TODO: if we're ignoring the action we should really not be sending it up here
 		if _, returnPayload, err := d.plugin.Receive(dataPayload.Action, dataPayload.ActionPayload); err == nil {
@@ -246,7 +247,7 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
 
-	var plugin plugin.IPlugin
+	var plugin plgn.IPlugin
 	var err error
 
 	switch pluginName {
@@ -256,6 +257,8 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+	case Shell:
+		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")
 	}
