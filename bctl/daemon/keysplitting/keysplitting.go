@@ -39,12 +39,6 @@ type BZCertMetadata struct {
 	Exp  time.Time
 }
 
-type IKeysplitting interface {
-	BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error)
-	Validate(ksMessage *ksmsg.KeysplittingMessage) error
-	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
-}
-
 type Keysplitting struct {
 	hPointer         string
 	expectedHPointer string
@@ -52,21 +46,20 @@ type Keysplitting struct {
 	privatekey       string
 
 	// daemon variables
-	targetId            string
-	configPath          string
-	bzcertHash          string
-	refreshTokenCommand string
+	base64EncodedAgentPubKey string
+	configPath               string
+	bzcertHash               string
+	refreshTokenCommand      string
 }
 
-func New(targetId string, configPath string, refreshTokenCommand string) (IKeysplitting, error) {
-
+func New(base64EncodedAgentPubKey string, configPath string, refreshTokenCommand string) (*Keysplitting, error) {
 	// TODO: load keys from storage
 	keysplitter := &Keysplitting{
-		hPointer:            "",
-		expectedHPointer:    "",
-		targetId:            targetId,
-		configPath:          configPath,
-		refreshTokenCommand: refreshTokenCommand,
+		hPointer:                 "",
+		expectedHPointer:         "",
+		base64EncodedAgentPubKey: base64EncodedAgentPubKey,
+		configPath:               configPath,
+		refreshTokenCommand:      refreshTokenCommand,
 	}
 
 	return keysplitter, nil
@@ -85,12 +78,17 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}
 
-	// Verify received hash pointer matches expected
-	if hpointer != k.expectedHPointer {
-		return fmt.Errorf("%T hash pointer did not match expected", ksMessage.KeysplittingPayload)
-	} else {
-		return nil
+	// Verify the signature
+	if err := ksMessage.VerifySignature(k.base64EncodedAgentPubKey); err != nil {
+		return fmt.Errorf("failed to verify %v signature: %w", ksMessage.Type, err)
 	}
+
+	// Verify received hash pointer matches expected hash pointer
+	if hpointer != k.expectedHPointer {
+		return fmt.Errorf("%T hash pointer did not match expected hash pointer", ksMessage.KeysplittingPayload)
+	}
+
+	return nil
 }
 
 func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
@@ -160,7 +158,7 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 		Type:          string(ksmsg.Syn),
 		Action:        action,
 		ActionPayload: payload,
-		TargetId:      k.targetId, // TODO
+		TargetId:      k.base64EncodedAgentPubKey,
 		Nonce:         nonce,
 		BZCert:        bzCert,
 	}

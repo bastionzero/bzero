@@ -19,8 +19,8 @@ import (
 
 // Declaring flags as package-accessible variables
 var (
-	sessionId, authHeader, targetId, serviceUrl, plugin string
-	logPath, refreshTokenCommand, localPort, localHost  string
+	sessionId, authHeader, targetId, serviceUrl, plugin             string
+	logPath, refreshTokenCommand, localPort, localHost, agentPubKey string
 
 	// Kube server specifc values
 	targetGroupsRaw, targetUser, certPath, keyPath string
@@ -124,6 +124,7 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 		serviceUrl,
 		params,
 		headers,
+		agentPubKey,
 		targetSelectHandler)
 }
 
@@ -142,6 +143,7 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 		serviceUrl,
 		params,
 		headers,
+		agentPubKey,
 		targetSelectHandler)
 }
 
@@ -166,6 +168,7 @@ func startKubeServer(logger *logger.Logger, headers map[string]string, params ma
 		serviceUrl,
 		params,
 		headers,
+		agentPubKey,
 		targetSelectHandler)
 }
 
@@ -192,6 +195,7 @@ func parseFlags() error {
 	flag.StringVar(&plugin, "plugin", "", "Plugin to activate (kube, db, web)")
 	flag.StringVar(&localPort, "localPort", "", "Daemon Port To Use")
 	flag.StringVar(&localHost, "localHost", "", "Daemon Post To Use")
+	flag.StringVar(&agentPubKey, "agentPubKey", "", "Base64 encoded string of agent's public key")
 
 	// Kube plugin variables
 	flag.StringVar(&targetGroupsRaw, "targetGroups", "", "Kube Group to Assume")
@@ -220,7 +224,7 @@ func parseFlags() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort"}
+	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort", "agentPubKey"}
 	switch plugin {
 	case "kube":
 		requiredFlags = append(requiredFlags, "targetUser", "targetId", "localhostToken", "certPath", "keyPath")

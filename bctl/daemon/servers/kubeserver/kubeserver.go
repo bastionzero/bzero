@@ -58,6 +58,7 @@ type KubeServer struct {
 	configPath          string
 	targetUser          string
 	targetGroups        []string
+	agentPubKey         string
 }
 
 func StartKubeServer(logger *logger.Logger,
@@ -73,6 +74,7 @@ func StartKubeServer(logger *logger.Logger,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
+	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
 	listener := &KubeServer{
@@ -87,6 +89,7 @@ func StartKubeServer(logger *logger.Logger,
 		targetUser:          targetUser,
 		targetGroups:        targetGroups,
 		refreshTokenCommand: refreshTokenCommand,
+		agentPubKey:         agentPubKey,
 	}
 
 	// Create a new websocket
@@ -184,7 +187,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 	}
 
 	action = "kube/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {
