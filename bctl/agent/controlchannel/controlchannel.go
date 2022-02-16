@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"bastionzero.com/bctl/v1/bctl/agent/datachannel"
+	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -21,11 +22,11 @@ import (
 )
 
 type wsMeta struct {
-	Client       *websocket.Websocket
+	Client       websocket.IWebsocket
 	DataChannels map[string]websocket.IChannel
 }
 type ControlChannel struct {
-	websocket *websocket.Websocket
+	websocket websocket.IWebsocket
 	logger    *logger.Logger
 	tmb       tomb.Tomb
 	id        string
@@ -48,7 +49,7 @@ type ControlChannel struct {
 
 func Start(logger *logger.Logger,
 	id string,
-	websocket *websocket.Websocket, // control channel websocket
+	websocket websocket.IWebsocket, // control channel websocket
 	serviceUrl string,
 	targetType string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
@@ -159,23 +160,23 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 }
 
 func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
+	// openDataChannel expects that openWebsocket has already been called and a websocket has been created
 	wsId := message.DaemonWebsocketId
 	dcId := message.DataChannelId
-
 	subLogger := c.logger.GetDatachannelLogger(dcId)
 
 	// grab the websocket
 	if websocketMeta, ok := c.getConnectionMap(wsId); !ok {
 		return fmt.Errorf("agent does not have a websocket associated with id %s", wsId)
+	} else if keysplitter, err := keysplitting.New(); err != nil {
+		return err
+	} else if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn, keysplitter); err != nil {
+		return err
 	} else {
-		if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn); err != nil {
-			return err
-		} else {
-			// add our new datachannel to our connections dictionary
-			websocketMeta.DataChannels[dcId] = datachannel
-		}
+		// add our new datachannel to our connections dictionary
+		websocketMeta.DataChannels[dcId] = datachannel
+		return nil
 	}
-	return nil
 }
 
 // This is our main process function where incoming messages from the websocket will be processed
