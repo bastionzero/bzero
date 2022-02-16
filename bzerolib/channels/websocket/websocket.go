@@ -59,6 +59,10 @@ const (
 type IWebsocket interface {
 	Connect() error
 	Send(agentMessage am.AgentMessage)
+	Unsubscribe(id string)
+	Subscribe(id string, channel IChannel)
+	Close(error)
+	Ready() bool
 }
 
 // This will be the client that we use to store our websocket connection

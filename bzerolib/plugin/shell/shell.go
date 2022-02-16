@@ -13,7 +13,9 @@
 
 package shell
 
-type ShellOpenMessage struct{}
+type ShellOpenMessage struct {
+	RunAsUser string `json:"runasuser"`
+}
 
 type ShellCloseMessage struct{}
 
@@ -27,10 +29,6 @@ type ShellResizeMessage struct {
 }
 
 type ShellReplayMessage struct{}
-
-type ShellConfigParams struct {
-	RunAsUser string `json:"runasuser"`
-}
 
 type ShellAction string
 
