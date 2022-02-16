@@ -81,7 +81,7 @@ func Post(logger *logger.Logger, endpoint string, contentType string, body []byt
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
 
-	req := createBzhttp(logger, endpoint, headers, params, body, backoffParams)
+	req := createBzhttp(logger, endpoint, contentType, headers, params, body, backoffParams)
 
 	return req.post()
 
@@ -94,28 +94,26 @@ func Get(logger *logger.Logger, endpoint string, headers map[string]string, para
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
 
-	req := createBzhttp(logger, endpoint, headers, params, []byte{}, backoffParams)
+	req := createBzhttp(logger, endpoint, "", headers, params, []byte{}, backoffParams)
 
 	return req.get()
 }
 
 func Patch(logger *logger.Logger, endpoint string, headers map[string]string, params map[string]string) (*http.Response, error) {
-	// Helper function to perform exponential backoff on http get requests
-
 	// Define our exponential backoff params
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
 
-	req := createBzhttp(logger, endpoint, headers, params, []byte{}, backoffParams)
+	req := createBzhttp(logger, endpoint, "application/json", headers, params, []byte{}, backoffParams)
 
 	return req.patch()
 }
 
-func createBzhttp(logger *logger.Logger, endpoint string, headers map[string]string, params map[string]string, body []byte, backoffParams *backoff.ExponentialBackOff) bzhttp {
+func createBzhttp(logger *logger.Logger, endpoint string, contentType string, headers map[string]string, params map[string]string, body []byte, backoffParams *backoff.ExponentialBackOff) bzhttp {
 	return bzhttp{
 		logger:        logger,
 		endpoint:      endpoint,
-		contentType:   "",
+		contentType:   contentType,
 		body:          body,
 		headers:       headers,
 		params:        params,

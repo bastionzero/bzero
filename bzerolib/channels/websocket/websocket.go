@@ -134,17 +134,18 @@ func New(logger *logger.Logger,
 	go func() {
 		if err := ws.Connect(); err != nil {
 			logger.Error(err)
-			ws.Close(fmt.Errorf("Process was unable to connect to BastionZero"))
+			go ws.Close(fmt.Errorf("Process was unable to connect to BastionZero"))
 
 			// If this is a daemon connection (i.e. we are not getting a challenge)
 			// we also need to make sure we close the connection in the backend
 			if ws.requestParams["connectionId"] != "" {
 				cnControllerLogger := ws.logger.GetComponentLogger("cncontroller")
-				cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, ws.serviceUrl, "", ws.headers, ws.params)
+				cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, serviceUrl, "", ws.headers, ws.params)
 				if cnControllerErr != nil {
 					ws.logger.Errorf("error building connection controller to close connection %s", cnControllerErr)
 				}
 				cnController.CloseConnection(ws.requestParams["connectionId"])
+				logger.Infof("Closed connection: %s", ws.requestParams["connectionId"])
 			}
 		}
 	}()
