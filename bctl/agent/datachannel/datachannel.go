@@ -26,9 +26,10 @@ import (
 type PluginName string
 
 const (
-	Kube PluginName = "kube"
-	Db   PluginName = "db"
-	Web  PluginName = "web"
+	Kube  PluginName = "kube"
+	Db    PluginName = "db"
+	Web   PluginName = "web"
+	Shell PluginName = "shell"
 )
 
 type DataChannel struct {

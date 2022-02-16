@@ -49,7 +49,7 @@ func New(parentTmb *tomb.Tomb,
 	// Unmarshal the Syn payload
 	var synPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
-		return &WebPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
+		return &WebPlugin{}, fmt.Errorf("malformed Web plugin SYN payload %v", string(payload))
 	}
 
 	// Determine if we are using target hostname or host:port
@@ -124,7 +124,7 @@ func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte
 		subLogger.AddRequestId(rid)
 		switch bzweb.WebAction(webAction) {
 		case bzweb.Dial:
-			// Create a new dbdial action
+			// Create a new webdial action
 			a, err := webdial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
 			k.updateActionsMap(a, rid) // save action for later input
 
@@ -138,7 +138,7 @@ func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte
 			action, payload, err := a.Receive(action, actionPayloadSafe)
 			return action, payload, err
 		default:
-			rerr := fmt.Errorf("unhandled db action: %v", action)
+			rerr := fmt.Errorf("unhandled web action: %v", action)
 			k.logger.Error(rerr)
 			return "", []byte{}, rerr
 		}
