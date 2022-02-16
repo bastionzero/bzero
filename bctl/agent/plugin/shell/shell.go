@@ -26,6 +26,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/config"
@@ -34,12 +35,12 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
+	"bastionzero.com/bctl/v1/bzerolib/ringbuffer"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
 
 // ShellPlugin - Allows launching an interactive shell on the host which the agent is running on.
-//
 //
 //   New - Configures the shell including setting the RunAsUser but doesn't launch it
 //   Receive - receives MRZAP actions and dispatches them to the correct methods
@@ -64,7 +65,6 @@ import (
 //		plugin.close --> pty.ptyfile.close()
 //
 //		This should allow use to mock at the level of the ShellPlugin since none of the pty details are exposed
-
 type ShellPlugin struct {
 	tmb              *tomb.Tomb // datachannel's tomb
 	logger           *logger.Logger
@@ -75,6 +75,8 @@ type ShellPlugin struct {
 	streamOutputChan chan smsg.StreamMessage
 	shellStarted     bool
 	runAsUser        string
+	stdoutbuff       *ringbuffer.RingBuffer
+	stdoutbuffMutex  sync.Mutex
 }
 
 // New returns a new instance of the Shell Plugin
@@ -171,11 +173,30 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 			k.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
+	case bzshell.ShelllReplay:
+		var shellReplay bzshell.ShellReplayMessage
+
+		if err := json.Unmarshal(actionPayloadSafe, &shellReplay); err != nil {
+			rerr := fmt.Errorf("Malformed shell replay output payload %v", actionPayload)
+			k.logger.Error(rerr)
+			return action, []byte{}, rerr
+		}
+
+		outbuff := make([]byte, config.ShellStdOutBuffCapacity)
+		k.stdoutbuffMutex.Lock()
+		n, err := k.stdoutbuff.Read(outbuff)
+		k.stdoutbuffMutex.Unlock()
+
+		if err != nil {
+			return action, []byte{}, fmt.Errorf("Failed to read from stdout buff for shell replay %v", err)
+		}
+		return action, outbuff[0:n], nil
 	}
 
 	return action, []byte{}, nil
 }
 
+// Ready returns if the shell is running and can be interacted with
 func (k *ShellPlugin) Ready() bool {
 	return !(k.stdin == nil || k.stdout == nil)
 }
@@ -276,6 +297,8 @@ func (k *ShellPlugin) writePump(logger *logger.Logger) int {
 		}
 	}()
 
+	k.stdoutbuff = ringbuffer.New(config.ShellStdOutBuffCapacity)
+
 	stdoutBytes := make([]byte, config.StreamDataPayloadSize)
 	reader := bufio.NewReader(k.stdout)
 
@@ -291,6 +314,10 @@ func (k *ShellPlugin) writePump(logger *logger.Logger) int {
 			logger.Errorf("Stacktrace:\n%s", debug.Stack())
 			return config.ErrorExitCode
 		}
+
+		k.stdoutbuffMutex.Lock()
+		k.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
+		k.stdoutbuffMutex.Unlock()
 
 		str := base64.StdEncoding.EncodeToString(stdoutBytes[:stdoutBytesLen])
 
