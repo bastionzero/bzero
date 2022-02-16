@@ -14,6 +14,7 @@ import (
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
+	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
@@ -31,6 +32,12 @@ const (
 	Web  PluginName = "web"
 )
 
+type IKeysplitting interface {
+	GetHpointer() string
+	Validate(ksMessage *ksmsg.KeysplittingMessage) error
+	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+}
+
 type DataChannel struct {
 	websocket *websocket.Websocket
 	logger    *logger.Logger
@@ -38,7 +45,7 @@ type DataChannel struct {
 	id        string
 
 	plugin       plugin.IPlugin
-	keysplitting keysplitting.IKeysplitting
+	keysplitting IKeysplitting
 
 	// incoming and outgoing message channels
 	inputChan chan am.AgentMessage
@@ -50,11 +57,14 @@ func New(parentTmb *tomb.Tomb,
 	id string,
 	syn []byte) (*DataChannel, error) {
 
-	keysplitter, err := keysplitting.New()
+	// Load vault
+	config, err := vault.LoadVault()
 	if err != nil {
-		logger.Error(err)
-		return nil, err
+		return nil, fmt.Errorf("could not load vault: %s", err)
 	}
+
+	// Init keysplitter
+	keysplitter := keysplitting.New(config.Data.PublicKey, config.Data.PrivateKey, config.Data.IdpProvider, config.Data.IdpOrgId)
 
 	datachannel := &DataChannel{
 		websocket:    websocket,
