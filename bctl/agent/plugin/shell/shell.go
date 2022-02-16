@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/config"
-	"bastionzero.com/bctl/v1/bctl/agent/datachannel"
+	plgn "bastionzero.com/bctl/v1/bctl/agent/plugin"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/execcmd"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -86,7 +86,7 @@ func New(parentTmb *tomb.Tomb,
 	payload []byte) (*ShellPlugin, error) {
 
 	// Unmarshal the Syn payload
-	var configPayload bzshell.ShellConfigParams
+	var configPayload bzshell.ShellOpenMessage
 	if err := json.Unmarshal(payload, &configPayload); err != nil {
 		return &ShellPlugin{}, fmt.Errorf("malformed Shell plugin SYN payload %v", string(payload))
 	}
@@ -111,7 +111,7 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 	if len(parsedAction) < 2 {
 		return "", []byte{}, fmt.Errorf("malformed action: %s", action)
 	}
-	if datachannel.PluginName(parsedAction[0]) != datachannel.Shell {
+	if plgn.PluginName(parsedAction[0]) != plgn.Shell {
 		return "", []byte{}, fmt.Errorf("malformed action: expected 'shell/.*' got %s", action)
 	}
 
@@ -133,6 +133,8 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 
 	switch bzshell.ShellAction(shellAction) {
 	case bzshell.ShellOpen:
+		// We ignore the RunAsUser in the second Shell/Open message since it was set in the first one processed by .New.
+		//  This is important because the RunAsUser is part of policy and the policy check happens in the first Shell/Open message.
 		if err := k.open(); err != nil {
 			errorString := fmt.Errorf("Unable to start shell: %s", err)
 			k.logger.Error(errorString)
