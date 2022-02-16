@@ -134,7 +134,18 @@ func New(logger *logger.Logger,
 	go func() {
 		if err := ws.Connect(); err != nil {
 			logger.Error(err)
-			ws.Close(fmt.Errorf("Agent was unable to connect to BastionZero"))
+			ws.Close(fmt.Errorf("Process was unable to connect to BastionZero"))
+
+			// If this is a daemon connection (i.e. we are not getting a challenge)
+			// we also need to make sure we close the connection in the backend
+			if ws.requestParams["connectionId"] != "" {
+				cnControllerLogger := ws.logger.GetComponentLogger("cncontroller")
+				cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, ws.serviceUrl, "", ws.headers, ws.params)
+				if cnControllerErr != nil {
+					ws.logger.Errorf("error building connection controller to close connection %s", cnControllerErr)
+				}
+				cnController.CloseConnection(ws.requestParams["connectionId"])
+			}
 		}
 	}()
 
@@ -361,6 +372,8 @@ func (w *Websocket) Connect() error {
 		}
 
 		createConnectionResponse, err := cnController.CreateKubeConnection(w.params["target_user"], targetGroups, w.params["target_id"])
+		// Always set connectionId incase we error later and need to close the connection
+		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		if err != nil {
 			return err
 		}
@@ -373,7 +386,6 @@ func (w *Websocket) Connect() error {
 		w.baseUrl = newBaseUrl
 
 		// Define our request params
-		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
 
 		// Get the connection type based on the websocket type
@@ -388,6 +400,8 @@ func (w *Websocket) Connect() error {
 		}
 
 		createConnectionResponse, err := cnController.CreateDbConnection(w.params["target_id"])
+		// Always set connectionId incase we error later and need to close the connection
+		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		if err != nil {
 			return err
 		}
@@ -400,7 +414,6 @@ func (w *Websocket) Connect() error {
 		w.baseUrl = newBaseUrl
 
 		// Define our request params
-		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
 
 		// Get the connection type based on the websocket type
@@ -416,6 +429,8 @@ func (w *Websocket) Connect() error {
 		}
 
 		createConnectionResponse, err := cnController.CreateWebConnection(w.params["target_id"])
+		// Always set connectionId incase we error later and need to close the connection
+		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		if err != nil {
 			return err
 		}
@@ -428,7 +443,6 @@ func (w *Websocket) Connect() error {
 		w.baseUrl = newBaseUrl
 
 		// Define our request params
-		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
 		w.requestParams["authToken"] = createConnectionResponse.AuthToken
 
 		// Get the connection type based on the websocket type
