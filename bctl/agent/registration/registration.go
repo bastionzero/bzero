@@ -187,14 +187,15 @@ func (r *Registration) getRegistrationResponse(activationToken string, targetId 
 
 	// Create our request
 	req := RegistrationRequest{
-		PublicKey:      r.config.Data.PublicKey,
-		ActivationCode: activationToken,
-		Version:        r.config.Data.Version,
-		EnvironmentId:  r.config.Data.EnvironmentId,
-		TargetName:     r.config.Data.TargetName,
-		TargetHostName: hostname,
-		TargetId:       targetId,
-		Region:         region,
+		PublicKey:       r.config.Data.PublicKey,
+		ActivationCode:  activationToken,
+		Version:         r.config.Data.Version,
+		EnvironmentId:   r.config.Data.EnvironmentId,
+		EnvironmentName: r.config.Data.EnvironmentName,
+		TargetName:      r.config.Data.TargetName,
+		TargetHostName:  hostname,
+		TargetId:        targetId,
+		Region:          region,
 	}
 
 	// Build the endpoint we want to hit
