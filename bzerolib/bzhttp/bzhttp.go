@@ -5,8 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
+	"path"
+	"strings"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -21,6 +25,49 @@ type bzhttp struct {
 	headers       map[string]string
 	params        map[string]string
 	backoffParams backoff.BackOff
+}
+
+func BuildEndpoint(base string, toAdd string) (string, error) {
+	urlObject, err := url.Parse(base)
+	if err != nil {
+		return "", err
+	}
+	urlObject.Path = path.Join(urlObject.Path, toAdd)
+
+	// Now undo any url encoding that might have happened in UrlObject.String()
+	decodedUrl, err := url.QueryUnescape(urlObject.String())
+	if err != nil {
+		return "", err
+	}
+
+	// There is a problem with path.Join where it interally calls a Clean(..) function
+	// which will remove any trailing slashes, this causes issues when proxying requests
+	// that are expecting the trailing slash.
+	// Ref: https://forum.golangbridge.org/t/how-to-concatenate-paths-for-api-request/5791
+	if strings.HasSuffix(toAdd, "/") && !strings.HasSuffix(decodedUrl, "/") {
+		decodedUrl += "/"
+	}
+
+	return decodedUrl, nil
+}
+
+// Helper function to extract the body of a http request
+func GetBodyBytes(body io.ReadCloser) ([]byte, error) {
+	bodyInBytes, err := ioutil.ReadAll(body)
+	if err != nil {
+		rerr := fmt.Errorf("error building body: %s", err)
+		return nil, rerr
+	}
+	return bodyInBytes, nil
+}
+
+// Helper function to extract headers from a http request
+func GetHeaders(headers http.Header) map[string][]string {
+	toReturn := make(map[string][]string)
+	for name, values := range headers {
+		toReturn[name] = values
+	}
+	return toReturn
 }
 
 func PostContent(logger *logger.Logger, endpoint string, contentType string, body []byte) (*http.Response, error) {
@@ -160,7 +207,7 @@ func (b *bzhttp) post() (*http.Response, error) {
 
 			bodyBytes, err := io.ReadAll(response.Body)
 			if err != nil {
-				log.Fatal(err)
+				b.logger.Error(err)
 			}
 			bodyString := string(bodyBytes)
 			b.logger.Infof("error: %s", bodyString)
@@ -222,11 +269,6 @@ func (b *bzhttp) get() (*http.Response, error) {
 			req.URL.RawQuery = q.Encode()
 
 			response, err = httpClient.Do(req)
-
-			if err != nil {
-				b.logger.Errorf("error making post request: %v", err)
-				return nil, err
-			}
 		}
 
 		// If the status code is unauthorized, do not attempt to retry

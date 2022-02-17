@@ -31,7 +31,6 @@ const (
 
 	// datachannel controller messages
 	OpenDataChannel  MessageType = "openDataChannel"
-	DataChannelReady MessageType = "dataChannelReady"
 	CloseDataChannel MessageType = "closeDataChannel"
 
 	// websocket controller messages

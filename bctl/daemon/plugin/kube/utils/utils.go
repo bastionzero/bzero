@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -12,16 +11,6 @@ import (
 
 func generateUUID() string {
 	return uuid.New().String()
-}
-
-// Helper function to extract the body of a http request
-func GetBodyBytes(body io.ReadCloser) ([]byte, error) {
-	bodyInBytes, err := ioutil.ReadAll(body)
-	if err != nil {
-		rerr := fmt.Errorf("error building body: %s", err)
-		return nil, rerr
-	}
-	return bodyInBytes, nil
 }
 
 func WriteToHttpRequest(contentBytes []byte, writer http.ResponseWriter) error {
@@ -55,13 +44,4 @@ func IsQueryParamPresent(request *http.Request, paramArg string) bool {
 
 	// Else return false
 	return false
-}
-
-// Helper function to extract headers from a http request
-func GetHeaders(headers http.Header) map[string][]string {
-	toReturn := make(map[string][]string)
-	for name, values := range headers {
-		toReturn[name] = values
-	}
-	return toReturn
 }

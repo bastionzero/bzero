@@ -52,7 +52,7 @@ func Start(logger *logger.Logger,
 	websocket websocket.IWebsocket, // control channel websocket
 	serviceUrl string,
 	targetType string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) (*ControlChannel, error) {
 
 	control := &ControlChannel{
 		websocket: websocket,
@@ -72,6 +72,7 @@ func Start(logger *logger.Logger,
 	// The ChannelId is mostly for distinguishing multiple channels over a single websocket but the control channel has
 	// its own dedicated websocket.  This also makes it so there can only ever be one control channel associated with a
 	// given websocket at any time.
+	// TODO: figure out a way to let control channel know its own id before it subscribes
 	websocket.Subscribe("", control)
 
 	// Set up our handler to deal with incoming messages
@@ -104,7 +105,7 @@ func Start(logger *logger.Logger,
 		}
 	})
 
-	return nil
+	return control, nil
 }
 
 func (c *ControlChannel) Close(reason error) {
@@ -140,12 +141,13 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 
 	// Add our token to our params
 	params := make(map[string]string)
-	params["daemon_websocket_id"] = message.DaemonWebsocketId
+	params["connection_id"] = message.ConnectionId
 	params["connection_node_id"] = message.ConnectionNodeId
 	params["token"] = message.Token
-	params["connection_type"] = message.Type
+	params["connectionType"] = message.Type
+	params["connection_service_url"] = message.ConnectionServiceUrl
 
-	if ws, err := websocket.New(subLogger, message.DaemonWebsocketId, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
+	if ws, err := websocket.New(subLogger, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary
@@ -160,8 +162,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 }
 
 func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
-	// openDataChannel expects that openWebsocket has already been called and a websocket has been created
-	wsId := message.DaemonWebsocketId
+	connectionId := message.ConnectionId
 	dcId := message.DataChannelId
 	subLogger := c.logger.GetDatachannelLogger(dcId)
 
@@ -232,7 +233,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 		if err := json.Unmarshal(agentMessage.MessagePayload, &cdRequest); err != nil {
 			return fmt.Errorf("malformed close datachannel request: %s", err)
 		} else {
-			if websocket, ok := c.connections[cdRequest.ConnectionId]; ok {
+			if websocket, ok := c.getConnectionMap(cdRequest.ConnectionId); ok {
 				if datachannel, ok := websocket.DataChannels[cdRequest.DataChannelId]; ok {
 					datachannel.Close(errors.New("formal datachannel request received"))
 					delete(websocket.DataChannels, cdRequest.DataChannelId)

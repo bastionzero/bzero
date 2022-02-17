@@ -4,19 +4,23 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
+	"time"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
+	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
 // Declaring flags as package-accessible variables
 var (
 	sessionId, authHeader, targetId, serviceUrl, plugin string
-	logPath, refreshTokenCommand, daemonPort            string
+	logPath, refreshTokenCommand, localPort, localHost  string
 
 	// Kube server specifc values
 	targetGroupsRaw, targetUser, certPath, keyPath string
@@ -29,60 +33,80 @@ var (
 )
 
 const (
-	version = "$DAEMON_VERSION"
+	version        = "$DAEMON_VERSION"
+	prodServiceUrl = "https://cloud.bastionzero.com"
 )
 
 func main() {
-	parseErr := parseFlags() // TODO: Output missing args error
-	if parseErr != nil {
-		// TODO: We should alert zli somehow?, in all of these panics in this file?
-		panic(parseErr)
-	}
+	flagErr := parseFlags()
 
 	// Setup our loggers
 	// TODO: Pass in debug level as flag or put it in the config
-	logger, err := logger.New(logger.Debug, getLogFilePath())
-	if err != nil {
-		os.Exit(1)
+	if logger, err := logger.New(logger.Debug, logPath); err != nil {
+		reportError(logger, err)
+	} else {
+		logger.AddDaemonVersion(version)
+
+		// print out parseflags error now
+		if flagErr != nil {
+			reportError(logger, flagErr)
+		} else {
+			// Create our headers and params
+			headers := make(map[string]string)
+			headers["Authorization"] = authHeader
+
+			params := make(map[string]string)
+			params["session_id"] = sessionId
+			params["version"] = version
+
+			if err := startServer(logger, headers, params); err != nil {
+				logger.Error(err)
+				os.Exit(1)
+			} else {
+				select {} // sleep forever
+			}
+		}
 	}
-	logger.AddDaemonVersion(version)
 
-	// Create our headers and params
-	headers := make(map[string]string)
-	headers["Authorization"] = authHeader
+	// if we hit this, something has gone wrong
+	os.Exit(1)
+}
 
-	params := make(map[string]string)
-	params["session_id"] = sessionId
-	params["version"] = version
+func reportError(logger *logger.Logger, errorReport error) {
+	if logger != nil {
+		logger.Error(errorReport)
+	}
 
+	errReport := errorreport.ErrorReport{
+		Reporter:  "daemon-" + version,
+		Timestamp: fmt.Sprint(time.Now().Unix()),
+		Message:   errorReport.Error(),
+		State: map[string]string{
+			"targetHostName": "",
+			"goos":           runtime.GOOS,
+			"goarch":         runtime.GOARCH,
+		},
+	}
+
+	errorreport.ReportError(logger, serviceUrl, errReport)
+}
+
+func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	logger.Infof("Opening websocket to Bastion: %s for plugin %s", serviceUrl, plugin)
 
 	switch plugin {
 	case "kube":
-		params["websocketType"] = "kube"
-		if err := startKubeServer(logger, headers, params); err != nil {
-			logger.Error(err)
-			panic(err)
-		}
+		params["websocketType"] = "cluster"
+		return startKubeServer(logger, headers, params)
 	case "db":
 		params["websocketType"] = "db"
-		if err := startDbServer(logger, headers, params); err != nil {
-			logger.Error(err)
-			panic(err)
-		}
+		return startDbServer(logger, headers, params)
 	case "web":
 		params["websocketType"] = "web"
-		if err := startWebServer(logger, headers, params); err != nil {
-			logger.Error(err)
-			panic(err)
-		}
+		return startWebServer(logger, headers, params)
 	default:
-		pluginErr := fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
-		logger.Error(pluginErr)
-		panic(pluginErr)
+		return fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
-
-	select {} // sleep forever?
 }
 
 func startWebServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
@@ -91,7 +115,8 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 	params["target_id"] = targetId
 
 	return webserver.StartWebServer(subLogger,
-		daemonPort,
+		localPort,
+		localHost,
 		remotePort,
 		remoteHost,
 		refreshTokenCommand,
@@ -108,7 +133,8 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 	params["target_id"] = targetId
 
 	return dbserver.StartDbServer(subLogger,
-		daemonPort,
+		localPort,
+		localHost,
 		remotePort,
 		remoteHost,
 		refreshTokenCommand,
@@ -128,7 +154,8 @@ func startKubeServer(logger *logger.Logger, headers map[string]string, params ma
 	params["target_groups"] = targetGroupsRaw
 
 	return kubeserver.StartKubeServer(subLogger,
-		daemonPort,
+		localPort,
+		localHost,
 		certPath,
 		keyPath,
 		refreshTokenCommand,
@@ -160,10 +187,11 @@ func parseFlags() error {
 	flag.StringVar(&authHeader, "authHeader", "", "Auth Header From Zli")
 
 	// Our expected flags we need to start
-	flag.StringVar(&serviceUrl, "serviceURL", "", "Service URL to use")
+	flag.StringVar(&serviceUrl, "serviceURL", prodServiceUrl, "Service URL to use")
 	flag.StringVar(&targetId, "targetId", "", "Kube Cluster Id to Connect to")
 	flag.StringVar(&plugin, "plugin", "", "Plugin to activate (kube, db, web)")
-	flag.StringVar(&daemonPort, "daemonPort", "", "Daemon Port To Use")
+	flag.StringVar(&localPort, "localPort", "", "Daemon Port To Use")
+	flag.StringVar(&localHost, "localHost", "", "Daemon Post To Use")
 
 	// Kube plugin variables
 	flag.StringVar(&targetGroupsRaw, "targetGroups", "", "Kube Group to Assume")
@@ -179,11 +207,44 @@ func parseFlags() error {
 	flag.IntVar(&remotePort, "remotePort", -1, "Remote target port to connect to")
 	flag.StringVar(&remoteHost, "remoteHost", "", "Remote target host to connect to")
 
-	// Check we have all required flags
 	flag.Parse()
-	if sessionId == "" || authHeader == "" || serviceUrl == "" ||
-		logPath == "" || configPath == "" || daemonPort == "" {
-		return fmt.Errorf("missing flags")
+
+	// Make sure our service url is correctly formatted
+	if !strings.HasPrefix(serviceUrl, "http") {
+		if url, err := bzhttp.BuildEndpoint("https://", serviceUrl); err != nil {
+			return fmt.Errorf("error adding scheme to serviceUrl %s: %s", serviceUrl, err)
+		} else {
+			serviceUrl = url
+		}
+	}
+
+	// Check we have all required flags
+	// Depending on the plugin ensure we have the correct required flag values
+	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort"}
+	switch plugin {
+	case "kube":
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
+	case "db":
+	case "web":
+		requiredFlags = append(requiredFlags, "remoteHost", "remotePort")
+	default:
+		return fmt.Errorf("unhandled plugin passed: %s", plugin)
+	}
+
+	// Put all of the flags we've seen into a dict
+	seen := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { seen[f.Name] = true })
+
+	// Check against required dict to find the missing ones
+	var missingFlags []string
+	for _, req := range requiredFlags {
+		if !seen[req] {
+			missingFlags = append(missingFlags, req)
+		}
+	}
+
+	if len(missingFlags) > 0 {
+		return fmt.Errorf("missing flags! %v", missingFlags)
 	}
 
 	// Depending on the plugin ensure we have the correct values
@@ -210,8 +271,4 @@ func parseFlags() error {
 	}
 
 	return nil
-}
-
-func getLogFilePath() string {
-	return logPath
 }

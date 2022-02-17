@@ -38,7 +38,8 @@ type DbServer struct {
 	remoteHost string
 
 	// fields for new datachannels
-	daemonport          string
+	localPort           string
+	localHost           string
 	params              map[string]string
 	headers             map[string]string
 	serviceUrl          string
@@ -47,7 +48,8 @@ type DbServer struct {
 }
 
 func StartDbServer(logger *logger.Logger,
-	daemonPort string,
+	localPort string,
+	localHost string,
 	remotePort int,
 	remoteHost string,
 	refreshTokenCommand string,
@@ -65,7 +67,8 @@ func StartDbServer(logger *logger.Logger,
 		targetSelectHandler: targetSelectHandler,
 		configPath:          configPath,
 		refreshTokenCommand: refreshTokenCommand,
-		daemonport:          daemonPort,
+		localPort:           localPort,
+		localHost:           localHost,
 		remoteHost:          remoteHost,
 		remotePort:          remotePort,
 	}
@@ -84,14 +87,14 @@ func StartDbServer(logger *logger.Logger,
 	}
 
 	// Now create our local listener for TCP connections
-	logger.Infof("Resolving TCP address for port: %s", daemonPort)
-	localTcpAddress, err := net.ResolveTCPAddr("tcp", ":"+daemonPort)
+	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
+	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
 	if err != nil {
 		logger.Errorf("Failed to resolve TCP address %s", err)
 		os.Exit(1)
 	}
 
-	logger.Infof("Setting up TCP lister")
+	logger.Infof("Setting up TCP listener")
 	localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
 	if err != nil {
 		logger.Errorf("Failed to open local port to listen: %s", err)
@@ -131,7 +134,7 @@ func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, reques
 // for creating new websockets
 func (h *DbServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Db); err != nil {
+	if wsClient, err := websocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Db); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient
@@ -156,7 +159,7 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
 	if marshalErr != nil {
 		h.logger.Error(fmt.Errorf("error marshalling action params for db"))
-		return &datachannel.DataChannel{}, marshalErr
+		return nil, marshalErr
 	}
 
 	action = "db/" + action

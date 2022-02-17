@@ -5,7 +5,17 @@ type WebDialActionPayload struct {
 }
 
 type WebDataInActionPayload struct {
-	Data           string `json:"data"`
-	SequenceNumber int    `json:"sequenceNumber"`
-	RequestId      string `json:"requestId"`
+	Body           []byte              `json:"body"`
+	Endpoint       string              `json:"endpoint"`
+	Headers        map[string][]string `json:"headers"`
+	Method         string              `json:"method"`
+	SequenceNumber int                 `json:"sequenceNumber"`
+	RequestId      string              `json:"requestId"`
+}
+
+type WebDataOutActionPayload struct {
+	StatusCode int                 `json:"statusCode"`
+	RequestId  string              `json:"requestId"`
+	Headers    map[string][]string `json:"headers"`
+	Content    []byte              `json:"content"`
 }

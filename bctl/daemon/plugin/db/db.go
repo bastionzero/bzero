@@ -116,7 +116,7 @@ func (k *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte
 	}
 
 	// No keysplitting data comes from dial plugins on the agent
-	k.logger.Errorf("keysplitting message received. This should now happen")
+	k.logger.Errorf("keysplitting message received. This should not happen")
 	return nil
 }
 

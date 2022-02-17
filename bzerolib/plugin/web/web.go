@@ -1,11 +1,14 @@
 package web
 
-import "net"
+import (
+	"net/http"
+)
 
 type WebAction string
 
 const (
-	Dial WebAction = "dial"
+	Dial      WebAction = "dial"
+	Websocket WebAction = "websocket"
 )
 
 type WebActionParams struct {
@@ -14,6 +17,7 @@ type WebActionParams struct {
 }
 
 type WebFood struct {
-	Action WebAction
-	Conn   *net.TCPConn
+	Action  WebAction
+	Writer  http.ResponseWriter
+	Request *http.Request
 }

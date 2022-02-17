@@ -49,17 +49,17 @@ func New(parentTmb *tomb.Tomb,
 	// Unmarshal the Syn payload
 	var synPayload db.DbActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
-		return &DbPlugin{}, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
+		return nil, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
 	// Build our address
-	address := synPayload.RemoteHost + ":" + fmt.Sprint(synPayload.RemotePort)
+	address := fmt.Sprintf("%s:%v", synPayload.RemoteHost, synPayload.RemotePort)
 
 	// Open up a connection to the TCP addr we are trying to connect to
 	raddr, err := net.ResolveTCPAddr("tcp", address)
 	if err != nil {
 		logger.Errorf("Failed to resolve remote address: %s", err)
-		return &DbPlugin{}, fmt.Errorf("failed to resolve remote address: %s", err)
+		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
 	}
 
 	plugin := &DbPlugin{

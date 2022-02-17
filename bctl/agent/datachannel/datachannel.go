@@ -65,7 +65,7 @@ func New(parentTmb *tomb.Tomb,
 			case <-parentTmb.Dying(): // control channel is dying
 				return errors.New("agent was orphaned too young and can't be batman :'(")
 			case <-datachannel.tmb.Dying():
-				time.Sleep(30 * time.Second) // allow the datachannel to close gracefully TODO: Figure out a better way to gracefully die
+				time.Sleep(10 * time.Second) // allow the datachannel to close gracefully TODO: Figure out a better way to gracefully die
 				return nil
 			case agentMessage := <-datachannel.inputChan: // receive messages
 				datachannel.processInput(agentMessage)
@@ -78,11 +78,11 @@ func New(parentTmb *tomb.Tomb,
 	if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
 		rerr := fmt.Errorf("malformed Keysplitting message")
 		logger.Error(rerr)
-		return &DataChannel{}, rerr
+		return nil, rerr
 	} else if synPayload.Type != ksmsg.Syn {
 		err := fmt.Errorf("datachannel must be started with a SYN message")
 		logger.Error(err)
-		return &DataChannel{}, err
+		return nil, err
 	}
 
 	// process our syn to startup the plugin

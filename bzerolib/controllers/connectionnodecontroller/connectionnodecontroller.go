@@ -8,7 +8,6 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 )
 
 type ConnectionNodeController struct {
@@ -30,7 +29,7 @@ const (
 	createWebConnectionEndpoint = "/api/v2/connections/web"
 
 	// General endpoints
-	getAuthDetailsEndpoint = "/api/v2/connections/$TYPE/$ID/$VERSION/connection-auth-details"
+	getAuthDetailsEndpoint = "/api/v2/connections/$ID/$VERSION/connection-auth-details"
 )
 
 func New(logger *logger.Logger,
@@ -48,7 +47,7 @@ func New(logger *logger.Logger,
 	}, nil
 }
 
-func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targetGroups []string, targetId string) ConnectionDetailsResponse {
+func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targetGroups []string, targetId string) (ConnectionDetailsResponse, error) {
 	// Create our request
 	createKubeConnectionRequest := CreateKubeConnectionRequest{
 		TargetUser:   targetUser,
@@ -56,175 +55,110 @@ func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targe
 		TargetId:     targetId,
 	}
 
-	// Build the endpoint we want to hit
-	createConnectionEndpoint, err := utils.JoinUrls(c.bastionUrl, createKubeConnectionEndpoint)
-	if err != nil {
-		c.logger.Error(fmt.Errorf("error building url"))
-		panic(err)
-	}
-
-	// Marshall the request
-	msgBytes, errMarshal := json.Marshal(createKubeConnectionRequest)
-	if errMarshal != nil {
-		c.logger.Error(fmt.Errorf("error marshalling create kube connection request for connection node: %v", createKubeConnectionRequest))
-		panic(errMarshal)
-	}
-
-	// Perform the request
-	httpCreateConnectionResponse, errPost := bzhttp.Post(c.logger, createConnectionEndpoint, "application/json", msgBytes, c.headers, c.params)
-	if errPost != nil {
-		c.logger.Error(fmt.Errorf("error on create kube connection for connection node: %s. Response: %+v", errPost, httpCreateConnectionResponse))
-		panic(errPost)
-	}
-
-	// Read all the bytes from the response
-	createConnectionResponseBytes, readAllErr := ioutil.ReadAll(httpCreateConnectionResponse.Body)
-	if readAllErr != nil {
-		c.logger.Error(fmt.Errorf("error reading bytes from create connection response"))
-		panic(readAllErr)
-	}
-
-	// Unmarshal the bytes
-	createConnectionResponse := &CreateConnectionResponse{}
-	if err := json.Unmarshal(createConnectionResponseBytes, &createConnectionResponse); err != nil {
-		// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
-		c.logger.Error(fmt.Errorf("error un-marshalling create connection response"))
-		panic(err)
-	}
-
-	return c.createCnConnection(createConnectionResponse.ConnectionId, "kube")
+	return c.createConnection(createKubeConnectionRequest, "kube")
 }
 
-func (c *ConnectionNodeController) CreateDbConnection(targetId string) ConnectionDetailsResponse {
+func (c *ConnectionNodeController) CreateDbConnection(targetId string) (ConnectionDetailsResponse, error) {
 	// Create our request
 	createDbConnectionRequest := CreateConnectionRequest{
 		TargetId: targetId,
 	}
 
-	// Build the endpoint we want to hit
-	createConnectionEndpoint, err := utils.JoinUrls(c.bastionUrl, createDbConnectionEndpoint)
-	if err != nil {
-		c.logger.Error(fmt.Errorf("error building url"))
-		panic(err)
-	}
-
-	// Marshall the request
-	msgBytes, errMarshal := json.Marshal(createDbConnectionRequest)
-	if errMarshal != nil {
-		c.logger.Error(fmt.Errorf("error marshalling create db connection request for connection node: %v", createDbConnectionRequest))
-		panic(errMarshal)
-	}
-
-	// Perform the request
-	httpCreateConnectionResponse, errPost := bzhttp.Post(c.logger, createConnectionEndpoint, "application/json", msgBytes, c.headers, c.params)
-	if errPost != nil {
-		c.logger.Error(fmt.Errorf("error on create db connection for connection node: %s. Response: %+v", errPost, httpCreateConnectionResponse))
-		panic(errPost)
-	}
-
-	// Read all the bytes from the response
-	createConnectionResponseBytes, readAllErr := ioutil.ReadAll(httpCreateConnectionResponse.Body)
-	if readAllErr != nil {
-		c.logger.Error(fmt.Errorf("error reading bytes from create connection response"))
-		panic(readAllErr)
-	}
-
-	// Unmarshal the bytes
-	createConnectionResponse := &CreateConnectionResponse{}
-	if err := json.Unmarshal(createConnectionResponseBytes, &createConnectionResponse); err != nil {
-		// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
-		c.logger.Error(fmt.Errorf("error un-marshalling create connection response"))
-		panic(err)
-	}
-
-	return c.createCnConnection(createConnectionResponse.ConnectionId, "db")
+	return c.createConnection(createDbConnectionRequest, "db")
 }
 
-func (c *ConnectionNodeController) CreateWebConnection(targetId string) ConnectionDetailsResponse {
+func (c *ConnectionNodeController) CreateWebConnection(targetId string) (ConnectionDetailsResponse, error) {
 	// Create our request
-	createDbConnectionRequest := CreateConnectionRequest{
+	createWebConnectionRequest := CreateConnectionRequest{
 		TargetId: targetId,
 	}
 
+	return c.createConnection(createWebConnectionRequest, "web")
+}
+
+func (c *ConnectionNodeController) createConnection(request interface{}, connectionType string) (ConnectionDetailsResponse, error) {
 	// Build the endpoint we want to hit
-	createConnectionEndpoint, err := utils.JoinUrls(c.bastionUrl, createWebConnectionEndpoint)
+	endpoint := ""
+	switch connectionType {
+	case "kube":
+		endpoint = createKubeConnectionEndpoint
+	case "web":
+		endpoint = createWebConnectionEndpoint
+	case "db":
+		endpoint = createDbConnectionEndpoint
+	default:
+		return ConnectionDetailsResponse{}, fmt.Errorf("attempting to make an unrecognized connection: %s", connectionType)
+	}
+
+	createConnectionEndpoint, err := bzhttp.BuildEndpoint(c.bastionUrl, endpoint)
 	if err != nil {
-		c.logger.Error(fmt.Errorf("error building url"))
-		panic(err)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error building url")
 	}
 
 	// Marshall the request
-	msgBytes, errMarshal := json.Marshal(createDbConnectionRequest)
+	msgBytes, errMarshal := json.Marshal(request)
 	if errMarshal != nil {
-		c.logger.Error(fmt.Errorf("error marshalling create web connection request for connection node: %v", createDbConnectionRequest))
-		panic(errMarshal)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error marshalling create %s connection request for connection node: %+v", connectionType, request)
 	}
 
 	// Perform the request
 	httpCreateConnectionResponse, errPost := bzhttp.Post(c.logger, createConnectionEndpoint, "application/json", msgBytes, c.headers, c.params)
 	if errPost != nil {
-		c.logger.Error(fmt.Errorf("error on create web connection for connection node: %s. Response: %+v", errPost, httpCreateConnectionResponse))
-		panic(errPost)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error on create %s connection for connection node: %s. Response: %+v", connectionType, errPost, httpCreateConnectionResponse)
 	}
 
 	// Read all the bytes from the response
 	createConnectionResponseBytes, readAllErr := ioutil.ReadAll(httpCreateConnectionResponse.Body)
 	if readAllErr != nil {
-		c.logger.Error(fmt.Errorf("error reading bytes from create connection response"))
-		panic(readAllErr)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error reading bytes from create connection response")
 	}
 
 	// Unmarshal the bytes
 	createConnectionResponse := &CreateConnectionResponse{}
 	if err := json.Unmarshal(createConnectionResponseBytes, &createConnectionResponse); err != nil {
 		// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
-		c.logger.Error(fmt.Errorf("error un-marshalling create connection response"))
-		panic(err)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error un-marshalling create connection response")
 	}
 
-	return c.createCnConnection(createConnectionResponse.ConnectionId, "web")
+	return c.createCnConnection(createConnectionResponse.ConnectionId)
 }
 
-func (c *ConnectionNodeController) createCnConnection(connectionId string, typeOfConnection string) ConnectionDetailsResponse {
+func (c *ConnectionNodeController) createCnConnection(connectionId string) (ConnectionDetailsResponse, error) {
 	// Now use the connectionId to get the connectionNodeId and AuthToken
 
 	// Add our ID and type and version
 	getAuthDetailsEndpointFormatted := strings.Replace(getAuthDetailsEndpoint, "$ID", connectionId, -1)
-	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpointFormatted, "$TYPE", typeOfConnection, -1)
 	getAuthDetailsEndpointFormatted = strings.Replace(getAuthDetailsEndpointFormatted, "$VERSION", c.params["version"], -1)
 
 	// Build our endpoint
-	getAuthDetailsEndpoint, err := utils.JoinUrls(c.bastionUrl, getAuthDetailsEndpointFormatted)
+	getAuthDetailsEndpoint, err := bzhttp.BuildEndpoint(c.bastionUrl, getAuthDetailsEndpointFormatted)
 	if err != nil {
-		c.logger.Error(fmt.Errorf("error building url"))
-		panic(err)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error building url")
 	}
 
 	httpGetAuthDetailsResponse, errPost := bzhttp.Get(c.logger, getAuthDetailsEndpoint, c.headers, c.params)
 	if errPost != nil {
-		c.logger.Error(fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpGetAuthDetailsResponse))
-		panic(errPost)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpGetAuthDetailsResponse)
 	}
 
 	// Unmarshal the bytes
 	getAuthDetailsResponseBytes, readAllErr := ioutil.ReadAll(httpGetAuthDetailsResponse.Body)
 	if readAllErr != nil {
-		c.logger.Error(fmt.Errorf("error reading bytes from get auth details response"))
-		panic(readAllErr)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error reading bytes from get auth details response")
 	}
 
 	// Unmarshal the bytes
 	getAuthDetailsResponse := &ConnectionAuthDetailsResponse{}
 	if err := json.Unmarshal(getAuthDetailsResponseBytes, &getAuthDetailsResponse); err != nil {
 		// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
-		c.logger.Error(fmt.Errorf("error un-marshalling create connection response"))
-		panic(err)
+		return ConnectionDetailsResponse{}, fmt.Errorf("error un-marshalling create connection response")
 	}
 
 	// Return the auth details response
 	return ConnectionDetailsResponse{
-		ConnectionNodeId: getAuthDetailsResponse.ConnectionNodeId,
-		AuthToken:        getAuthDetailsResponse.AuthToken,
-		ConnectionId:     connectionId,
-	}
+		ConnectionNodeId:     getAuthDetailsResponse.ConnectionNodeId,
+		AuthToken:            getAuthDetailsResponse.AuthToken,
+		ConnectionServiceUrl: getAuthDetailsResponse.ConnectionServiceUrl,
+		ConnectionId:         connectionId,
+	}, nil
 }

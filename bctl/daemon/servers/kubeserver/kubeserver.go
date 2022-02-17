@@ -61,7 +61,8 @@ type KubeServer struct {
 }
 
 func StartKubeServer(logger *logger.Logger,
-	daemonPort string,
+	localPort string,
+	localHost string,
 	certPath string,
 	keyPath string,
 	refreshTokenCommand string,
@@ -116,7 +117,7 @@ func StartKubeServer(logger *logger.Logger,
 			listener.statusCallback(w, r)
 		})
 
-		if err := http.ListenAndServeTLS(":"+daemonPort, certPath, keyPath, nil); err != nil {
+		if err := http.ListenAndServeTLS(localHost+":"+localPort, certPath, keyPath, nil); err != nil {
 			logger.Error(err)
 		}
 	}()
@@ -154,7 +155,7 @@ func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 // for creating new websockets
 func (h *KubeServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, wsId, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Cluster); err != nil {
+	if wsClient, err := websocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Cluster); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient
@@ -179,7 +180,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
 	if marshalErr != nil {
 		h.logger.Error(fmt.Errorf("error marshalling action params for kube"))
-		return &datachannel.DataChannel{}, marshalErr
+		return nil, marshalErr
 	}
 
 	action = "kube/" + action

@@ -8,7 +8,6 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/utils"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -18,11 +17,10 @@ type AgentController struct {
 	connectionNodeBaseUrl string
 	headers               map[string]string
 	params                map[string]string
-	targetType            string
+	agentType             string
 }
 
 const (
-	registerEndpoint  = "/api/v2/agent/register-agent"
 	challengeEndpoint = "/api/v2/agent/challenge"
 )
 
@@ -30,69 +28,22 @@ func New(logger *logger.Logger,
 	bastionUrl string,
 	headers map[string]string,
 	params map[string]string,
-	targetType string) *AgentController {
-
-	// Build the endpoint we want to hit
-	bastionUrlFormatted, err := utils.JoinUrls("https://", bastionUrl)
-	if err != nil {
-		logger.Error(fmt.Errorf("error building url"))
-		panic(err)
-	}
+	agentType string) (*AgentController, error) {
 
 	return &AgentController{
 		logger:     logger,
-		bastionUrl: bastionUrlFormatted,
+		bastionUrl: bastionUrl,
 		headers:    headers,
 		params:     params,
-		targetType: targetType,
-	}
+		agentType:  agentType,
+	}, nil
 }
-
-func (c *AgentController) RegisterAgent(publicKey string, activationToken string, version string, orgId string, environmentId string, targetName string, targetId string, targetType string) error {
-	// Create our request
-	registerAgentMessage := RegisterAgentMessage{
-		PublicKey:       publicKey,
-		ActivationCode:  activationToken,
-		Version:         version,
-		OrgId:           orgId,
-		EnvironmentId:   environmentId,
-		EnvironmentName: "",
-		TargetName:      targetName,
-		TargetId:        targetId,
-		TargetType:      targetType,
-	}
-
-	// Build the endpoint we want to hit
-	registerAgentEndpoint, err := utils.JoinUrls(c.bastionUrl, registerEndpoint)
-	if err != nil {
-		c.logger.Error(fmt.Errorf("error building url"))
-		panic(err)
-	}
-
-	// Marshall the request
-	msgBytes, errMarshal := json.Marshal(registerAgentMessage)
-	if errMarshal != nil {
-		c.logger.Error(fmt.Errorf("error marshalling register agent message for agent: %s", targetName))
-		panic(errMarshal)
-	}
-
-	// Perform the request
-	httpCreateConnectionResponse, errPost := bzhttp.Post(c.logger, registerAgentEndpoint, "application/json", msgBytes, c.headers, c.params)
-	if errPost != nil {
-		c.logger.Error(fmt.Errorf("error on register agent: %s. Response: %+v", errPost, httpCreateConnectionResponse))
-		panic(errPost)
-	}
-
-	return nil
-}
-
-func (c *AgentController) GetChallenge(orgId string, targetId string, targetName string, privateKey string, targetType string, version string) (string, error) {
+func (c *AgentController) GetChallenge(targetId string, targetName string, privateKey string, version string) (string, error) {
 	// Get challenge
 	challengeRequest := GetChallengeMessage{
-		OrgId:      orgId,
 		TargetId:   targetId,
 		TargetName: targetName,
-		TargetType: targetType,
+		AgentType:  c.agentType,
 		Version:    version,
 	}
 
@@ -102,10 +53,9 @@ func (c *AgentController) GetChallenge(orgId string, targetId string, targetName
 	}
 
 	// Build the endpoint we want to hit
-	challengeEndpointFormatted, err := utils.JoinUrls(c.bastionUrl, challengeEndpoint)
+	challengeEndpointFormatted, err := bzhttp.BuildEndpoint(c.bastionUrl, challengeEndpoint)
 	if err != nil {
-		c.logger.Error(fmt.Errorf("error building url"))
-		panic(err)
+		return "", fmt.Errorf("error building url")
 	}
 
 	// Make our POST request

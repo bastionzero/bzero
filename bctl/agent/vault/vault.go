@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
+	"sync"
 
-	"github.com/tucnak/store"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"github.com/fsnotify/fsnotify"
 	coreV1 "k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -16,32 +21,37 @@ import (
 )
 
 const (
-	keyConfig = "keyConfig"
+	vaultKey          = "secret"
+	defaultValueValue = "coolbeans"
 
 	// Env var to flag if we are in a kube cluster
 	inClusterEnvVar = "BASTIONZERO_IN_CLUSTER"
 
 	// Vault systemd consts
-	vaultPath = "bzero.vault.json" // This can be found uin ~/.config/bzero-config/bzero.vault.json
+	vaultPath = "/etc/bzero/vault.json"
 )
 
 type Vault struct {
 	Data SecretData
 
 	// Kube secret related
-	client coreV1Types.SecretInterface
-	secret *coreV1.Secret
+	client   coreV1Types.SecretInterface
+	secret   *coreV1.Secret
+	fileLock sync.Mutex
 }
 
 type SecretData struct {
-	PublicKey   string
-	PrivateKey  string
-	OrgId       string
-	ServiceUrl  string
-	TargetName  string
-	Namespace   string
-	IdpProvider string
-	IdpOrgId    string
+	PublicKey     string
+	PrivateKey    string
+	ServiceUrl    string
+	TargetName    string
+	Namespace     string
+	IdpProvider   string
+	IdpOrgId      string
+	TargetId      string
+	EnvironmentId string
+	AgentType     string
+	Version       string
 }
 
 func LoadVault() (*Vault, error) {
@@ -61,35 +71,115 @@ func InCluster() bool {
 	}
 }
 
+func WaitForNewRegistration(logger *logger.Logger) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("error starting new file watcher: %s", err)
+	}
+	defer watcher.Close()
+
+	done := make(chan error)
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					done <- fmt.Errorf("file watcher closed events channel")
+				}
+
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					var config SecretData
+					if file, err := ioutil.ReadFile(vaultPath); err != nil {
+						continue
+					} else if err := json.Unmarshal([]byte(file), &config); err != nil {
+						continue
+					} else {
+						// if we haven't completed registration yet, continue waiting
+						if config.PublicKey == "" {
+							continue
+						} else {
+							done <- nil
+						}
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					done <- fmt.Errorf("file watcher closed errors channel")
+				}
+				done <- fmt.Errorf("file watcher caught error: %s", err)
+			}
+		}
+	}()
+
+	if err := watcher.Add(vaultPath); err != nil {
+		return fmt.Errorf("unable to watch file: %s, error: %s", vaultPath, err)
+	}
+
+	return <-done
+}
+
 func systemdVault() (*Vault, error) {
 	var secretData SecretData
 
-	store.Init("bzero-config")
+	// check if file exists
+	if f, err := os.Stat(vaultPath); os.IsNotExist(err) { // our file does not exist
 
-	// First check if we've created the vault before
-	if err := store.Load(vaultPath, &secretData); err != nil {
-
-		// Now save the secret data
-		if err := store.Save(vaultPath, &secretData); err != nil {
-			return &Vault{}, fmt.Errorf("error saving vault information: %v", err.Error())
+		// create our directory, if it doesn't exit
+		if err := os.MkdirAll(filepath.Dir(vaultPath), os.ModePerm); err != nil {
+			return nil, err
 		}
+
+		// create our file
+		if _, err := os.Create(vaultPath); err != nil {
+			return nil, err
+		} else {
+			vault := Vault{
+				client: nil,
+				secret: nil,
+				Data:   secretData,
+			}
+			vault.Save()
+
+			// return our newly created, and empty vault
+			return &vault, nil
+		}
+	} else if err != nil {
+		return nil, err
+	} else if f.Size() == 0 { // our file exists, but is empty
+		vault := Vault{
+			client: nil,
+			secret: nil,
+			Data:   secretData,
+		}
+		vault.Save()
+
+		// return our newly created, and empty vault
+		return &vault, nil
 	}
-	return &Vault{
-		client: nil, // systemd vault does not have a client
-		secret: nil, // systemd vault does not have a secret
-		Data:   secretData,
-	}, nil
+
+	// if the file does exist, read it into memory
+	if file, err := ioutil.ReadFile(vaultPath); err != nil {
+		return nil, err
+	} else if err := json.Unmarshal([]byte(file), &secretData); err != nil {
+		return nil, err
+	} else {
+		return &Vault{
+			client: nil,
+			secret: nil,
+			Data:   secretData,
+		}, nil
+	}
 }
 
 func clusterVault() (*Vault, error) {
 	// Create our api object
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return &Vault{}, fmt.Errorf("error grabbing cluster config: %v", err.Error())
+		return nil, fmt.Errorf("error grabbing cluster config: %v", err.Error())
 	}
 
 	if clientset, err := kubernetes.NewForConfig(config); err != nil {
-		return &Vault{}, fmt.Errorf("error creating new config: %v", err.Error())
+		return nil, fmt.Errorf("error creating new config: %v", err.Error())
 	} else {
 		secretName := "bctl-" + os.Getenv("TARGET_NAME") + "-secret"
 
@@ -100,13 +190,13 @@ func clusterVault() (*Vault, error) {
 		if secret, err := secretsClient.Get(context.Background(), secretName, metaV1.GetOptions{}); err != nil {
 			// If there is no secret there, create it
 			secretData := map[string][]byte{
-				"secret": []byte("coolbeans"),
+				"secret": []byte(defaultValueValue),
 			}
 			object := metaV1.ObjectMeta{Name: secretName}
 			secret := &coreV1.Secret{Data: secretData, ObjectMeta: object}
 
 			if _, err := secretsClient.Create(context.TODO(), secret, metaV1.CreateOptions{}); err != nil {
-				return &Vault{}, fmt.Errorf("error creating secret: %v", err.Error())
+				return nil, fmt.Errorf("error creating secret: %v", err.Error())
 			}
 
 			return &Vault{
@@ -116,9 +206,17 @@ func clusterVault() (*Vault, error) {
 			}, nil
 
 		} else {
-			if data, ok := secret.Data[keyConfig]; ok {
+			if data, ok := secret.Data[vaultKey]; ok {
+				if bytes.Equal(data, []byte(defaultValueValue)) {
+					// This is a fresh secret, return an empty secrets data
+					return &Vault{
+						client: secretsClient,
+						secret: secret,
+						Data:   SecretData{},
+					}, nil
+				}
 				if secretData, err := DecodeToSecretConfig(data); err != nil {
-					return &Vault{}, err
+					return nil, err
 				} else {
 					return &Vault{
 						client: secretsClient,
@@ -156,10 +254,24 @@ func (v *Vault) Save() error {
 	}
 }
 
+// There is no selective saving, saving the vault will overwrite anything existing
 func (v *Vault) saveSystemd() error {
-	if err := store.Save(vaultPath, v.Data); err != nil {
-		return fmt.Errorf("error saving vault information: %v", err.Error())
+	v.fileLock.Lock()
+	defer v.fileLock.Unlock()
+
+	// overwrite entire file every time
+	dataBytes, _ := json.Marshal(v.Data)
+
+	// empty out our file
+	if err := os.Truncate(vaultPath, 0); err != nil {
+		return err
 	}
+
+	// replace it with our new vault
+	if err := ioutil.WriteFile(vaultPath, dataBytes, 0644); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -171,7 +283,7 @@ func (v *Vault) saveCluster() error {
 	}
 
 	// Now update the kube secret object
-	v.secret.Data[keyConfig] = encodedSecretConfig
+	v.secret.Data[vaultKey] = encodedSecretConfig
 
 	// Update the secret
 	if _, err := v.client.Update(context.Background(), v.secret, metaV1.UpdateOptions{}); err != nil {

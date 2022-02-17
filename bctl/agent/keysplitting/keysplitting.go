@@ -31,13 +31,12 @@ type Keysplitting struct {
 	privatekey       string
 	idpProvider      string
 	idpOrgId         string
-	orgId            string
 }
 
 func New() (IKeysplitting, error) {
 	// Generate public private key pair along ed25519 curve
 	if publicKey, privateKey, err := ed.GenerateKey(nil); err != nil {
-		return &Keysplitting{}, fmt.Errorf("error generating key pair: %v", err.Error())
+		return nil, fmt.Errorf("error generating key pair: %v", err.Error())
 	} else {
 		pubkeyString := base64.StdEncoding.EncodeToString([]byte(publicKey))
 		privkeyString := base64.StdEncoding.EncodeToString([]byte(privateKey))
@@ -53,7 +52,6 @@ func New() (IKeysplitting, error) {
 			privatekey:       privkeyString,
 			idpProvider:      config.Data.IdpProvider,
 			idpOrgId:         config.Data.IdpOrgId,
-			orgId:            config.Data.OrgId,
 		}, nil
 	}
 }
@@ -70,16 +68,13 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		// Verify the BZCert
 		if hash, exp, err := synPayload.BZCert.Verify(k.idpProvider, k.idpOrgId); err != nil {
 			return err
+		} else if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
+			return err
 		} else {
 			k.bzCerts[hash] = BZCertMetadata{
 				Cert: synPayload.BZCert,
 				Exp:  exp,
 			}
-		}
-
-		// Verify the Signature
-		if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
-			return err
 		}
 
 		// Make sure targetId matches
@@ -92,6 +87,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		// Check BZCert matches one we have stored
 		if certMetadata, ok := k.bzCerts[dataPayload.BZCertHash]; !ok {
 			return fmt.Errorf("could not match BZCert hash to one previously received")
+		} else if time.Now().After(certMetadata.Exp) {
+			return fmt.Errorf("BZCert is expired")
 		} else {
 
 			// Verify the Signature

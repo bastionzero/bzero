@@ -1,0 +1,7 @@
+Package: $BZERO_PKG_NAME
+Version: $VERSION
+Maintainer: BastionZero Inc <support@bastionzero.com>
+Depends: 
+Architecture: $ARCH
+Homepage: https://bastionzero.com
+Description: BastionZero's Agent!
