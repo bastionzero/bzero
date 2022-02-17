@@ -11,9 +11,13 @@ require (
 	github.com/Masterminds/semver v1.5.0
 	github.com/creack/pty v1.1.17
 	github.com/fsnotify/fsnotify v1.5.1
+	github.com/creack/pty v1.1.17 // indirect
+	github.com/fsnotify/fsnotify v1.5.1
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.2.0
-	github.com/gorilla/websocket v1.4.2
-	github.com/stretchr/testify v1.7.0
+	github.com/gorilla/websocket v1.4.2 // indirect
+	github.com/ovh/configstore v0.5.2 // indirect
+	github.com/stretchr/testify v1.7.0 // indirect
 	golang.org/x/build v0.0.0-20211108163316-3ce30f35b9aa
 	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637
 	k8s.io/api v0.21.3
