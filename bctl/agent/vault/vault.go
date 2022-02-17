@@ -41,17 +41,18 @@ type Vault struct {
 }
 
 type SecretData struct {
-	PublicKey     string
-	PrivateKey    string
-	ServiceUrl    string
-	TargetName    string
-	Namespace     string
-	IdpProvider   string
-	IdpOrgId      string
-	TargetId      string
-	EnvironmentId string
-	AgentType     string
-	Version       string
+	PublicKey       string
+	PrivateKey      string
+	ServiceUrl      string
+	TargetName      string
+	Namespace       string
+	IdpProvider     string
+	IdpOrgId        string
+	TargetId        string
+	EnvironmentId   string
+	EnvironmentName string
+	AgentType       string
+	Version         string
 }
 
 func LoadVault() (*Vault, error) {

@@ -324,14 +324,15 @@ func isRegistered() (bool, error) {
 
 			// Save flags passed to our config so registration can access them
 			config.Data = vault.SecretData{
-				ServiceUrl:    serviceUrl,
-				Namespace:     namespace,
-				IdpProvider:   idpProvider,
-				IdpOrgId:      idpOrgId,
-				EnvironmentId: environmentId,
-				AgentType:     agentType,
-				TargetName:    targetName,
-				Version:       getAgentVersion(),
+				ServiceUrl:      serviceUrl,
+				Namespace:       namespace,
+				IdpProvider:     idpProvider,
+				IdpOrgId:        idpOrgId,
+				EnvironmentId:   environmentId,
+				EnvironmentName: environmentName,
+				AgentType:       agentType,
+				TargetName:      targetName,
+				Version:         getAgentVersion(),
 			}
 			if err := config.Save(); err != nil {
 				return registered, fmt.Errorf("error saving vault: %s", err)
