@@ -71,7 +71,7 @@ func (w *TestWebsocket) Close(err error)                                 {}
 func CreateSynMsg(t *testing.T) []byte {
 	fakebzcert := bzcert.BZCert{}
 	runAsUser := testutils.GetRunAsUser(t)
-	synActionPayload, _ := json.Marshal(bzshell.ShellOpenMessage{RunAsUser: runAsUser})
+	synActionPayload, _ := json.Marshal(bzshell.ShellOpenMessage{TargetUser: runAsUser})
 
 	synPayload := ksmsg.SynPayload{
 		Timestamp:     fmt.Sprint(time.Now().Unix()),
@@ -95,7 +95,7 @@ func CreateSynMsg(t *testing.T) []byte {
 }
 
 func CreateOpenShellDataMsg() []byte {
-	dataActionPayload, _ := json.Marshal(bzshell.ShellOpenMessage{RunAsUser: "test-user"})
+	dataActionPayload, _ := json.Marshal(bzshell.ShellOpenMessage{TargetUser: "test-user"})
 
 	dataPayload := ksmsg.DataPayload{
 		Timestamp:     fmt.Sprint(time.Now().Unix()),

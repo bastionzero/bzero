@@ -43,7 +43,7 @@ func SpawnTerminal(t *testing.T, streamOutputChan chan smsg.StreamMessage) *Shel
 
 	var tmb tomb.Tomb
 	synPayload, _ := json.Marshal(bzshell.ShellOpenMessage{
-		RunAsUser: testshelluser,
+		TargetUser: testshelluser,
 	})
 	plugin, err := New(&tmb, subLogger, streamOutputChan, synPayload)
 	if err != nil {
@@ -260,7 +260,7 @@ func TestNoUserExistsErr(t *testing.T) {
 	userThatDoesNotExist := "NoSuchUser"
 
 	synPayload, _ := json.Marshal(bzshell.ShellOpenMessage{
-		RunAsUser: userThatDoesNotExist,
+		TargetUser: userThatDoesNotExist,
 	})
 	plugin, err := New(&tmb, subLogger, streamOutputChan, synPayload)
 	if err != nil {

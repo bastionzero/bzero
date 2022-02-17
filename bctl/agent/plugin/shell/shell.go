@@ -66,9 +66,9 @@ import (
 //
 //		This should allow use to mock at the level of the ShellPlugin since none of the pty details are exposed
 type ShellPlugin struct {
-	tmb              *tomb.Tomb // datachannel's tomb
-	logger           *logger.Logger
-	name             string
+	tmb    *tomb.Tomb // datachannel's tomb
+	logger *logger.Logger
+	// name             string
 	stdin            *os.File
 	stdout           *os.File
 	execCmd          execcmd.IExecCmd
@@ -92,7 +92,7 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	var plugin = ShellPlugin{
-		runAsUser:        configPayload.RunAsUser,
+		runAsUser:        configPayload.TargetUser,
 		shellStarted:     false,
 		logger:           logger,
 		tmb:              parentTmb, // if datachannel dies, so should we
@@ -120,30 +120,32 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
 	// so that we can murder its family
-	if len(actionPayload) > 0 {
-		actionPayload = actionPayload[1 : len(actionPayload)-1]
-	}
+	// if len(actionPayload) > 0 {
+	// 	actionPayload = actionPayload[1 : len(actionPayload)-1]
+	// }
 
 	// Json unmarshalling encodes bytes in base64
-	actionPayloadSafe, base64Err := base64.StdEncoding.DecodeString(string(actionPayload))
-	if base64Err != nil {
-		k.logger.Errorf("error decoding actionPayload: %v", base64Err)
-		return "", []byte{}, base64Err
-	}
+	// actionPayloadSafe, base64Err := base64.StdEncoding.DecodeString(string(actionPayload))
+	// if base64Err != nil {
+	// 	k.logger.Infof("actionpayload: %v", string(actionPayload))
+	// 	k.logger.Errorf("error decoding actionPayload: %v", base64Err)
+	// 	return "", []byte{}, base64Err
+	// }
+	actionPayloadSafe := []byte(string(actionPayload))
 
 	switch bzshell.ShellAction(shellAction) {
 	case bzshell.ShellOpen:
 		// We ignore the RunAsUser in the second Shell/Open message since it was set in the first one processed by .New.
 		//  This is important because the RunAsUser is part of policy and the policy check happens in the first Shell/Open message.
 		if err := k.open(); err != nil {
-			errorString := fmt.Errorf("Unable to start shell: %s", err)
+			errorString := fmt.Errorf("unable to start shell: %s", err)
 			k.logger.Error(errorString)
 			time.Sleep(2 * time.Second)
 			return "", []byte{}, errorString
 		}
 	case bzshell.ShellClose:
 		if err := k.close(); err != nil {
-			rerr := fmt.Errorf("Shell stop failed %v", err)
+			rerr := fmt.Errorf("shell stop failed %v", err)
 			k.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
@@ -151,13 +153,13 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 		var shellInput bzshell.ShellInputMessage
 
 		if err := json.Unmarshal(actionPayloadSafe, &shellInput); err != nil {
-			rerr := fmt.Errorf("Malformed shell input payload %v", actionPayload)
+			rerr := fmt.Errorf("malformed shell input payload %v", actionPayload)
 			k.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 
 		if err := k.shellInput(shellInput); err != nil {
-			rerr := fmt.Errorf("Write to stdin failed %v", err)
+			rerr := fmt.Errorf("write to stdin failed %v", err)
 			k.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
@@ -165,13 +167,13 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 		var shellResize bzshell.ShellResizeMessage
 
 		if err := json.Unmarshal(actionPayloadSafe, &shellResize); err != nil {
-			rerr := fmt.Errorf("Malformed shell resize payload %v", actionPayload)
+			rerr := fmt.Errorf("malformed shell resize payload %v", actionPayload)
 			k.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 
 		if err := k.setSize(shellResize.Cols, shellResize.Rows); err != nil {
-			rerr := fmt.Errorf("Shell resize failed %v", err)
+			rerr := fmt.Errorf("shell resize failed %v", err)
 			k.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
@@ -179,7 +181,7 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 		var shellReplay bzshell.ShellReplayMessage
 
 		if err := json.Unmarshal(actionPayloadSafe, &shellReplay); err != nil {
-			rerr := fmt.Errorf("Malformed shell replay output payload %v", actionPayload)
+			rerr := fmt.Errorf("malformed shell replay output payload %v", actionPayload)
 			k.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
@@ -190,7 +192,7 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 		k.stdoutbuffMutex.Unlock()
 
 		if err != nil {
-			return action, []byte{}, fmt.Errorf("Failed to read from stdout buff for shell replay %v", err)
+			return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %v", err)
 		}
 		return action, outbuff[0:n], nil
 	}
@@ -215,8 +217,8 @@ var startPty = func(
 func (k *ShellPlugin) open() error {
 	// If this method "open" is called twice is means something has gone very
 	//  wrong and failing early is the safest action.
-	if k.shellStarted == true {
-		return fmt.Errorf("Attempted to start the shell but a call to open a shell has already been made")
+	if k.shellStarted {
+		return fmt.Errorf("attempted to start the shell but a call to open a shell has already been made")
 	}
 	k.shellStarted = true
 	commands := ""
@@ -259,7 +261,7 @@ func (k *ShellPlugin) close() (err error) {
 
 // shellInput passes payload byte stream to shell stdin
 func (k *ShellPlugin) shellInput(shellInput bzshell.ShellInputMessage) error {
-	if k.Ready() == false {
+	if !k.Ready() {
 		// This is to handle scenario when cli/console starts sending size data but pty has not been started yet
 		// Since packets are rejected, cli/console will resend these packets until pty starts successfully in separate thread
 		k.logger.Tracef("Pty unavailable. Reject incoming message packet")
