@@ -157,9 +157,7 @@ func (b *bzhttp) patch() (*http.Response, error) {
 	// Keep looping through our ticker, waiting for it to tell us when to retry
 	for range ticker.C {
 		// Make our Client
-		var httpClient = &http.Client{
-			Timeout: time.Second * 10,
-		}
+		var httpClient = getHttpClient()
 
 		// declare our variables
 		var response *http.Response
@@ -169,22 +167,10 @@ func (b *bzhttp) patch() (*http.Response, error) {
 		req, _ := http.NewRequest("PATCH", b.endpoint, bytes.NewBuffer(b.body))
 
 		// Add the expected headers
-		for name, values := range b.headers {
-			// Loop over all values for the name.
-			req.Header.Set(name, values)
-		}
-
-		// Add the content type header
-		req.Header.Set("Content-Type", b.contentType)
+		req = addHeaders(req, b.headers, b.contentType)
 
 		// Set any query params
-		q := req.URL.Query()
-		for key, values := range b.params {
-			q.Add(key, values)
-		}
-
-		q.Add("clientProtocol", "1.5")
-		req.URL.RawQuery = q.Encode()
+		req = addQueryParams(req, b.params)
 
 		response, err = httpClient.Do(req)
 
@@ -193,20 +179,15 @@ func (b *bzhttp) patch() (*http.Response, error) {
 			return nil, err
 		}
 
-		// If the status code is unauthorized, do not attempt to retry
-		if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusUnsupportedMediaType {
+		if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
-			return response, fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
+			return response, err
 		}
 
 		if err != nil || response.StatusCode != http.StatusOK {
 			b.logger.Infof("error making patch request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
-			bodyBytes, err := io.ReadAll(response.Body)
-			if err != nil {
-				b.logger.Error(err)
-			}
-			bodyString := string(bodyBytes)
+			bodyString := extractBody(response)
 			b.logger.Infof("error: %s", bodyString)
 			continue
 		}
@@ -233,9 +214,7 @@ func (b *bzhttp) post() (*http.Response, error) {
 	// Keep looping through our ticker, waiting for it to tell us when to retry
 	for range ticker.C {
 		// Make our Client
-		var httpClient = &http.Client{
-			Timeout: time.Second * 10,
-		}
+		var httpClient = getHttpClient()
 
 		// declare our variables
 		var response *http.Response
@@ -253,22 +232,10 @@ func (b *bzhttp) post() (*http.Response, error) {
 			req, _ := http.NewRequest("POST", b.endpoint, bytes.NewBuffer(b.body))
 
 			// Add the expected headers
-			for name, values := range b.headers {
-				// Loop over all values for the name.
-				req.Header.Set(name, values)
-			}
-
-			// Add the content type header
-			req.Header.Set("Content-Type", b.contentType)
+			req = addHeaders(req, b.headers, b.contentType)
 
 			// Set any query params
-			q := req.URL.Query()
-			for key, values := range b.params {
-				q.Add(key, values)
-			}
-
-			q.Add("clientProtocol", "1.5")
-			req.URL.RawQuery = q.Encode()
+			req = addQueryParams(req, b.params)
 
 			response, err = httpClient.Do(req)
 
@@ -279,19 +246,15 @@ func (b *bzhttp) post() (*http.Response, error) {
 		}
 
 		// If the status code is unauthorized, do not attempt to retry
-		if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusUnsupportedMediaType {
+		if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
-			return response, fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
+			return response, err
 		}
 
 		if err != nil || response.StatusCode != http.StatusOK {
 			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
-			bodyBytes, err := io.ReadAll(response.Body)
-			if err != nil {
-				b.logger.Error(err)
-			}
-			bodyString := string(bodyBytes)
+			bodyString := extractBody(response)
 			b.logger.Infof("error: %s", bodyString)
 			continue
 		}
@@ -318,9 +281,7 @@ func (b *bzhttp) get() (*http.Response, error) {
 	// Keep looping through our ticker, waiting for it to tell us when to retry
 	for range ticker.C {
 		// Make our Client
-		var httpClient = &http.Client{
-			Timeout: time.Second * 10,
-		}
+		var httpClient = getHttpClient()
 
 		// declare our variables
 		var response *http.Response
@@ -333,40 +294,23 @@ func (b *bzhttp) get() (*http.Response, error) {
 			req, _ := http.NewRequest("GET", b.endpoint, bytes.NewBuffer(b.body))
 
 			// Add the expected headers
-			for name, values := range b.headers {
-				// Loop over all values for the name.
-				req.Header.Set(name, values)
-			}
-
-			// Add the content type header
-			req.Header.Set("Content-Type", b.contentType)
+			req = addHeaders(req, b.headers, b.contentType)
 
 			// Set any query params
-			q := req.URL.Query()
-			for key, values := range b.params {
-				q.Add(key, values)
-			}
-
-			q.Add("clientProtocol", "1.5")
-			req.URL.RawQuery = q.Encode()
+			req = addQueryParams(req, b.params)
 
 			response, err = httpClient.Do(req)
 		}
 
-		// If the status code is unauthorized, do not attempt to retry
-		if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound {
+		if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
-			return response, fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
+			return response, err
 		}
 
 		if err != nil || response.StatusCode != http.StatusOK {
 			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
-			bodyBytes, err := io.ReadAll(response.Body)
-			if err != nil {
-				log.Fatal(err)
-			}
-			bodyString := string(bodyBytes)
+			bodyString := extractBody(response)
 			b.logger.Infof("error: %s", bodyString)
 			continue
 		}
@@ -376,4 +320,57 @@ func (b *bzhttp) get() (*http.Response, error) {
 	}
 
 	return nil, errors.New("unable to make get request")
+}
+
+// Helper function to check if we received a status code that we should not attempt to try again
+func checkBadStatusCode(response *http.Response) error {
+	if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusUnsupportedMediaType {
+		return fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
+	}
+	return nil
+}
+
+// Helper function to add headers and set the content type
+func addHeaders(request *http.Request, headers map[string]string, contentType string) *http.Request {
+	// Add the expected headers
+	for name, values := range headers {
+		// Loop over all values for the name.
+		request.Header.Set(name, values)
+	}
+
+	// Add the content type header
+	request.Header.Set("Content-Type", contentType)
+
+	return request
+}
+
+// Helper function to add query params
+func addQueryParams(request *http.Request, params map[string]string) *http.Request {
+	// Set any query params
+	q := request.URL.Query()
+	for key, values := range params {
+		q.Add(key, values)
+	}
+
+	// Add the client protocol for signalr
+	q.Add("clientProtocol", "1.5")
+	request.URL.RawQuery = q.Encode()
+
+	return request
+}
+
+// Helper function to build a http client
+func getHttpClient() *http.Client {
+	return &http.Client{
+		Timeout: time.Second * 10,
+	}
+}
+
+// Helper function to extract the response body
+func extractBody(response *http.Response) string {
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return string(bodyBytes)
 }
