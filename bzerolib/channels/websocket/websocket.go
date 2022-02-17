@@ -57,7 +57,7 @@ const (
 )
 
 type IWebsocket interface {
-	Connect()
+	Connect() error
 	Send(agentMessage am.AgentMessage)
 	Unsubscribe(id string)
 	Subscribe(id string, channel IChannel)

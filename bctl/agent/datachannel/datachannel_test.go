@@ -60,7 +60,7 @@ type TestWebsocket struct {
 	MsgsSent []am.AgentMessage
 }
 
-func (w *TestWebsocket) Connect() {}
+func (w *TestWebsocket) Connect() error { return nil }
 func (w *TestWebsocket) Send(agentMessage am.AgentMessage) {
 	w.MsgsSent = append(w.MsgsSent, agentMessage)
 }

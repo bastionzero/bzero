@@ -77,7 +77,7 @@ func Start(logger *logger.Logger,
 
 	// Set up our handler to deal with incoming messages
 	control.tmb.Go(func() error {
-		defer websocket.Unsubscribe(id)
+		defer websocket.Unsubscribe("")
 		for {
 			select {
 			case <-control.tmb.Dying():
@@ -134,7 +134,7 @@ func (c *ControlChannel) send(messageType am.MessageType, messagePayload interfa
 }
 
 func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
-	subLogger := c.logger.GetWebsocketLogger(message.DaemonWebsocketId)
+	subLogger := c.logger.GetWebsocketLogger(message.ConnectionId)
 
 	// Create our headers and params, headers are empty
 	headers := make(map[string]string)
@@ -151,12 +151,12 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary
-		c.logger.Infof("created websocket with id: %s", message.DaemonWebsocketId)
+		c.logger.Infof("created websocket with id: %s", message.ConnectionId)
 		meta := wsMeta{
 			Client:       ws,
 			DataChannels: make(map[string]websocket.IChannel),
 		}
-		c.updateConnectionsMap(message.DaemonWebsocketId, meta)
+		c.updateConnectionsMap(message.ConnectionId, meta)
 	}
 	return nil
 }
@@ -167,8 +167,8 @@ func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
 	subLogger := c.logger.GetDatachannelLogger(dcId)
 
 	// grab the websocket
-	if websocketMeta, ok := c.getConnectionMap(wsId); !ok {
-		return fmt.Errorf("agent does not have a websocket associated with id %s", wsId)
+	if websocketMeta, ok := c.getConnectionMap(connectionId); !ok {
+		return fmt.Errorf("agent does not have a websocket associated with id %s", connectionId)
 	} else if keysplitter, err := keysplitting.New(); err != nil {
 		return err
 	} else if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn, keysplitter); err != nil {
@@ -209,14 +209,14 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 		if err := json.Unmarshal(agentMessage.MessagePayload, &cwRequest); err != nil {
 			return fmt.Errorf("malformed close websocket request")
 		} else {
-			if websocket, ok := c.getConnectionMap(cwRequest.DaemonWebsocketId); ok {
+			if websocket, ok := c.getConnectionMap(cwRequest.ConnectionId); ok {
 				// this can take a little time, but we don't want it blocking other things
 				go func() {
 					websocket.Client.Close(errors.New("websocket closed on daemon"))
-					c.deleteConnectionsMap(cwRequest.DaemonWebsocketId)
+					c.deleteConnectionsMap(cwRequest.ConnectionId)
 				}()
 			} else {
-				return fmt.Errorf("could not close non existent websocket with id: %s", cwRequest.DaemonWebsocketId)
+				return fmt.Errorf("could not close non existent websocket with id: %s", cwRequest.ConnectionId)
 			}
 		}
 	case am.OpenDataChannel:
