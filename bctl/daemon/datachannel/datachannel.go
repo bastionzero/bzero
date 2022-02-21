@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Masterminds/semver"
 	tomb "gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
@@ -91,10 +90,9 @@ func New(logger *logger.Logger,
 	action string,
 	actionParams []byte,
 	agentPubKey string,
-	agentVersion *semver.Version,
 	daemonVersion string) (*DataChannel, *tomb.Tomb, error) {
 
-	keysplitter, err := keysplitting.New(agentPubKey, agentVersion, daemonVersion, configPath, refreshTokenCommand)
+	keysplitter, err := keysplitting.New(agentPubKey, daemonVersion, configPath, refreshTokenCommand)
 	if err != nil {
 		logger.Error(err)
 		return nil, &tomb.Tomb{}, err

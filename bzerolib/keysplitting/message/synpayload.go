@@ -25,7 +25,7 @@ type SynPayload struct {
 	BZCert        bzcrt.BZCert `json:"bZCert"`
 }
 
-func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (SynAckPayload, string, error) {
+func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string, agentVersion string) (SynAckPayload, string, error) {
 	hashBytes, _ := util.HashPayload(s)
 	hash := base64.StdEncoding.EncodeToString(hashBytes)
 
@@ -36,6 +36,7 @@ func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (S
 		Action:                s.Action,
 		ActionResponsePayload: actionPayload,
 		TargetPublicKey:       pubKey,
+		AgentVersion:          agentVersion,
 		Nonce:                 util.Nonce(),
 		HPointer:              hash,
 	}, hash, nil

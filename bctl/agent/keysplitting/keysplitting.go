@@ -23,11 +23,13 @@ type Keysplitting struct {
 	privatekey       string
 	idpProvider      string
 	idpOrgId         string
+	agentVersion     string
 }
 
 func New(
 	base64EncodedPublicKey string,
 	base64EncodedPrivateKey string,
+	agentVersion string,
 	idpProvider string,
 	idpOrgId string) *Keysplitting {
 
@@ -39,6 +41,7 @@ func New(
 		privatekey:       base64EncodedPrivateKey,
 		idpProvider:      idpProvider,
 		idpOrgId:         idpOrgId,
+		agentVersion:     agentVersion,
 	}
 }
 
@@ -113,7 +116,7 @@ func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 	switch ksMessage.Type {
 	case ksmsg.Syn:
 		synPayload := ksMessage.KeysplittingPayload.(ksmsg.SynPayload)
-		if synAckPayload, hash, err := synPayload.BuildResponsePayload(actionPayload, k.publickey); err != nil {
+		if synAckPayload, hash, err := synPayload.BuildResponsePayload(actionPayload, k.publickey, k.agentVersion); err != nil {
 			return ksmsg.KeysplittingMessage{}, err
 		} else {
 			k.hPointer = hash

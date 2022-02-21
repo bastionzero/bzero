@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Masterminds/semver"
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
@@ -60,7 +59,6 @@ type KubeServer struct {
 	targetUser          string
 	targetGroups        []string
 	agentPubKey         string
-	agentVersion        *semver.Version
 	daemonVersion       string
 }
 
@@ -78,7 +76,6 @@ func StartKubeServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	agentVersion *semver.Version,
 	daemonVersion string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
@@ -95,7 +92,6 @@ func StartKubeServer(logger *logger.Logger,
 		targetGroups:        targetGroups,
 		refreshTokenCommand: refreshTokenCommand,
 		agentPubKey:         agentPubKey,
-		agentVersion:        agentVersion,
 		daemonVersion:       daemonVersion,
 	}
 
@@ -194,7 +190,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 	}
 
 	action = "kube/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey, h.agentVersion, h.daemonVersion); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey, h.daemonVersion); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {

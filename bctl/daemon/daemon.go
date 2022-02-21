@@ -15,14 +15,13 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"github.com/Masterminds/semver"
 )
 
 // Declaring flags as package-accessible variables
 var (
 	sessionId, authHeader, targetId, serviceUrl, plugin string
 	logPath, refreshTokenCommand, localPort, localHost  string
-	agentPubKey, agentVersion                           string
+	agentPubKey                                         string
 
 	// Kube server specifc values
 	targetGroupsRaw, targetUser, certPath, keyPath string
@@ -32,8 +31,6 @@ var (
 	// Db and web specifc values
 	remoteHost string
 	remotePort int
-
-	agentVersionAsSemVer *semver.Version
 )
 
 const (
@@ -129,7 +126,6 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 		params,
 		headers,
 		agentPubKey,
-		agentVersionAsSemVer,
 		daemonVersion,
 		targetSelectHandler)
 }
@@ -150,7 +146,6 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 		params,
 		headers,
 		agentPubKey,
-		agentVersionAsSemVer,
 		daemonVersion,
 		targetSelectHandler)
 }
@@ -177,7 +172,6 @@ func startKubeServer(logger *logger.Logger, headers map[string]string, params ma
 		params,
 		headers,
 		agentPubKey,
-		agentVersionAsSemVer,
 		daemonVersion,
 		targetSelectHandler)
 }
@@ -206,7 +200,6 @@ func parseFlags() error {
 	flag.StringVar(&localPort, "localPort", "", "Daemon Port To Use")
 	flag.StringVar(&localHost, "localHost", "", "Daemon Post To Use")
 	flag.StringVar(&agentPubKey, "agentPubKey", "", "Base64 encoded string of agent's public key")
-	flag.StringVar(&agentVersion, "agentVersion", "", "Agent's version")
 
 	// Kube plugin variables
 	flag.StringVar(&targetGroupsRaw, "targetGroups", "", "Kube Group to Assume")
@@ -235,7 +228,7 @@ func parseFlags() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort", "agentPubKey", "agentVersion"}
+	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort", "agentPubKey"}
 	switch plugin {
 	case "kube":
 		requiredFlags = append(requiredFlags, "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
@@ -267,13 +260,6 @@ func parseFlags() error {
 	if targetGroupsRaw != "" {
 		targetGroups = strings.Split(targetGroupsRaw, ",")
 	}
-
-	// Parse agentVersion
-	v, err := semver.NewVersion(agentVersion)
-	if err != nil {
-		return fmt.Errorf("failed to parse agent version (%v) as semver: %w", agentVersion, err)
-	}
-	agentVersionAsSemVer = v
 
 	return nil
 }

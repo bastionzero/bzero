@@ -12,7 +12,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
-	"github.com/Masterminds/semver"
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 )
@@ -47,7 +46,6 @@ type DbServer struct {
 	refreshTokenCommand string
 	configPath          string
 	agentPubKey         string
-	agentVersion        *semver.Version
 	daemonVersion       string
 }
 
@@ -62,7 +60,6 @@ func StartDbServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	agentVersion *semver.Version,
 	daemonVersion string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
@@ -79,7 +76,6 @@ func StartDbServer(logger *logger.Logger,
 		remoteHost:          remoteHost,
 		remotePort:          remotePort,
 		agentPubKey:         agentPubKey,
-		agentVersion:        agentVersion,
 		daemonVersion:       daemonVersion,
 	}
 
@@ -173,7 +169,7 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 	}
 
 	action = "db/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey, h.agentVersion, h.daemonVersion); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey, h.daemonVersion); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {

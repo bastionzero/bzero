@@ -48,19 +48,18 @@ type Keysplitting struct {
 
 	// daemon variables
 	base64EncodedAgentPubKey string
-	agentVersion             *semver.Version
 	daemonVersion            string
 	configPath               string
 	bzcertHash               string
 	refreshTokenCommand      string
 
 	// Protocol differences due to agent version
-	shouldCheckAgentSignatures bool
+	checkAgentSignatureConstraint *semver.Constraints
+	shouldCheckAgentSignatures    bool
 }
 
 func New(
 	base64EncodedAgentPubKey string,
-	agentVersion *semver.Version,
 	daemonVersion string,
 	configPath string,
 	refreshTokenCommand string,
@@ -69,7 +68,6 @@ func New(
 	keysplitter := &Keysplitting{
 		hPointer:                 "",
 		expectedHPointer:         "",
-		agentVersion:             agentVersion,
 		daemonVersion:            daemonVersion,
 		base64EncodedAgentPubKey: base64EncodedAgentPubKey,
 		configPath:               configPath,
@@ -82,7 +80,7 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create check agent signature constraint: %w", err)
 	}
-	keysplitter.shouldCheckAgentSignatures = constraintCheckAgentSig.Check(agentVersion)
+	keysplitter.checkAgentSignatureConstraint = constraintCheckAgentSig
 
 	return keysplitter, nil
 }
@@ -92,6 +90,16 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	switch ksMessage.Type {
 	case ksmsg.SynAck:
 		synAckPayload := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
+
+		// Parse agentVersion
+		if synAckPayload.AgentVersion != "" {
+			v, err := semver.NewVersion(synAckPayload.AgentVersion)
+			if err != nil {
+				return fmt.Errorf("failed to parse agent version (%v) as semver: %w", synAckPayload.AgentVersion, err)
+			}
+			k.shouldCheckAgentSignatures = k.checkAgentSignatureConstraint.Check(v)
+		}
+
 		hpointer = synAckPayload.HPointer
 	case ksmsg.DataAck:
 		dataAckPayload := ksMessage.KeysplittingPayload.(ksmsg.DataAckPayload)

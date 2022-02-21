@@ -64,7 +64,13 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	// Init keysplitter
-	keysplitter := keysplitting.New(config.Data.PublicKey, config.Data.PrivateKey, config.Data.IdpProvider, config.Data.IdpOrgId)
+	keysplitter := keysplitting.New(
+		config.Data.PublicKey,
+		config.Data.PrivateKey,
+		config.Data.Version,
+		config.Data.IdpProvider,
+		config.Data.IdpOrgId,
+	)
 
 	datachannel := &DataChannel{
 		websocket:    websocket,
