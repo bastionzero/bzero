@@ -11,6 +11,7 @@ import (
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
+	"github.com/Masterminds/semver"
 )
 
 const (
@@ -47,20 +48,41 @@ type Keysplitting struct {
 
 	// daemon variables
 	base64EncodedAgentPubKey string
+	agentVersion             *semver.Version
+	daemonVersion            string
 	configPath               string
 	bzcertHash               string
 	refreshTokenCommand      string
+
+	// Protocol differences due to agent version
+	shouldCheckAgentSignatures bool
 }
 
-func New(base64EncodedAgentPubKey string, configPath string, refreshTokenCommand string) (*Keysplitting, error) {
+func New(
+	base64EncodedAgentPubKey string,
+	agentVersion *semver.Version,
+	daemonVersion string,
+	configPath string,
+	refreshTokenCommand string,
+) (*Keysplitting, error) {
 	// TODO: load keys from storage
 	keysplitter := &Keysplitting{
 		hPointer:                 "",
 		expectedHPointer:         "",
+		agentVersion:             agentVersion,
+		daemonVersion:            daemonVersion,
 		base64EncodedAgentPubKey: base64EncodedAgentPubKey,
 		configPath:               configPath,
 		refreshTokenCommand:      refreshTokenCommand,
 	}
+
+	// Create constraint on validating agent's signatures. All agent versions >=
+	// 4.0.1 sign their messages with the expected agent key.
+	constraintCheckAgentSig, err := semver.NewConstraint(">= 4.0.1")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create check agent signature constraint: %w", err)
+	}
+	keysplitter.shouldCheckAgentSignatures = constraintCheckAgentSig.Check(agentVersion)
 
 	return keysplitter, nil
 }
@@ -78,9 +100,12 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}
 
-	// Verify the signature
-	if err := ksMessage.VerifySignature(k.base64EncodedAgentPubKey); err != nil {
-		return fmt.Errorf("failed to verify %v signature: %w", ksMessage.Type, err)
+	// Verify the signature if agent has specific version. This is done for
+	// backwards compatability reasons in case an agent hasn't updated.
+	if k.shouldCheckAgentSignatures {
+		if err := ksMessage.VerifySignature(k.base64EncodedAgentPubKey); err != nil {
+			return fmt.Errorf("failed to verify %v signature: %w", ksMessage.Type, err)
+		}
 	}
 
 	// Verify received hash pointer matches expected hash pointer
@@ -158,6 +183,7 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 		Type:          string(ksmsg.Syn),
 		Action:        action,
 		ActionPayload: payload,
+		DaemonVersion: k.daemonVersion,
 		TargetId:      k.base64EncodedAgentPubKey,
 		Nonce:         nonce,
 		BZCert:        bzCert,

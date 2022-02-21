@@ -62,9 +62,15 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			return fmt.Errorf("failed to verify SYN's signature: %w", err)
 		}
 
-		// Verify SYN message commits to this agent's cryptographic identity
-		if synPayload.TargetId != k.publickey {
-			return fmt.Errorf("SYN's TargetId did not match agent's public key")
+		// Verify the SYN message's targetId field only if the message also
+		// contains daemonVersion. Daemons that do not set daemonVersion also do
+		// not set targetId. This is done for backwards compatability reasons in
+		// case a daemon hasn't updated.
+		if synPayload.DaemonVersion != "" {
+			// Verify SYN message commits to this agent's cryptographic identity
+			if synPayload.TargetId != k.publickey {
+				return fmt.Errorf("SYN's TargetId did not match agent's public key")
+			}
 		}
 
 		// All checks have passed. Add cert to dict of known bzCerts

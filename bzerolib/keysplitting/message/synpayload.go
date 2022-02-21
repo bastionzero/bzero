@@ -19,9 +19,10 @@ type SynPayload struct {
 	ActionPayload []byte `json:"actionPayload"`
 
 	// Unique to Syn
-	TargetId string       `json:"targetId"`
-	Nonce    string       `json:"nonce"`
-	BZCert   bzcrt.BZCert `json:"bZCert"`
+	DaemonVersion string       `json:"daemonVersion"`
+	TargetId      string       `json:"targetId"`
+	Nonce         string       `json:"nonce"`
+	BZCert        bzcrt.BZCert `json:"bZCert"`
 }
 
 func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (SynAckPayload, string, error) {

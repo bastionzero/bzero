@@ -11,6 +11,7 @@ import (
 	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
+	"github.com/Masterminds/semver"
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 )
@@ -46,6 +47,8 @@ type WebServer struct {
 	refreshTokenCommand string
 	configPath          string
 	agentPubKey         string
+	agentVersion        *semver.Version
+	daemonVersion       string
 }
 
 func StartWebServer(logger *logger.Logger,
@@ -59,6 +62,8 @@ func StartWebServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
+	agentVersion *semver.Version,
+	daemonVersion string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
 	listener := &WebServer{
@@ -74,6 +79,8 @@ func StartWebServer(logger *logger.Logger,
 		targetHost:          targetHost,
 		targetPort:          targetPort,
 		agentPubKey:         agentPubKey,
+		agentVersion:        agentVersion,
+		daemonVersion:       daemonVersion,
 	}
 
 	// Create a new websocket
@@ -156,7 +163,7 @@ func (h *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 	}
 
 	action = "web/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey, h.agentVersion, h.daemonVersion); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {
