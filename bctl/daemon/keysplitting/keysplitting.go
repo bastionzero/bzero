@@ -75,8 +75,8 @@ func New(
 	}
 
 	// Create constraint on validating agent's signatures. All agent versions >=
-	// 4.0.1 sign their messages with the expected agent key.
-	constraintCheckAgentSig, err := semver.NewConstraint(">= 4.0.1")
+	// 4.0.2 sign their messages with the expected agent key.
+	constraintCheckAgentSig, err := semver.NewConstraint(">= 4.0.2")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create check agent signature constraint: %w", err)
 	}
