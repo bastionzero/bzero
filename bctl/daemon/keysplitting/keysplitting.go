@@ -11,11 +11,10 @@ import (
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
-	"github.com/Masterminds/semver"
 )
 
 const (
-	schemaVersion = "1.0"
+	schemaVersion = "1.1"
 )
 
 type Config struct {
@@ -47,40 +46,28 @@ type Keysplitting struct {
 	privatekey       string
 
 	// daemon variables
-	base64EncodedAgentPubKey string
-	daemonVersion            string
-	configPath               string
-	bzcertHash               string
-	refreshTokenCommand      string
+	configPath          string
+	agentPubKey         string
+	bzcertHash          string
+	refreshTokenCommand string
 
-	// Protocol differences due to agent version
-	checkAgentSignatureConstraint *semver.Constraints
-	shouldCheckAgentSignatures    bool
+	ackPublicKey string
 }
 
 func New(
-	base64EncodedAgentPubKey string,
-	daemonVersion string,
+	agentPubKey string,
 	configPath string,
 	refreshTokenCommand string,
 ) (*Keysplitting, error) {
 	// TODO: load keys from storage
 	keysplitter := &Keysplitting{
-		hPointer:                 "",
-		expectedHPointer:         "",
-		daemonVersion:            daemonVersion,
-		base64EncodedAgentPubKey: base64EncodedAgentPubKey,
-		configPath:               configPath,
-		refreshTokenCommand:      refreshTokenCommand,
+		hPointer:            "",
+		expectedHPointer:    "",
+		configPath:          configPath,
+		refreshTokenCommand: refreshTokenCommand,
+		agentPubKey:         agentPubKey,
+		ackPublicKey:        "",
 	}
-
-	// Create constraint on validating agent's signatures. All agent versions >=
-	// 4.0.2 sign their messages with the expected agent key.
-	constraintCheckAgentSig, err := semver.NewConstraint(">= 4.0.2")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create check agent signature constraint: %w", err)
-	}
-	keysplitter.checkAgentSignatureConstraint = constraintCheckAgentSig
 
 	return keysplitter, nil
 }
@@ -90,17 +77,13 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	switch ksMessage.Type {
 	case ksmsg.SynAck:
 		synAckPayload := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
-
-		// Parse agentVersion
-		if synAckPayload.AgentVersion != "" {
-			v, err := semver.NewVersion(synAckPayload.AgentVersion)
-			if err != nil {
-				return fmt.Errorf("failed to parse agent version (%v) as semver: %w", synAckPayload.AgentVersion, err)
-			}
-			k.shouldCheckAgentSignatures = k.checkAgentSignatureConstraint.Check(v)
-		}
-
 		hpointer = synAckPayload.HPointer
+
+		if k.ackPublicKey == "" {
+			k.ackPublicKey = synAckPayload.TargetPublicKey
+		} else {
+			return fmt.Errorf("received more than one SYNACK for the same keysplitting session. ackPublicKey was already set in a previously received SYNACK")
+		}
 	case ksmsg.DataAck:
 		dataAckPayload := ksMessage.KeysplittingPayload.(ksmsg.DataAckPayload)
 		hpointer = dataAckPayload.HPointer
@@ -108,11 +91,10 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}
 
-	// Verify the signature if agent has specific version. This is done for
-	// backwards compatability reasons in case an agent hasn't updated.
-	if k.shouldCheckAgentSignatures {
-		if err := ksMessage.VerifySignature(k.base64EncodedAgentPubKey); err != nil {
-			return fmt.Errorf("failed to verify %v signature: %w", ksMessage.Type, err)
+	// Verify the agent's signature
+	if err := ksMessage.VerifySignature(k.agentPubKey); err != nil {
+		if innerErr := ksMessage.VerifySignature(k.ackPublicKey); innerErr != nil {
+			return fmt.Errorf("failed to verify %v signature: inner error: %v. original error: %v", ksMessage.Type, innerErr, err)
 		}
 	}
 
@@ -191,8 +173,7 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 		Type:          string(ksmsg.Syn),
 		Action:        action,
 		ActionPayload: payload,
-		DaemonVersion: k.daemonVersion,
-		TargetId:      k.base64EncodedAgentPubKey,
+		TargetId:      k.agentPubKey,
 		Nonce:         nonce,
 		BZCert:        bzCert,
 	}

@@ -64,13 +64,15 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	// Init keysplitter
-	keysplitter := keysplitting.New(
+	keysplitter, err := keysplitting.New(
 		config.Data.PublicKey,
 		config.Data.PrivateKey,
-		config.Data.Version,
 		config.Data.IdpProvider,
 		config.Data.IdpOrgId,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init keysplitter: %w", err)
+	}
 
 	datachannel := &DataChannel{
 		websocket:    websocket,

@@ -90,9 +90,9 @@ func New(logger *logger.Logger,
 	action string,
 	actionParams []byte,
 	agentPubKey string,
-	daemonVersion string) (*DataChannel, *tomb.Tomb, error) {
+) (*DataChannel, *tomb.Tomb, error) {
 
-	keysplitter, err := keysplitting.New(agentPubKey, daemonVersion, configPath, refreshTokenCommand)
+	keysplitter, err := keysplitting.New(agentPubKey, configPath, refreshTokenCommand)
 	if err != nil {
 		logger.Error(err)
 		return nil, &tomb.Tomb{}, err

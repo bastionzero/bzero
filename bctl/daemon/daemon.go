@@ -126,7 +126,6 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 		params,
 		headers,
 		agentPubKey,
-		daemonVersion,
 		targetSelectHandler)
 }
 
@@ -146,7 +145,6 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 		params,
 		headers,
 		agentPubKey,
-		daemonVersion,
 		targetSelectHandler)
 }
 
@@ -172,7 +170,6 @@ func startKubeServer(logger *logger.Logger, headers map[string]string, params ma
 		params,
 		headers,
 		agentPubKey,
-		daemonVersion,
 		targetSelectHandler)
 }
 

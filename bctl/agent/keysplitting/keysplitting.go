@@ -8,7 +8,11 @@ import (
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
+	"github.com/Masterminds/semver"
 )
+
+// schema version <= this value do not set targetId to the agent's pubkey
+const schemaVersionTargetIdNotSet string = "1.0"
 
 type BZCertMetadata struct {
 	Cert bzcrt.BZCert
@@ -23,26 +27,32 @@ type Keysplitting struct {
 	privatekey       string
 	idpProvider      string
 	idpOrgId         string
-	agentVersion     string
+
+	// define constraints based on schema version
+	shouldCheckTargetId *semver.Constraints
 }
 
 func New(
 	base64EncodedPublicKey string,
 	base64EncodedPrivateKey string,
-	agentVersion string,
 	idpProvider string,
-	idpOrgId string) *Keysplitting {
+	idpOrgId string) (*Keysplitting, error) {
+
+	shouldCheckTargetIdConstraint, err := semver.NewConstraint(fmt.Sprintf("> %v", schemaVersionTargetIdNotSet))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create check target id constraint: %w", err)
+	}
 
 	return &Keysplitting{
-		hPointer:         "",
-		expectedHPointer: "",
-		bzCerts:          make(map[string]BZCertMetadata),
-		publickey:        base64EncodedPublicKey,
-		privatekey:       base64EncodedPrivateKey,
-		idpProvider:      idpProvider,
-		idpOrgId:         idpOrgId,
-		agentVersion:     agentVersion,
-	}
+		hPointer:            "",
+		expectedHPointer:    "",
+		bzCerts:             make(map[string]BZCertMetadata),
+		publickey:           base64EncodedPublicKey,
+		privatekey:          base64EncodedPrivateKey,
+		idpProvider:         idpProvider,
+		idpOrgId:            idpOrgId,
+		shouldCheckTargetId: shouldCheckTargetIdConstraint,
+	}, nil
 }
 
 func (k *Keysplitting) GetHpointer() string {
@@ -65,11 +75,16 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			return fmt.Errorf("failed to verify SYN's signature: %w", err)
 		}
 
-		// Verify the SYN message's targetId field only if the message also
-		// contains daemonVersion. Daemons that do not set daemonVersion also do
-		// not set targetId. This is done for backwards compatability reasons in
-		// case a daemon hasn't updated.
-		if synPayload.DaemonVersion != "" {
+		// Extract semver version to determine if different protocol checks must
+		// be done
+		v, err := semver.NewVersion(synPayload.SchemaVersion)
+		if err != nil {
+			return fmt.Errorf("failed to parse schema version (%v) as semver: %w", synPayload.SchemaVersion, err)
+		}
+
+		// Daemons with schema version <= 1.0 do not set targetId, so we cannot
+		// apply this check universally
+		if k.shouldCheckTargetId.Check(v) {
 			// Verify SYN message commits to this agent's cryptographic identity
 			if synPayload.TargetId != k.publickey {
 				return fmt.Errorf("SYN's TargetId did not match agent's public key")
@@ -116,7 +131,7 @@ func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 	switch ksMessage.Type {
 	case ksmsg.Syn:
 		synPayload := ksMessage.KeysplittingPayload.(ksmsg.SynPayload)
-		if synAckPayload, hash, err := synPayload.BuildResponsePayload(actionPayload, k.publickey, k.agentVersion); err != nil {
+		if synAckPayload, hash, err := synPayload.BuildResponsePayload(actionPayload, k.publickey); err != nil {
 			return ksmsg.KeysplittingMessage{}, err
 		} else {
 			k.hPointer = hash

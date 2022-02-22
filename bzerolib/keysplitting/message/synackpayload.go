@@ -18,7 +18,6 @@ type SynAckPayload struct {
 	ActionResponsePayload []byte `json:"actionResponsePayload"`
 
 	// Unique to SynAck
-	AgentVersion    string `json:"agentVersion"`
 	TargetPublicKey string `json:"targetPublicKey"`
 	Nonce           string `json:"nonce"`
 	HPointer        string `json:"hPointer"`

@@ -19,13 +19,12 @@ type SynPayload struct {
 	ActionPayload []byte `json:"actionPayload"`
 
 	// Unique to Syn
-	DaemonVersion string       `json:"daemonVersion"`
-	TargetId      string       `json:"targetId"`
-	Nonce         string       `json:"nonce"`
-	BZCert        bzcrt.BZCert `json:"bZCert"`
+	TargetId string       `json:"targetId"`
+	Nonce    string       `json:"nonce"`
+	BZCert   bzcrt.BZCert `json:"bZCert"`
 }
 
-func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string, agentVersion string) (SynAckPayload, string, error) {
+func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (SynAckPayload, string, error) {
 	hashBytes, _ := util.HashPayload(s)
 	hash := base64.StdEncoding.EncodeToString(hashBytes)
 
@@ -36,7 +35,6 @@ func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string, ag
 		Action:                s.Action,
 		ActionResponsePayload: actionPayload,
 		TargetPublicKey:       pubKey,
-		AgentVersion:          agentVersion,
 		Nonce:                 util.Nonce(),
 		HPointer:              hash,
 	}, hash, nil
