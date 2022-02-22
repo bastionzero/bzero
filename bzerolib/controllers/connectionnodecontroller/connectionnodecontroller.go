@@ -29,7 +29,8 @@ const (
 	createWebConnectionEndpoint = "/api/v2/connections/web"
 
 	// General endpoints
-	getAuthDetailsEndpoint = "/api/v2/connections/$ID/$VERSION/connection-auth-details"
+	getAuthDetailsEndpoint  = "/api/v2/connections/$ID/$VERSION/connection-auth-details"
+	closeConnectionEndpoint = "/api/v2/connections/$ID/close"
 )
 
 func New(logger *logger.Logger,
@@ -45,6 +46,19 @@ func New(logger *logger.Logger,
 		headers:               headers,
 		params:                params,
 	}, nil
+}
+
+func (c *ConnectionNodeController) CloseConnection(connectionId string) error {
+	endpoint := strings.Replace(closeConnectionEndpoint, "$ID", connectionId, -1)
+	closeConnectionEndpointToHit, err := bzhttp.BuildEndpoint(c.bastionUrl, endpoint)
+	if err != nil {
+		return fmt.Errorf("error building url")
+	}
+	patchResponse, errPost := bzhttp.Patch(c.logger, closeConnectionEndpointToHit, c.headers, c.params)
+	if errPost != nil {
+		return fmt.Errorf("error closing connection: %s. Response: %+v", errPost, patchResponse)
+	}
+	return nil
 }
 
 func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targetGroups []string, targetId string) (ConnectionDetailsResponse, error) {
@@ -125,6 +139,10 @@ func (c *ConnectionNodeController) createConnection(request interface{}, connect
 
 func (c *ConnectionNodeController) createCnConnection(connectionId string) (ConnectionDetailsResponse, error) {
 	// Now use the connectionId to get the connectionNodeId and AuthToken
+	// Always return the connection id, even on errors
+	response := ConnectionDetailsResponse{
+		ConnectionId: connectionId,
+	}
 
 	// Add our ID and type and version
 	getAuthDetailsEndpointFormatted := strings.Replace(getAuthDetailsEndpoint, "$ID", connectionId, -1)
@@ -133,32 +151,30 @@ func (c *ConnectionNodeController) createCnConnection(connectionId string) (Conn
 	// Build our endpoint
 	getAuthDetailsEndpoint, err := bzhttp.BuildEndpoint(c.bastionUrl, getAuthDetailsEndpointFormatted)
 	if err != nil {
-		return ConnectionDetailsResponse{}, fmt.Errorf("error building url")
+		return response, fmt.Errorf("error building url")
 	}
 
 	httpGetAuthDetailsResponse, errPost := bzhttp.Get(c.logger, getAuthDetailsEndpoint, c.headers, c.params)
 	if errPost != nil {
-		return ConnectionDetailsResponse{}, fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpGetAuthDetailsResponse)
+		return response, fmt.Errorf("error on getting auth details for connection node: %s. Response: %+v", errPost, httpGetAuthDetailsResponse)
 	}
 
 	// Unmarshal the bytes
 	getAuthDetailsResponseBytes, readAllErr := ioutil.ReadAll(httpGetAuthDetailsResponse.Body)
 	if readAllErr != nil {
-		return ConnectionDetailsResponse{}, fmt.Errorf("error reading bytes from get auth details response")
+		return response, fmt.Errorf("error reading bytes from get auth details response")
 	}
 
 	// Unmarshal the bytes
 	getAuthDetailsResponse := &ConnectionAuthDetailsResponse{}
 	if err := json.Unmarshal(getAuthDetailsResponseBytes, &getAuthDetailsResponse); err != nil {
 		// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
-		return ConnectionDetailsResponse{}, fmt.Errorf("error un-marshalling create connection response")
+		return response, fmt.Errorf("error un-marshalling create connection response")
 	}
 
 	// Return the auth details response
-	return ConnectionDetailsResponse{
-		ConnectionNodeId:     getAuthDetailsResponse.ConnectionNodeId,
-		AuthToken:            getAuthDetailsResponse.AuthToken,
-		ConnectionServiceUrl: getAuthDetailsResponse.ConnectionServiceUrl,
-		ConnectionId:         connectionId,
-	}, nil
+	response.ConnectionNodeId = getAuthDetailsResponse.ConnectionNodeId
+	response.AuthToken = getAuthDetailsResponse.AuthToken
+	response.ConnectionServiceUrl = getAuthDetailsResponse.ConnectionServiceUrl
+	return response, nil
 }

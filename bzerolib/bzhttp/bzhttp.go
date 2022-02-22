@@ -81,15 +81,7 @@ func Post(logger *logger.Logger, endpoint string, contentType string, body []byt
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
 
-	req := &bzhttp{
-		logger:        logger,
-		endpoint:      endpoint,
-		contentType:   contentType,
-		body:          body,
-		headers:       headers,
-		params:        params,
-		backoffParams: backoffParams,
-	}
+	req := createBzhttp(logger, endpoint, contentType, headers, params, body, backoffParams)
 
 	return req.post()
 
@@ -102,17 +94,31 @@ func Get(logger *logger.Logger, endpoint string, headers map[string]string, para
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
 
-	req := &bzhttp{
+	req := createBzhttp(logger, endpoint, "", headers, params, []byte{}, backoffParams)
+
+	return req.get()
+}
+
+func Patch(logger *logger.Logger, endpoint string, headers map[string]string, params map[string]string) (*http.Response, error) {
+	// Define our exponential backoff params
+	backoffParams := backoff.NewExponentialBackOff()
+	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
+
+	req := createBzhttp(logger, endpoint, "application/json", headers, params, []byte{}, backoffParams)
+
+	return req.patch()
+}
+
+func createBzhttp(logger *logger.Logger, endpoint string, contentType string, headers map[string]string, params map[string]string, body []byte, backoffParams *backoff.ExponentialBackOff) bzhttp {
+	return bzhttp{
 		logger:        logger,
 		endpoint:      endpoint,
-		contentType:   "",
-		body:          []byte{},
+		contentType:   contentType,
+		body:          body,
 		headers:       headers,
 		params:        params,
 		backoffParams: backoffParams,
 	}
-
-	return req.get()
 }
 
 func PostRegister(logger *logger.Logger, endpoint string, contentType string, body []byte) (*http.Response, error) {
@@ -136,6 +142,63 @@ func PostRegister(logger *logger.Logger, endpoint string, contentType string, bo
 	return req.post()
 }
 
+func (b *bzhttp) patch() (*http.Response, error) {
+	// Default params
+	// Ref: https://github.com/cenkalti/backoff/blob/a78d3804c2c84f0a3178648138442c9b07665bda/exponential.go#L76
+	// DefaultInitialInterval     = 500 * time.Millisecond
+	// DefaultRandomizationFactor = 0.5
+	// DefaultMultiplier          = 1.5
+	// DefaultMaxInterval         = 60 * time.Second
+	// DefaultMaxElapsedTime      = 15 * time.Minute
+
+	// Make our ticker
+	ticker := backoff.NewTicker(b.backoffParams)
+
+	// Keep looping through our ticker, waiting for it to tell us when to retry
+	for range ticker.C {
+		// Make our Client
+		var httpClient = getHttpClient()
+
+		// declare our variables
+		var response *http.Response
+		var err error
+
+		// Make our Request
+		req, _ := http.NewRequest("PATCH", b.endpoint, bytes.NewBuffer(b.body))
+
+		// Add the expected headers
+		req = addHeaders(req, b.headers, b.contentType)
+
+		// Set any query params
+		req = addQueryParams(req, b.params)
+
+		response, err = httpClient.Do(req)
+
+		if err != nil {
+			b.logger.Errorf("error making patch request: %v", err)
+			return nil, err
+		}
+
+		if err := checkBadStatusCode(response); err != nil {
+			ticker.Stop()
+			return response, err
+		}
+
+		if err != nil || response.StatusCode != http.StatusOK {
+			b.logger.Infof("error making patch request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
+
+			bodyString := extractBody(response)
+			b.logger.Infof("error: %s", bodyString)
+			continue
+		}
+
+		ticker.Stop()
+		return response, err
+	}
+
+	return nil, errors.New("unable to make post request")
+}
+
 func (b *bzhttp) post() (*http.Response, error) {
 	// Default params
 	// Ref: https://github.com/cenkalti/backoff/blob/a78d3804c2c84f0a3178648138442c9b07665bda/exponential.go#L76
@@ -151,9 +214,7 @@ func (b *bzhttp) post() (*http.Response, error) {
 	// Keep looping through our ticker, waiting for it to tell us when to retry
 	for range ticker.C {
 		// Make our Client
-		var httpClient = &http.Client{
-			Timeout: time.Second * 10,
-		}
+		var httpClient = getHttpClient()
 
 		// declare our variables
 		var response *http.Response
@@ -171,22 +232,10 @@ func (b *bzhttp) post() (*http.Response, error) {
 			req, _ := http.NewRequest("POST", b.endpoint, bytes.NewBuffer(b.body))
 
 			// Add the expected headers
-			for name, values := range b.headers {
-				// Loop over all values for the name.
-				req.Header.Set(name, values)
-			}
-
-			// Add the content type header
-			req.Header.Set("Content-Type", b.contentType)
+			req = addHeaders(req, b.headers, b.contentType)
 
 			// Set any query params
-			q := req.URL.Query()
-			for key, values := range b.params {
-				q.Add(key, values)
-			}
-
-			q.Add("clientProtocol", "1.5")
-			req.URL.RawQuery = q.Encode()
+			req = addQueryParams(req, b.params)
 
 			response, err = httpClient.Do(req)
 
@@ -197,19 +246,15 @@ func (b *bzhttp) post() (*http.Response, error) {
 		}
 
 		// If the status code is unauthorized, do not attempt to retry
-		if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusUnsupportedMediaType {
+		if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
-			return response, fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
+			return response, err
 		}
 
 		if err != nil || response.StatusCode != http.StatusOK {
 			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
-			bodyBytes, err := io.ReadAll(response.Body)
-			if err != nil {
-				b.logger.Error(err)
-			}
-			bodyString := string(bodyBytes)
+			bodyString := extractBody(response)
 			b.logger.Infof("error: %s", bodyString)
 			continue
 		}
@@ -236,9 +281,7 @@ func (b *bzhttp) get() (*http.Response, error) {
 	// Keep looping through our ticker, waiting for it to tell us when to retry
 	for range ticker.C {
 		// Make our Client
-		var httpClient = &http.Client{
-			Timeout: time.Second * 10,
-		}
+		var httpClient = getHttpClient()
 
 		// declare our variables
 		var response *http.Response
@@ -251,40 +294,23 @@ func (b *bzhttp) get() (*http.Response, error) {
 			req, _ := http.NewRequest("GET", b.endpoint, bytes.NewBuffer(b.body))
 
 			// Add the expected headers
-			for name, values := range b.headers {
-				// Loop over all values for the name.
-				req.Header.Set(name, values)
-			}
-
-			// Add the content type header
-			req.Header.Set("Content-Type", b.contentType)
+			req = addHeaders(req, b.headers, b.contentType)
 
 			// Set any query params
-			q := req.URL.Query()
-			for key, values := range b.params {
-				q.Add(key, values)
-			}
-
-			q.Add("clientProtocol", "1.5")
-			req.URL.RawQuery = q.Encode()
+			req = addQueryParams(req, b.params)
 
 			response, err = httpClient.Do(req)
 		}
 
-		// If the status code is unauthorized, do not attempt to retry
-		if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound {
+		if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
-			return response, fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
+			return response, err
 		}
 
 		if err != nil || response.StatusCode != http.StatusOK {
 			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
-			bodyBytes, err := io.ReadAll(response.Body)
-			if err != nil {
-				log.Fatal(err)
-			}
-			bodyString := string(bodyBytes)
+			bodyString := extractBody(response)
 			b.logger.Infof("error: %s", bodyString)
 			continue
 		}
@@ -294,4 +320,57 @@ func (b *bzhttp) get() (*http.Response, error) {
 	}
 
 	return nil, errors.New("unable to make get request")
+}
+
+// Helper function to check if we received a status code that we should not attempt to try again
+func checkBadStatusCode(response *http.Response) error {
+	if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusUnsupportedMediaType || response.StatusCode == http.StatusGone {
+		return fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
+	}
+	return nil
+}
+
+// Helper function to add headers and set the content type
+func addHeaders(request *http.Request, headers map[string]string, contentType string) *http.Request {
+	// Add the expected headers
+	for name, values := range headers {
+		// Loop over all values for the name.
+		request.Header.Set(name, values)
+	}
+
+	// Add the content type header
+	request.Header.Set("Content-Type", contentType)
+
+	return request
+}
+
+// Helper function to add query params
+func addQueryParams(request *http.Request, params map[string]string) *http.Request {
+	// Set any query params
+	q := request.URL.Query()
+	for key, values := range params {
+		q.Add(key, values)
+	}
+
+	// Add the client protocol for signalr
+	q.Add("clientProtocol", "1.5")
+	request.URL.RawQuery = q.Encode()
+
+	return request
+}
+
+// Helper function to build a http client
+func getHttpClient() *http.Client {
+	return &http.Client{
+		Timeout: time.Second * 10,
+	}
+}
+
+// Helper function to extract the response body
+func extractBody(response *http.Response) string {
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return string(bodyBytes)
 }
