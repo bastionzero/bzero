@@ -32,12 +32,14 @@ type Keysplitting struct {
 	shouldCheckTargetId *semver.Constraints
 }
 
-func New(
-	base64EncodedPublicKey string,
-	base64EncodedPrivateKey string,
-	idpProvider string,
-	idpOrgId string) (*Keysplitting, error) {
+type IKeysplittingConfig interface {
+	GetPublicKey() string
+	GetPrivateKey() string
+	GetIdpProvider() string
+	GetIdpOrgId() string
+}
 
+func New(config IKeysplittingConfig) (*Keysplitting, error) {
 	shouldCheckTargetIdConstraint, err := semver.NewConstraint(fmt.Sprintf("> %v", schemaVersionTargetIdNotSet))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create check target id constraint: %w", err)
@@ -47,10 +49,10 @@ func New(
 		hPointer:            "",
 		expectedHPointer:    "",
 		bzCerts:             make(map[string]BZCertMetadata),
-		publickey:           base64EncodedPublicKey,
-		privatekey:          base64EncodedPrivateKey,
-		idpProvider:         idpProvider,
-		idpOrgId:            idpOrgId,
+		publickey:           config.GetPublicKey(),
+		privatekey:          config.GetPrivateKey(),
+		idpProvider:         config.GetIdpProvider(),
+		idpOrgId:            config.GetIdpOrgId(),
 		shouldCheckTargetId: shouldCheckTargetIdConstraint,
 	}, nil
 }

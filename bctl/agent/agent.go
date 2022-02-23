@@ -200,7 +200,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 	ccId := uuid.New().String()
 	ccLogger := logger.GetControlChannelLogger(ccId)
 
-	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, agentType, dcTargetSelectHandler)
+	return controlchannel.Start(ccLogger, ccId, websocket, serviceUrl, agentType, dcTargetSelectHandler, config)
 }
 
 // control channel function to select correct SignalR hubs on message egress

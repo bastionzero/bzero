@@ -14,7 +14,6 @@ import (
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
-	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
@@ -55,21 +54,11 @@ func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	websocket *websocket.Websocket,
 	id string,
-	syn []byte) (*DataChannel, error) {
-
-	// Load vault
-	config, err := vault.LoadVault()
-	if err != nil {
-		return nil, fmt.Errorf("could not load vault: %s", err)
-	}
+	syn []byte,
+	ksConfig keysplitting.IKeysplittingConfig) (*DataChannel, error) {
 
 	// Init keysplitter
-	keysplitter, err := keysplitting.New(
-		config.Data.PublicKey,
-		config.Data.PrivateKey,
-		config.Data.IdpProvider,
-		config.Data.IdpOrgId,
-	)
+	keysplitter, err := keysplitting.New(ksConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init keysplitter: %w", err)
 	}

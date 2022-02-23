@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"bastionzero.com/bctl/v1/bctl/agent/datachannel"
+	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -29,6 +30,9 @@ type ControlChannel struct {
 	logger    *logger.Logger
 	tmb       tomb.Tomb
 	id        string
+
+	// config values needed for keysplitting
+	ksConfig keysplitting.IKeysplittingConfig
 
 	// variables for opening websockets
 	serviceUrl            string
@@ -51,21 +55,19 @@ func Start(logger *logger.Logger,
 	websocket *websocket.Websocket, // control channel websocket
 	serviceUrl string,
 	targetType string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) (*ControlChannel, error) {
+	targetSelectHandler func(msg am.AgentMessage) (string, error),
+	ksConfig keysplitting.IKeysplittingConfig) (*ControlChannel, error) {
 
 	control := &ControlChannel{
-		websocket: websocket,
-		logger:    logger,
-		id:        id,
-
+		websocket:             websocket,
+		logger:                logger,
+		id:                    id,
+		ksConfig:              ksConfig,
 		serviceUrl:            serviceUrl,
 		dcTargetSelectHandler: targetSelectHandler,
-
-		targetType: targetType,
-
-		inputChan: make(chan am.AgentMessage, 25),
-
-		connections: make(map[string]wsMeta),
+		targetType:            targetType,
+		inputChan:             make(chan am.AgentMessage, 25),
+		connections:           make(map[string]wsMeta),
 	}
 
 	// The ChannelId is mostly for distinguishing multiple channels over a single websocket but the control channel has
@@ -170,7 +172,7 @@ func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
 	if websocketMeta, ok := c.getConnectionMap(connectionId); !ok {
 		return fmt.Errorf("agent does not have a websocket associated with id %s", connectionId)
 	} else {
-		if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn); err != nil {
+		if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn, c.ksConfig); err != nil {
 			return err
 		} else {
 			// add our new datachannel to our connections dictionary

@@ -255,6 +255,20 @@ func (v *Vault) Save() error {
 	}
 }
 
+func (v *Vault) GetPublicKey() string {
+	return v.Data.PublicKey
+}
+func (v *Vault) GetPrivateKey() string {
+	return v.Data.PrivateKey
+}
+func (v *Vault) GetIdpProvider() string {
+	return v.Data.IdpProvider
+}
+
+func (v *Vault) GetIdpOrgId() string {
+	return v.Data.IdpOrgId
+}
+
 // There is no selective saving, saving the vault will overwrite anything existing
 func (v *Vault) saveSystemd() error {
 	v.fileLock.Lock()
