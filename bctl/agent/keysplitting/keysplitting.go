@@ -86,6 +86,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 		// Daemons with schema version <= 1.0 do not set targetId, so we cannot
 		// apply this check universally
+		// TODO: CWC-1553: Always check TargetId once all daemons have updated
 		if k.shouldCheckTargetId.Check(v) {
 			// Verify SYN message commits to this agent's cryptographic identity
 			if synPayload.TargetId != k.publickey {

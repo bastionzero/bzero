@@ -13,10 +13,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
 
-const (
-	schemaVersion = "1.1"
-)
-
 type Config struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`
 	TokenSet TokenSetConfig     `json:"tokenSet"`
@@ -79,6 +75,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		synAckPayload := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
 		hpointer = synAckPayload.HPointer
 
+		// TODO: CWC-1553: Remove this code once all agents have updated
 		if k.ackPublicKey == "" {
 			k.ackPublicKey = synAckPayload.TargetPublicKey
 		} else {
@@ -93,6 +90,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 	// Verify the agent's signature
 	if err := ksMessage.VerifySignature(k.agentPubKey); err != nil {
+		// TODO: CWC-1553: Remove this inner conditional once all agents have
+		// updated
 		if innerErr := ksMessage.VerifySignature(k.ackPublicKey); innerErr != nil {
 			return fmt.Errorf("failed to verify %v signature: inner error: %v. original error: %v", ksMessage.Type, innerErr, err)
 		}
@@ -169,7 +168,7 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 	// Build the keysplitting message
 	synPayload := ksmsg.SynPayload{
 		Timestamp:     fmt.Sprint(time.Now().Unix()),
-		SchemaVersion: schemaVersion,
+		SchemaVersion: ksmsg.SchemaVersion,
 		Type:          string(ksmsg.Syn),
 		Action:        action,
 		ActionPayload: payload,

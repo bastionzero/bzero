@@ -26,7 +26,7 @@ func (d DataAckPayload) BuildResponsePayload(action string, actionPayload []byte
 
 	return DataPayload{
 		Timestamp:     fmt.Sprint(time.Now().Unix()),
-		SchemaVersion: d.SchemaVersion,
+		SchemaVersion: SchemaVersion,
 		Type:          string(Data),
 		Action:        action,
 		TargetId:      d.TargetPublicKey, //TODO: Make this come from storage
