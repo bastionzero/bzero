@@ -362,7 +362,7 @@ func addQueryParams(request *http.Request, params map[string]string) *http.Reque
 // Helper function to build a http client
 func getHttpClient() *http.Client {
 	return &http.Client{
-		Timeout: time.Second * 10,
+		Timeout: time.Second * 30,
 	}
 }
 
