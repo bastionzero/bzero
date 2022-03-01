@@ -169,38 +169,10 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 						if sequenceNumber == 1 {
 							// check to see if there are any logs we can stream back, do not attempt to handle any error, this is best effort
 							// Remove the follow from the endpoint
-							if noFollowUrl, err := convertToUrlObject(streamActionRequest.Endpoint); err == nil {
+							if urlObject, err := convertToUrlObject(streamActionRequest.Endpoint); err == nil {
 								// Ensure this is a log request
-								if strings.HasSuffix(noFollowUrl.Path, "/log") {
-									// Remove the follow query param
-									q := noFollowUrl.Query()
-									q.Del("follow")
-									noFollowUrl.RawQuery = q.Encode()
-
-									// Build our http request
-									if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, noFollowUrl.String(), streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
-										if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
-											// Parse out the body
-											if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
-												// Stream the context back to the user
-												content := base64.StdEncoding.EncodeToString(bodyBytes)
-												message := smsg.StreamMessage{
-													Type:           string(smsg.StreamData),
-													RequestId:      streamActionRequest.RequestId,
-													LogId:          streamActionRequest.LogId,
-													SequenceNumber: sequenceNumber,
-													Content:        content,
-												}
-												s.streamOutputChan <- message
-											} else {
-												s.logger.Errorf("error reading body of http request: %s", err)
-											}
-										} else {
-											s.logger.Errorf("error making making http request for log endpoint: %s", err)
-										}
-									} else {
-										s.logger.Errorf("error building log http request: %s", err)
-									}
+								if strings.HasSuffix(urlObject.Path, "/log") {
+									s.handleLastLogStream(urlObject, streamActionRequest, sequenceNumber)
 								}
 							} else {
 								s.logger.Errorf("error converting to url object: %s", err)
@@ -257,6 +229,41 @@ func (s *StreamAction) buildHttpRequest(endpoint, body, method string, headers m
 		return nil, err
 	} else {
 		return toReturn, nil
+	}
+}
+
+// Helper function to try and see if there are any logs we can stream to the user
+// This is trigger in the case where the pod is terminated or crashing
+func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest KubeStreamActionPayload, sequenceNumber int) {
+	// Remove the follow query param
+	q := url.Query()
+	q.Del("follow")
+	url.RawQuery = q.Encode()
+
+	// Build our http request
+	if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, url.String(), streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
+		httpClient := &http.Client{}
+		if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
+			// Parse out the body
+			if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
+				// Stream the context back to the user
+				content := base64.StdEncoding.EncodeToString(bodyBytes)
+				message := smsg.StreamMessage{
+					Type:           string(smsg.StreamData),
+					RequestId:      streamActionRequest.RequestId,
+					LogId:          streamActionRequest.LogId,
+					SequenceNumber: sequenceNumber,
+					Content:        content,
+				}
+				s.streamOutputChan <- message
+			} else {
+				s.logger.Errorf("error reading body of http request: %s", err)
+			}
+		} else {
+			s.logger.Errorf("error making making http request for log endpoint: %s", err)
+		}
+	} else {
+		s.logger.Errorf("error building log http request: %s", err)
 	}
 }
 
