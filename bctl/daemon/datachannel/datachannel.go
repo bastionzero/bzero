@@ -129,6 +129,7 @@ func New(logger *logger.Logger,
 			case <-parentTmb.Dying(): // daemon is dying
 				return errors.New("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
+				dc.logger.Infof("Killing datachannel and its subsidiaries because %s", dc.tmb.Err())
 				time.Sleep(30 * time.Second) // give datachannel time to close correctly
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
@@ -350,6 +351,7 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 		// executive decision: we don't retry if we get an error on a syn aka d.handshook == false
 		if d.retry > maxRetries {
 			rerr = fmt.Errorf("goodbye. retried too many times to fix error: %s", errMessage.Message)
+			d.Close(rerr)
 		} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError && d.handshook {
 			d.retry++
 			d.setOnDeck(d.getLastMessage())
@@ -358,12 +360,11 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 			// so that our input message handler is pointing to the right thing.
 			if err := d.sendSyn(d.getOnDeck().Action); err != nil {
 				return err
-			} else {
-				return rerr
 			}
+		} else {
+			d.Close(rerr)
 		}
 
-		d.tmb.Kill(rerr)
 		return rerr
 	}
 }
