@@ -33,7 +33,7 @@ var (
 )
 
 const (
-	version        = "$DAEMON_VERSION"
+	version        = "4.0.2"
 	prodServiceUrl = "https://cloud.bastionzero.com"
 )
 

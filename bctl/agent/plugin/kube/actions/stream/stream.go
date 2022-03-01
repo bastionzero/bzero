@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
+	"net/url"
 
 	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -29,14 +31,6 @@ type StreamAction struct {
 	targetGroups        []string
 	targetUser          string
 }
-
-type StreamSubAction string
-
-const (
-	StreamData  StreamSubAction = "kube/stream/stdout"
-	StreamStart StreamSubAction = "kube/stream/start"
-	StreamStop  StreamSubAction = "kube/stream/stop"
-)
 
 func New(logger *logger.Logger,
 	pluginTmb *tomb.Tomb,
@@ -63,10 +57,10 @@ func (s *StreamAction) Closed() bool {
 }
 
 func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch StreamSubAction(action) {
+	switch smsg.StreamType(action) {
 
 	// Start exec message required before anything else
-	case StreamStart:
+	case smsg.StreamStart:
 		var streamActionRequest KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
@@ -77,7 +71,7 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 		s.requestId = streamActionRequest.RequestId
 
 		return s.StartStream(streamActionRequest, action)
-	case StreamStop:
+	case smsg.StreamStop:
 		var streamActionRequest KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
@@ -136,7 +130,7 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 
 	// Stream the response back
 	message := smsg.StreamMessage{
-		Type:           string(StreamData),
+		Type:           string(smsg.StreamData),
 		RequestId:      streamActionRequest.RequestId,
 		LogId:          streamActionRequest.LogId,
 		SequenceNumber: 0,
@@ -168,14 +162,50 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 						s.logger.Info("Received EOF on stream action stream")
 					default:
 						s.logger.Error(fmt.Errorf("could not read HTTP response: %s", err))
+
+						// If the sequenceNumber is 1, this means that we never streamed any data back,
+						if sequenceNumber == 1 {
+							// check to see if there are any logs we can stream back, do not attempt to handle any error, this is best effort
+							// Remove the follow from the endpoint
+							if noFollowUrl, err := stripQueryParam(streamActionRequest.Endpoint, "follow"); err == nil {
+								// Build our http request
+								if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, noFollowUrl, streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
+									if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
+										// Parse out the body
+										if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
+											// Stream the context back to the user
+											content := base64.StdEncoding.EncodeToString(bodyBytes)
+											message := smsg.StreamMessage{
+												Type:           string(smsg.StreamData),
+												RequestId:      streamActionRequest.RequestId,
+												LogId:          streamActionRequest.LogId,
+												SequenceNumber: sequenceNumber,
+												Content:        content,
+											}
+											s.streamOutputChan <- message
+										}
+									}
+								}
+							}
+						}
 					}
+
+					// Let the daemon know the stream has ended
+					message := smsg.StreamMessage{
+						Type:           string(smsg.StreamEnd),
+						RequestId:      streamActionRequest.RequestId,
+						LogId:          streamActionRequest.LogId,
+						SequenceNumber: sequenceNumber,
+						Content:        "",
+					}
+					s.streamOutputChan <- message
 					return
 				}
 
 				// Stream the response back
 				content := base64.StdEncoding.EncodeToString(buf[:numBytes])
 				message := smsg.StreamMessage{
-					Type:           string(StreamData),
+					Type:           string(smsg.StreamData),
 					RequestId:      streamActionRequest.RequestId,
 					LogId:          streamActionRequest.LogId,
 					SequenceNumber: sequenceNumber,
@@ -210,4 +240,17 @@ func (s *StreamAction) buildHttpRequest(endpoint, body, method string, headers m
 	} else {
 		return toReturn, nil
 	}
+}
+
+// Helper function to remove a query param from a url
+// Ref: https://johnweldon.com/blog/quick-tip-remove-query-param-from-url-in-go/
+func stripQueryParam(inURL string, stripKey string) (string, error) {
+	u, err := url.Parse(inURL)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Del(stripKey)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }

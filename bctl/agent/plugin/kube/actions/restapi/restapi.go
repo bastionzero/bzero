@@ -74,7 +74,10 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 	}
 
 	// Parse out the body
-	bodyBytes, _ := ioutil.ReadAll(res.Body)
+	bodyBytes, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return action, []byte{}, err
+	}
 
 	// Now we need to send that data back to the client
 	responsePayload := KubeRestApiActionResponsePayload{

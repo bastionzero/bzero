@@ -29,4 +29,9 @@ const (
 	DbAgentClose StreamType = "db/agentClose"
 
 	WebOut StreamType = "web/dataout"
+
+	StreamData  StreamType = "kube/stream/stdout"
+	StreamStart StreamType = "kube/stream/start"
+	StreamStop  StreamType = "kube/stream/stop"
+	StreamEnd   StreamType = "kube/stream/end"
 )
