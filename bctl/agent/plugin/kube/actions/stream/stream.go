@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
+	"net/url"
+	"strings"
 
 	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -29,14 +32,6 @@ type StreamAction struct {
 	targetGroups        []string
 	targetUser          string
 }
-
-type StreamSubAction string
-
-const (
-	StreamData  StreamSubAction = "kube/stream/stdout"
-	StreamStart StreamSubAction = "kube/stream/start"
-	StreamStop  StreamSubAction = "kube/stream/stop"
-)
 
 func New(logger *logger.Logger,
 	pluginTmb *tomb.Tomb,
@@ -63,10 +58,10 @@ func (s *StreamAction) Closed() bool {
 }
 
 func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch StreamSubAction(action) {
+	switch smsg.StreamType(action) {
 
 	// Start exec message required before anything else
-	case StreamStart:
+	case smsg.StreamStart:
 		var streamActionRequest KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
@@ -77,7 +72,7 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 		s.requestId = streamActionRequest.RequestId
 
 		return s.StartStream(streamActionRequest, action)
-	case StreamStop:
+	case smsg.StreamStop:
 		var streamActionRequest KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
@@ -136,7 +131,7 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 
 	// Stream the response back
 	message := smsg.StreamMessage{
-		Type:           string(StreamData),
+		Type:           string(smsg.StreamData),
 		RequestId:      streamActionRequest.RequestId,
 		LogId:          streamActionRequest.LogId,
 		SequenceNumber: 0,
@@ -168,14 +163,39 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 						s.logger.Info("Received EOF on stream action stream")
 					default:
 						s.logger.Error(fmt.Errorf("could not read HTTP response: %s", err))
+
+						// If the sequenceNumber is 1, this means that we never streamed any data back, if this is a log request attempt
+						// to get the latest logs
+						if sequenceNumber == 1 {
+							// check to see if there are any logs we can stream back, do not attempt to handle any error, this is best effort
+							// Remove the follow from the endpoint
+							if urlObject, err := convertToUrlObject(streamActionRequest.Endpoint); err == nil {
+								// Ensure this is a log request
+								if strings.HasSuffix(urlObject.Path, "/log") {
+									s.handleLastLogStream(urlObject, streamActionRequest, sequenceNumber)
+								}
+							} else {
+								s.logger.Errorf("error converting to url object: %s", err)
+							}
+						}
 					}
+
+					// Let the daemon know the stream has ended
+					message := smsg.StreamMessage{
+						Type:           string(smsg.StreamEnd),
+						RequestId:      streamActionRequest.RequestId,
+						LogId:          streamActionRequest.LogId,
+						SequenceNumber: sequenceNumber,
+						Content:        "",
+					}
+					s.streamOutputChan <- message
 					return
 				}
 
 				// Stream the response back
 				content := base64.StdEncoding.EncodeToString(buf[:numBytes])
 				message := smsg.StreamMessage{
-					Type:           string(StreamData),
+					Type:           string(smsg.StreamData),
 					RequestId:      streamActionRequest.RequestId,
 					LogId:          streamActionRequest.LogId,
 					SequenceNumber: sequenceNumber,
@@ -210,4 +230,48 @@ func (s *StreamAction) buildHttpRequest(endpoint, body, method string, headers m
 	} else {
 		return toReturn, nil
 	}
+}
+
+// Helper function to try and see if there are any logs we can stream to the user
+// This is trigger in the case where the pod is terminated or crashing
+func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest KubeStreamActionPayload, sequenceNumber int) {
+	// Remove the follow query param
+	q := url.Query()
+	q.Del("follow")
+	url.RawQuery = q.Encode()
+
+	// Build our http request
+	if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, url.String(), streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
+		httpClient := &http.Client{}
+		if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
+			// Parse out the body
+			if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
+				// Stream the context back to the user
+				content := base64.StdEncoding.EncodeToString(bodyBytes)
+				message := smsg.StreamMessage{
+					Type:           string(smsg.StreamData),
+					RequestId:      streamActionRequest.RequestId,
+					LogId:          streamActionRequest.LogId,
+					SequenceNumber: sequenceNumber,
+					Content:        content,
+				}
+				s.streamOutputChan <- message
+			} else {
+				s.logger.Errorf("error reading body of http request: %s", err)
+			}
+		} else {
+			s.logger.Errorf("error making making http request for log endpoint: %s", err)
+		}
+	} else {
+		s.logger.Errorf("error building log http request: %s", err)
+	}
+}
+
+// Helper function to convert a string to a url object
+func convertToUrlObject(inURL string) (*url.URL, error) {
+	u, err := url.Parse(inURL)
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
 }

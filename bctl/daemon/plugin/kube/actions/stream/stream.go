@@ -15,11 +15,6 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
-const (
-	startStream = "kube/stream/start"
-	stopStream  = "kube/stream/stop"
-)
-
 type StreamAction struct {
 	logger *logger.Logger
 
@@ -102,7 +97,7 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        startStream,
+		Action:        string(smsg.StreamStart),
 		ActionPayload: payloadBytes,
 	}
 
@@ -159,32 +154,40 @@ outOfOrderMessageHandler:
 
 			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
-				Action:        stopStream,
+				Action:        string(smsg.StreamStop),
 				ActionPayload: payloadBytes,
 			}
 
 			return nil
 
 		case watchData := <-s.streamInputChan:
+			// Determin if this is an end or data messages
+			switch watchData.Type {
+			case string(smsg.StreamData):
+				// Then stream the response to kubectl
+				if watchData.SequenceNumber == s.expectedSequenceNumber {
+					// If the incoming data is equal to the current expected seqNumber, show the user
+					contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
+					if err := kubeutils.WriteToHttpRequest(contentBytes, writer); err != nil {
+						s.logger.Error(err)
+						return nil
+					}
 
-			// Then stream the response to kubectl
-			if watchData.SequenceNumber == s.expectedSequenceNumber {
-				// If the incoming data is equal to the current expected seqNumber, show the user
-				contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
-				if err := kubeutils.WriteToHttpRequest(contentBytes, writer); err != nil {
-					s.logger.Error(err)
-					return nil
+					// Increment the seqNumber
+					s.expectedSequenceNumber += 1
+
+					// See if we have any early messages for this seqNumber
+					s.handleOutOfOrderMessage()
+				} else {
+					s.outOfOrderMessages[watchData.SequenceNumber] = watchData
 				}
-
-				// Increment the seqNumber
-				s.expectedSequenceNumber += 1
-
-				// See if we have any early messages for this seqNumber
-				s.handleOutOfOrderMessage()
-			} else {
-				s.outOfOrderMessages[watchData.SequenceNumber] = watchData
+			case string(smsg.StreamEnd):
+				// End the stream
+				s.logger.Infof("Stream has been ended from the agent, closing request")
+				return nil
+			default:
+				s.logger.Errorf("unhandled stream message: %s", watchData.Type)
 			}
-
 		}
 	}
 }
