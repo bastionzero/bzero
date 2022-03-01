@@ -49,10 +49,10 @@ func Nonce() string {
 func RunRefreshAuthCommand(refreshCommand string) error {
 	if splits := strings.Split(refreshCommand, " "); len(splits) >= 2 {
 		if out, err := exec.Command(splits[0], splits[1:]...).CombinedOutput(); err != nil {
-			fmt.Errorf("%s while executing zli refresh token command: %s", err, string(out))
+			return fmt.Errorf("%s while executing zli refresh token command: %s", err, string(out))
 		}
 	} else {
-		fmt.Errorf("not enough arguments to refresh token zli command: %v", len(splits))
+		return fmt.Errorf("not enough arguments to refresh token zli command: %v", len(splits))
 	}
 	return nil
 }

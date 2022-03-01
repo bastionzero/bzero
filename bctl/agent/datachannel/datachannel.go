@@ -175,22 +175,26 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	switch keysplittingMessage.Type {
 	case ksmsg.Syn:
 		synPayload := keysplittingMessage.KeysplittingPayload.(ksmsg.SynPayload)
+
 		// Grab user's action
 		if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
 			rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
 			d.sendError(rrr.KeysplittingExecutionError, rerr)
 			return
 		} else {
-			if d.plugin != nil { // Don't start plugin if there's already one started
-				return
+
+			// Don't start plugin if there's already one started
+			if d.plugin == nil {
+
+				// Start plugin based on action
+				actionPrefix := parsedAction[0]
+				if err := d.startPlugin(PluginName(actionPrefix), synPayload.ActionPayload); err != nil {
+					d.sendError(rrr.ComponentStartupError, err)
+					return
+				}
 			}
 
-			// Start plugin based on action
-			actionPrefix := parsedAction[0]
-			if err := d.startPlugin(PluginName(actionPrefix), synPayload.ActionPayload); err != nil {
-				d.sendError(rrr.ComponentStartupError, err)
-				return
-			}
+			// return a SYN/ACK
 			d.sendKeysplitting(keysplittingMessage, "", []byte{}) // empty payload
 		}
 	case ksmsg.Data:

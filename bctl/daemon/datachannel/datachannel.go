@@ -163,6 +163,7 @@ func (d *DataChannel) Ready() bool {
 }
 
 func (d *DataChannel) Close(reason error) {
+	d.logger.Infof("Killing datachannel and its subsidiaries because %s", reason)
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
 	d.tmb.Wait()
 }
@@ -350,7 +351,8 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 		// executive decision: we don't retry if we get an error on a syn aka d.handshook == false
 		if d.retry > maxRetries {
 			rerr = fmt.Errorf("goodbye. retried too many times to fix error: %s", errMessage.Message)
-		} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError && d.handshook {
+			d.Close(rerr)
+		} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError && d.getLastMessage().Action == "" {
 			d.retry++
 			d.setOnDeck(d.getLastMessage())
 
@@ -358,12 +360,11 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 			// so that our input message handler is pointing to the right thing.
 			if err := d.sendSyn(d.getOnDeck().Action); err != nil {
 				return err
-			} else {
-				return rerr
 			}
+		} else {
+			d.Close(rerr)
 		}
 
-		d.tmb.Kill(rerr)
 		return rerr
 	}
 }
