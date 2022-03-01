@@ -169,7 +169,7 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 						if sequenceNumber == 1 {
 							// check to see if there are any logs we can stream back, do not attempt to handle any error, this is best effort
 							// Remove the follow from the endpoint
-							if noFollowUrl, err := convertToUrlObject(streamActionRequest.Endpoint, "follow"); err == nil {
+							if noFollowUrl, err := convertToUrlObject(streamActionRequest.Endpoint); err == nil {
 								// Ensure this is a log request
 								if strings.HasSuffix(noFollowUrl.Path, "/log") {
 									// Remove the follow query param
@@ -252,9 +252,8 @@ func (s *StreamAction) buildHttpRequest(endpoint, body, method string, headers m
 	}
 }
 
-// Helper function to remove a query param from a url
-// Ref: https://johnweldon.com/blog/quick-tip-remove-query-param-from-url-in-go/
-func convertToUrlObject(inURL string, stripKey string) (*url.URL, error) {
+// Helper function to convert a string to a url object
+func convertToUrlObject(inURL string) (*url.URL, error) {
 	u, err := url.Parse(inURL)
 	if err != nil {
 		return nil, err
