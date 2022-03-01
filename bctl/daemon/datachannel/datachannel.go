@@ -352,7 +352,7 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 		if d.retry > maxRetries {
 			rerr = fmt.Errorf("goodbye. retried too many times to fix error: %s", errMessage.Message)
 			d.Close(rerr)
-		} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError && d.getLastMessage().Action == "" {
+		} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError && d.handshook {
 			d.retry++
 			d.setOnDeck(d.getLastMessage())
 
