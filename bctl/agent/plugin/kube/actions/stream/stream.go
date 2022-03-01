@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 
 	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -163,26 +164,35 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 					default:
 						s.logger.Error(fmt.Errorf("could not read HTTP response: %s", err))
 
-						// If the sequenceNumber is 1, this means that we never streamed any data back,
+						// If the sequenceNumber is 1, this means that we never streamed any data back, if this is a log request attempt
+						// to get the latest logs
 						if sequenceNumber == 1 {
 							// check to see if there are any logs we can stream back, do not attempt to handle any error, this is best effort
 							// Remove the follow from the endpoint
-							if noFollowUrl, err := stripQueryParam(streamActionRequest.Endpoint, "follow"); err == nil {
-								// Build our http request
-								if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, noFollowUrl, streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
-									if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
-										// Parse out the body
-										if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
-											// Stream the context back to the user
-											content := base64.StdEncoding.EncodeToString(bodyBytes)
-											message := smsg.StreamMessage{
-												Type:           string(smsg.StreamData),
-												RequestId:      streamActionRequest.RequestId,
-												LogId:          streamActionRequest.LogId,
-												SequenceNumber: sequenceNumber,
-												Content:        content,
+							if noFollowUrl, err := convertToUrlObject(streamActionRequest.Endpoint, "follow"); err == nil {
+								// Ensure this is a log request
+								if strings.HasSuffix(noFollowUrl.Path, "/log") {
+									// Remove the follow query param
+									q := noFollowUrl.Query()
+									q.Del("follow")
+									noFollowUrl.RawQuery = q.Encode()
+
+									// Build our http request
+									if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, noFollowUrl.String(), streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
+										if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
+											// Parse out the body
+											if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
+												// Stream the context back to the user
+												content := base64.StdEncoding.EncodeToString(bodyBytes)
+												message := smsg.StreamMessage{
+													Type:           string(smsg.StreamData),
+													RequestId:      streamActionRequest.RequestId,
+													LogId:          streamActionRequest.LogId,
+													SequenceNumber: sequenceNumber,
+													Content:        content,
+												}
+												s.streamOutputChan <- message
 											}
-											s.streamOutputChan <- message
 										}
 									}
 								}
@@ -244,13 +254,10 @@ func (s *StreamAction) buildHttpRequest(endpoint, body, method string, headers m
 
 // Helper function to remove a query param from a url
 // Ref: https://johnweldon.com/blog/quick-tip-remove-query-param-from-url-in-go/
-func stripQueryParam(inURL string, stripKey string) (string, error) {
+func convertToUrlObject(inURL string, stripKey string) (*url.URL, error) {
 	u, err := url.Parse(inURL)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	q := u.Query()
-	q.Del(stripKey)
-	u.RawQuery = q.Encode()
-	return u.String(), nil
+	return u, nil
 }
