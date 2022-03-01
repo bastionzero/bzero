@@ -129,6 +129,7 @@ func New(logger *logger.Logger,
 			case <-parentTmb.Dying(): // daemon is dying
 				return errors.New("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
+				dc.logger.Infof("Killing datachannel and its subsidiaries because %s", dc.tmb.Err())
 				time.Sleep(30 * time.Second) // give datachannel time to close correctly
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
@@ -163,7 +164,6 @@ func (d *DataChannel) Ready() bool {
 }
 
 func (d *DataChannel) Close(reason error) {
-	d.logger.Infof("Killing datachannel and its subsidiaries because %s", reason)
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
 	d.tmb.Wait()
 }

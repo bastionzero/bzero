@@ -70,7 +70,6 @@ func New(parentTmb *tomb.Tomb,
 	// listener for incoming messages
 	datachannel.tmb.Go(func() error {
 		defer websocket.Unsubscribe(id) // causes decoupling from websocket
-		defer datachannel.logger.Infof("Datachannel closed")
 		for {
 			select {
 			case <-parentTmb.Dying(): // control channel is dying
@@ -103,6 +102,7 @@ func New(parentTmb *tomb.Tomb,
 }
 
 func (d *DataChannel) Close(reason error) {
+	d.logger.Infof("Datachannel closed because: %s", reason)
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
 	d.tmb.Wait()
 }
