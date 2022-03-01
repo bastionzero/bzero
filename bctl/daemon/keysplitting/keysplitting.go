@@ -78,8 +78,6 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		// TODO: CWC-1553: Remove this code once all agents have updated
 		if k.ackPublicKey == "" {
 			k.ackPublicKey = synAckPayload.TargetPublicKey
-		} else {
-			return fmt.Errorf("received more than one SYNACK for the same keysplitting session. ackPublicKey was already set in a previously received SYNACK")
 		}
 	case ksmsg.DataAck:
 		dataAckPayload := ksMessage.KeysplittingPayload.(ksmsg.DataAckPayload)
