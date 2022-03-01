@@ -11,7 +11,7 @@ import (
 	"github.com/Masterminds/semver"
 )
 
-// schema version <= this value do not set targetId to the agent's pubkey
+// schema version <= this value doesn't set targetId to the agent's pubkey
 const schemaVersionTargetIdNotSet string = "1.0"
 
 type BZCertMetadata struct {
