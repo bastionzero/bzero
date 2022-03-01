@@ -29,7 +29,7 @@ func (s SynAckPayload) BuildResponsePayload(action string, actionPayload []byte,
 
 	return DataPayload{
 		Timestamp:     fmt.Sprint(time.Now().Unix()),
-		SchemaVersion: s.SchemaVersion,
+		SchemaVersion: SchemaVersion,
 		Type:          string(Data),
 		Action:        action,
 		TargetId:      s.TargetPublicKey, // TODO: Make this come from storage

@@ -27,7 +27,7 @@ func (d DataPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (
 
 	return DataAckPayload{
 		Timestamp:             fmt.Sprint(time.Now().Unix()),
-		SchemaVersion:         d.SchemaVersion,
+		SchemaVersion:         SchemaVersion,
 		Type:                  string(DataAck),
 		Action:                d.Action,
 		TargetPublicKey:       pubKey,

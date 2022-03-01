@@ -20,7 +20,7 @@ const (
 )
 
 const (
-	SchemaVersion = "1.0"
+	SchemaVersion = "1.1"
 )
 
 type IKeysplittingMessage interface {

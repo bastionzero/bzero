@@ -31,6 +31,12 @@ const (
 	Web  PluginName = "web"
 )
 
+type IKeysplitting interface {
+	GetHpointer() string
+	Validate(ksMessage *ksmsg.KeysplittingMessage) error
+	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+}
+
 type DataChannel struct {
 	websocket *websocket.Websocket
 	logger    *logger.Logger
@@ -38,7 +44,7 @@ type DataChannel struct {
 	id        string
 
 	plugin       plugin.IPlugin
-	keysplitting keysplitting.IKeysplitting
+	keysplitting IKeysplitting
 
 	// incoming and outgoing message channels
 	inputChan chan am.AgentMessage
@@ -48,12 +54,13 @@ func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	websocket *websocket.Websocket,
 	id string,
-	syn []byte) (*DataChannel, error) {
+	syn []byte,
+	ksConfig keysplitting.IKeysplittingConfig) (*DataChannel, error) {
 
-	keysplitter, err := keysplitting.New()
+	// Init keysplitter
+	keysplitter, err := keysplitting.New(ksConfig)
 	if err != nil {
-		logger.Error(err)
-		return nil, err
+		return nil, fmt.Errorf("failed to init keysplitter: %w", err)
 	}
 
 	datachannel := &DataChannel{

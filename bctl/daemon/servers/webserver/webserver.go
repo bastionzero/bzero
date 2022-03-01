@@ -45,6 +45,7 @@ type WebServer struct {
 	serviceUrl          string
 	refreshTokenCommand string
 	configPath          string
+	agentPubKey         string
 }
 
 func StartWebServer(logger *logger.Logger,
@@ -57,6 +58,7 @@ func StartWebServer(logger *logger.Logger,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
+	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
 	listener := &WebServer{
@@ -71,6 +73,7 @@ func StartWebServer(logger *logger.Logger,
 		localHost:           localHost,
 		targetHost:          targetHost,
 		targetPort:          targetPort,
+		agentPubKey:         agentPubKey,
 	}
 
 	// Create a new websocket
@@ -153,7 +156,7 @@ func (h *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 	}
 
 	action = "web/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {

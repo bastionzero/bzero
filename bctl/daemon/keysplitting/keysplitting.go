@@ -13,10 +13,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
 
-const (
-	schemaVersion = "1.0"
-)
-
 type Config struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`
 	TokenSet TokenSetConfig     `json:"tokenSet"`
@@ -39,12 +35,6 @@ type BZCertMetadata struct {
 	Exp  time.Time
 }
 
-type IKeysplitting interface {
-	BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error)
-	Validate(ksMessage *ksmsg.KeysplittingMessage) error
-	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
-}
-
 type Keysplitting struct {
 	hPointer         string
 	expectedHPointer string
@@ -52,21 +42,27 @@ type Keysplitting struct {
 	privatekey       string
 
 	// daemon variables
-	targetId            string
 	configPath          string
+	agentPubKey         string
 	bzcertHash          string
 	refreshTokenCommand string
+
+	ackPublicKey string
 }
 
-func New(targetId string, configPath string, refreshTokenCommand string) (IKeysplitting, error) {
-
+func New(
+	agentPubKey string,
+	configPath string,
+	refreshTokenCommand string,
+) (*Keysplitting, error) {
 	// TODO: load keys from storage
 	keysplitter := &Keysplitting{
 		hPointer:            "",
 		expectedHPointer:    "",
-		targetId:            targetId,
 		configPath:          configPath,
 		refreshTokenCommand: refreshTokenCommand,
+		agentPubKey:         agentPubKey,
+		ackPublicKey:        "",
 	}
 
 	return keysplitter, nil
@@ -78,6 +74,11 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	case ksmsg.SynAck:
 		synAckPayload := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
 		hpointer = synAckPayload.HPointer
+
+		// TODO: CWC-1553: Remove this code once all agents have updated
+		if k.ackPublicKey == "" {
+			k.ackPublicKey = synAckPayload.TargetPublicKey
+		}
 	case ksmsg.DataAck:
 		dataAckPayload := ksMessage.KeysplittingPayload.(ksmsg.DataAckPayload)
 		hpointer = dataAckPayload.HPointer
@@ -85,12 +86,21 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}
 
-	// Verify received hash pointer matches expected
-	if hpointer != k.expectedHPointer {
-		return fmt.Errorf("%T hash pointer did not match expected", ksMessage.KeysplittingPayload)
-	} else {
-		return nil
+	// Verify the agent's signature
+	if err := ksMessage.VerifySignature(k.agentPubKey); err != nil {
+		// TODO: CWC-1553: Remove this inner conditional once all agents have
+		// updated
+		if innerErr := ksMessage.VerifySignature(k.ackPublicKey); innerErr != nil {
+			return fmt.Errorf("failed to verify %v signature: inner error: %v. original error: %v", ksMessage.Type, innerErr, err)
+		}
 	}
+
+	// Verify received hash pointer matches expected hash pointer
+	if hpointer != k.expectedHPointer {
+		return fmt.Errorf("%T hash pointer did not match expected hash pointer", ksMessage.KeysplittingPayload)
+	}
+
+	return nil
 }
 
 func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
@@ -156,11 +166,11 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 	// Build the keysplitting message
 	synPayload := ksmsg.SynPayload{
 		Timestamp:     fmt.Sprint(time.Now().Unix()),
-		SchemaVersion: schemaVersion,
+		SchemaVersion: ksmsg.SchemaVersion,
 		Type:          string(ksmsg.Syn),
 		Action:        action,
 		ActionPayload: payload,
-		TargetId:      k.targetId, // TODO
+		TargetId:      k.agentPubKey,
 		Nonce:         nonce,
 		BZCert:        bzCert,
 	}

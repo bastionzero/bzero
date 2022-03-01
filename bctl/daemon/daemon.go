@@ -21,6 +21,7 @@ import (
 var (
 	sessionId, authHeader, targetId, serviceUrl, plugin string
 	logPath, refreshTokenCommand, localPort, localHost  string
+	agentPubKey                                         string
 
 	// Kube server specifc values
 	targetGroupsRaw, targetUser, certPath, keyPath string
@@ -33,7 +34,7 @@ var (
 )
 
 const (
-	version        = "$DAEMON_VERSION"
+	daemonVersion  = "$DAEMON_VERSION"
 	prodServiceUrl = "https://cloud.bastionzero.com"
 )
 
@@ -45,7 +46,7 @@ func main() {
 	if logger, err := logger.New(logger.Debug, logPath); err != nil {
 		reportError(logger, err)
 	} else {
-		logger.AddDaemonVersion(version)
+		logger.AddDaemonVersion(daemonVersion)
 
 		// print out parseflags error now
 		if flagErr != nil {
@@ -57,7 +58,7 @@ func main() {
 
 			params := make(map[string]string)
 			params["session_id"] = sessionId
-			params["version"] = version
+			params["version"] = daemonVersion
 
 			if err := startServer(logger, headers, params); err != nil {
 				logger.Error(err)
@@ -78,7 +79,7 @@ func reportError(logger *logger.Logger, errorReport error) {
 	}
 
 	errReport := errorreport.ErrorReport{
-		Reporter:  "daemon-" + version,
+		Reporter:  "daemon-" + daemonVersion,
 		Timestamp: fmt.Sprint(time.Now().Unix()),
 		Message:   errorReport.Error(),
 		State: map[string]string{
@@ -124,6 +125,7 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 		serviceUrl,
 		params,
 		headers,
+		agentPubKey,
 		targetSelectHandler)
 }
 
@@ -142,6 +144,7 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 		serviceUrl,
 		params,
 		headers,
+		agentPubKey,
 		targetSelectHandler)
 }
 
@@ -166,6 +169,7 @@ func startKubeServer(logger *logger.Logger, headers map[string]string, params ma
 		serviceUrl,
 		params,
 		headers,
+		agentPubKey,
 		targetSelectHandler)
 }
 
@@ -192,6 +196,7 @@ func parseFlags() error {
 	flag.StringVar(&plugin, "plugin", "", "Plugin to activate (kube, db, web)")
 	flag.StringVar(&localPort, "localPort", "", "Daemon Port To Use")
 	flag.StringVar(&localHost, "localHost", "", "Daemon Post To Use")
+	flag.StringVar(&agentPubKey, "agentPubKey", "", "Base64 encoded string of agent's public key")
 
 	// Kube plugin variables
 	flag.StringVar(&targetGroupsRaw, "targetGroups", "", "Kube Group to Assume")
@@ -220,7 +225,7 @@ func parseFlags() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort"}
+	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort", "agentPubKey"}
 	switch plugin {
 	case "kube":
 		requiredFlags = append(requiredFlags, "targetUser", "targetId", "localhostToken", "certPath", "keyPath")

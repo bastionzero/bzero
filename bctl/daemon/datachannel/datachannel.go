@@ -46,6 +46,12 @@ type OpenDataChannelPayload struct {
 	Action string `json:"action"`
 }
 
+type IKeysplitting interface {
+	BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error)
+	Validate(ksMessage *ksmsg.KeysplittingMessage) error
+	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+}
+
 type DataChannel struct {
 	logger       *logger.Logger
 	tmb          tomb.Tomb
@@ -53,7 +59,7 @@ type DataChannel struct {
 	id           string // DataChannel's ID
 	ready        bool
 	plugin       plugin.IPlugin
-	keysplitting keysplitting.IKeysplitting
+	keysplitting IKeysplitting
 	handshook    bool // bool to indicate if we have received a valid syn ack (initally set to false)
 
 	// channels for incoming messages
@@ -82,9 +88,11 @@ func New(logger *logger.Logger,
 	refreshTokenCommand string,
 	configPath string,
 	action string,
-	actionParams []byte) (*DataChannel, *tomb.Tomb, error) {
+	actionParams []byte,
+	agentPubKey string,
+) (*DataChannel, *tomb.Tomb, error) {
 
-	keysplitter, err := keysplitting.New("", configPath, refreshTokenCommand)
+	keysplitter, err := keysplitting.New(agentPubKey, configPath, refreshTokenCommand)
 	if err != nil {
 		logger.Error(err)
 		return nil, &tomb.Tomb{}, err

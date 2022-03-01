@@ -30,7 +30,7 @@ func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (S
 
 	return SynAckPayload{
 		Timestamp:             fmt.Sprint(time.Now().Unix()),
-		SchemaVersion:         s.SchemaVersion,
+		SchemaVersion:         SchemaVersion,
 		Type:                  string(SynAck),
 		Action:                s.Action,
 		ActionResponsePayload: actionPayload,

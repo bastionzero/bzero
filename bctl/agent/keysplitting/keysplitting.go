@@ -1,26 +1,22 @@
 package keysplitting
 
 import (
-	ed "crypto/ed25519"
 	"encoding/base64"
 	"fmt"
 	"time"
 
-	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
+	"github.com/Masterminds/semver"
 )
+
+// schema version <= this value doesn't set targetId to the agent's pubkey
+const schemaVersionTargetIdNotSet string = "1.0"
 
 type BZCertMetadata struct {
 	Cert bzcrt.BZCert
 	Exp  time.Time
-}
-
-type IKeysplitting interface {
-	GetHpointer() string
-	Validate(ksMessage *ksmsg.KeysplittingMessage) error
-	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
 }
 
 type Keysplitting struct {
@@ -31,29 +27,34 @@ type Keysplitting struct {
 	privatekey       string
 	idpProvider      string
 	idpOrgId         string
+
+	// define constraints based on schema version
+	shouldCheckTargetId *semver.Constraints
 }
 
-func New() (IKeysplitting, error) {
-	// Generate public private key pair along ed25519 curve
-	if publicKey, privateKey, err := ed.GenerateKey(nil); err != nil {
-		return nil, fmt.Errorf("error generating key pair: %v", err.Error())
-	} else {
-		pubkeyString := base64.StdEncoding.EncodeToString([]byte(publicKey))
-		privkeyString := base64.StdEncoding.EncodeToString([]byte(privateKey))
+type IKeysplittingConfig interface {
+	GetPublicKey() string
+	GetPrivateKey() string
+	GetIdpProvider() string
+	GetIdpOrgId() string
+}
 
-		// Load in our idp infomation from the vault as well
-		config, _ := vault.LoadVault()
-
-		return &Keysplitting{
-			hPointer:         "",
-			expectedHPointer: "",
-			bzCerts:          make(map[string]BZCertMetadata),
-			publickey:        pubkeyString,
-			privatekey:       privkeyString,
-			idpProvider:      config.Data.IdpProvider,
-			idpOrgId:         config.Data.IdpOrgId,
-		}, nil
+func New(config IKeysplittingConfig) (*Keysplitting, error) {
+	shouldCheckTargetIdConstraint, err := semver.NewConstraint(fmt.Sprintf("> %v", schemaVersionTargetIdNotSet))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create check target id constraint: %w", err)
 	}
+
+	return &Keysplitting{
+		hPointer:            "",
+		expectedHPointer:    "",
+		bzCerts:             make(map[string]BZCertMetadata),
+		publickey:           config.GetPublicKey(),
+		privatekey:          config.GetPrivateKey(),
+		idpProvider:         config.GetIdpProvider(),
+		idpOrgId:            config.GetIdpOrgId(),
+		shouldCheckTargetId: shouldCheckTargetIdConstraint,
+	}, nil
 }
 
 func (k *Keysplitting) GetHpointer() string {
@@ -66,46 +67,61 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		synPayload := ksMessage.KeysplittingPayload.(ksmsg.SynPayload)
 
 		// Verify the BZCert
-		if hash, exp, err := synPayload.BZCert.Verify(k.idpProvider, k.idpOrgId); err != nil {
-			return err
-		} else if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
-			return err
-		} else {
-			k.bzCerts[hash] = BZCertMetadata{
-				Cert: synPayload.BZCert,
-				Exp:  exp,
+		hash, exp, err := synPayload.BZCert.Verify(k.idpProvider, k.idpOrgId)
+		if err != nil {
+			return fmt.Errorf("failed to verify SYN's BZCert: %w", err)
+		}
+
+		// Verify the signature
+		if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
+			return fmt.Errorf("failed to verify SYN's signature: %w", err)
+		}
+
+		// Extract semver version to determine if different protocol checks must
+		// be done
+		v, err := semver.NewVersion(synPayload.SchemaVersion)
+		if err != nil {
+			return fmt.Errorf("failed to parse schema version (%v) as semver: %w", synPayload.SchemaVersion, err)
+		}
+
+		// Daemons with schema version <= 1.0 do not set targetId, so we cannot
+		// apply this check universally
+		// TODO: CWC-1553: Always check TargetId once all daemons have updated
+		if k.shouldCheckTargetId.Check(v) {
+			// Verify SYN message commits to this agent's cryptographic identity
+			if synPayload.TargetId != k.publickey {
+				return fmt.Errorf("SYN's TargetId did not match agent's public key")
 			}
 		}
 
-		// Make sure targetId matches
-		// if synPayload.TargetId != k.publickey {
-		// 	return fmt.Errorf("syn's TargetId did not match Target's actual ID")
-		// }
+		// All checks have passed. Add cert to dict of known bzCerts
+		k.bzCerts[hash] = BZCertMetadata{
+			Cert: synPayload.BZCert,
+			Exp:  exp,
+		}
 	case ksmsg.Data:
 		dataPayload := ksMessage.KeysplittingPayload.(ksmsg.DataPayload)
 
 		// Check BZCert matches one we have stored
-		if certMetadata, ok := k.bzCerts[dataPayload.BZCertHash]; !ok {
-			return fmt.Errorf("could not match BZCert hash to one previously received")
-		} else if time.Now().After(certMetadata.Exp) {
-			return fmt.Errorf("BZCert is expired")
-		} else {
+		certMetadata, ok := k.bzCerts[dataPayload.BZCertHash]
+		if !ok {
+			return fmt.Errorf("could not match DATA's BZCert hash to one previously received")
+		}
 
-			// Verify the Signature
-			if err := ksMessage.VerifySignature(certMetadata.Cert.ClientPublicKey); err != nil {
-				return err
-			}
+		// Verify the signature
+		if err := ksMessage.VerifySignature(certMetadata.Cert.ClientPublicKey); err != nil {
+			return err
+		}
+
+		// Check that BZCert isn't expired
+		if time.Now().After(certMetadata.Exp) {
+			return fmt.Errorf("DATA's referenced BZCert has expired")
 		}
 
 		// Verify received hash pointer matches expected
 		if dataPayload.HPointer != k.expectedHPointer {
-			return fmt.Errorf("data's hash pointer did not match expected")
+			return fmt.Errorf("DATA's hash pointer did not match expected hash pointer")
 		}
-
-		// Make sure targetId matches
-		// if dataPayload.TargetId != k.publickey {
-		// 	return fmt.Errorf("data's TargetId did not match Target's actual ID")
-		// }
 	default:
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}

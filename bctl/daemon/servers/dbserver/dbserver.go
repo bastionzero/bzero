@@ -45,6 +45,7 @@ type DbServer struct {
 	serviceUrl          string
 	refreshTokenCommand string
 	configPath          string
+	agentPubKey         string
 }
 
 func StartDbServer(logger *logger.Logger,
@@ -57,6 +58,7 @@ func StartDbServer(logger *logger.Logger,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
+	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
 	listener := &DbServer{
@@ -71,6 +73,7 @@ func StartDbServer(logger *logger.Logger,
 		localHost:           localHost,
 		remoteHost:          remoteHost,
 		remotePort:          remotePort,
+		agentPubKey:         agentPubKey,
 	}
 
 	// Create a new websocket
@@ -163,7 +166,7 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 	}
 
 	action = "db/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {
