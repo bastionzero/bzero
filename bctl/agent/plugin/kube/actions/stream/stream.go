@@ -192,10 +192,18 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 													Content:        content,
 												}
 												s.streamOutputChan <- message
+											} else {
+												s.logger.Errorf("error reading body of http request: %s", err)
 											}
+										} else {
+											s.logger.Errorf("error making making http request for log endpoint: %s", err)
 										}
+									} else {
+										s.logger.Errorf("error building log http request: %s", err)
 									}
 								}
+							} else {
+								s.logger.Errorf("error converting to url object: %s", err)
 							}
 						}
 					}
