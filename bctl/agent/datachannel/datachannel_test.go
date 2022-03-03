@@ -14,6 +14,7 @@
 package datachannel
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -116,6 +117,34 @@ func CreateOpenShellDataMsg() []byte {
 	return dataBytes
 }
 
+func CreateInputShellDataMsg() []byte {
+	dataActionPayload, err := json.Marshal(bzshell.ShellInputMessage{
+		Data: base64.StdEncoding.EncodeToString([]byte("e")),
+	})
+
+	if err != nil {
+		return nil
+	}
+
+	dataPayload := ksmsg.DataPayload{
+		Timestamp:     fmt.Sprint(time.Now().Unix()),
+		SchemaVersion: ksmsg.SchemaVersion,
+		Type:          string(ksmsg.Data),
+		Action:        "shell/input",
+		ActionPayload: dataActionPayload,
+		TargetId:      "currently unused",
+		BZCertHash:    "fake",
+	}
+
+	dataBytes, _ := json.Marshal(ksmsg.KeysplittingMessage{
+		Type:                ksmsg.Data,
+		KeysplittingPayload: dataPayload,
+		Signature:           "fake signature",
+	})
+
+	return dataBytes
+}
+
 func CreateAgentMessage(dataBytes []byte) am.AgentMessage {
 	agentMsg := am.AgentMessage{
 		ChannelId:      "fake",
@@ -157,9 +186,29 @@ func TestShelllDatachannel(t *testing.T) {
 	assert.Equal(t, len(ws.MsgsSent), 2)
 	assert.EqualValues(t, "keysplitting", ws.MsgsSent[1].MessageType)
 
-	var dataAckMsg ksmsg.KeysplittingMessage
-	err = json.Unmarshal(ws.MsgsSent[1].MessagePayload, &dataAckMsg)
+	var dataAckMsg1 ksmsg.KeysplittingMessage
+	err = json.Unmarshal(ws.MsgsSent[1].MessagePayload, &dataAckMsg1)
 	assert.Nil(t, err)
-	assert.EqualValues(t, ksmsg.DataAck, dataAckMsg.Type)
+	assert.EqualValues(t, ksmsg.DataAck, dataAckMsg1.Type)
 
+	dataBytes = CreateInputShellDataMsg()
+	agentMsg = CreateAgentMessage(dataBytes)
+
+	datachannel.processInput(agentMsg)
+
+	var dataAckMsg2 ksmsg.KeysplittingMessage
+	err = json.Unmarshal(ws.MsgsSent[2].MessagePayload, &dataAckMsg2)
+	assert.Nil(t, err)
+	assert.EqualValues(t, ksmsg.DataAck, dataAckMsg2.Type)
+
+}
+
+func TestShelllSimpleDeserialization(t *testing.T) {
+	actionPayloadSafe, _ := json.Marshal(
+		bzshell.ShellInputMessage{Data: base64.StdEncoding.EncodeToString([]byte("e"))})
+
+	var shellInput bzshell.ShellInputMessage
+
+	err := json.Unmarshal(actionPayloadSafe, &shellInput)
+	assert.Nil(t, err)
 }

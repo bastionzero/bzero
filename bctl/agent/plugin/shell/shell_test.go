@@ -55,9 +55,8 @@ func SpawnTerminal(t *testing.T, streamOutputChan chan smsg.StreamMessage) *Shel
 	var action = "shell/open"
 
 	openPayload, _ := json.Marshal(bzshell.ShellOpenMessage{})
-	b64payload := b64Encode(openPayload)
 
-	respstr, respbytes, err := plugin.Receive(action, b64payload)
+	respstr, respbytes, err := plugin.Receive(action, openPayload)
 
 	if err != nil {
 		t.Errorf("Shell start threw error: %v", err)
@@ -78,9 +77,8 @@ func SendResize(t *testing.T, plugin *ShellPlugin, rows uint32, cols uint32) {
 		Rows: rows,
 		Cols: cols,
 	})
-	b64payload := b64Encode(resizePayload)
 
-	respstr, respbytes, err := plugin.Receive(action, b64payload)
+	respstr, respbytes, err := plugin.Receive(action, resizePayload)
 	if err != nil {
 		t.Errorf("Shell input threw error: %v", err)
 	}
@@ -93,9 +91,8 @@ func SendReplay(t *testing.T, plugin *ShellPlugin) []byte {
 	action := "shell/replay"
 
 	replayPayload, _ := json.Marshal(bzshell.ShellReplayMessage{})
-	b64payload := b64Encode(replayPayload)
 
-	respstr, respbytes, err := plugin.Receive(action, b64payload)
+	respstr, respbytes, err := plugin.Receive(action, replayPayload)
 	if err != nil {
 		t.Errorf("Shell input threw error: %v", err)
 	}
@@ -110,9 +107,8 @@ func SendClose(t *testing.T, plugin *ShellPlugin) {
 	action := "shell/close"
 
 	closePayload, _ := json.Marshal(bzshell.ShellCloseMessage{})
-	b64payload := b64Encode(closePayload)
 
-	respstr, respbytes, err := plugin.Receive(action, b64payload)
+	respstr, respbytes, err := plugin.Receive(action, closePayload)
 	if err != nil {
 		t.Errorf("Shell input threw error: %v", err)
 	}
@@ -121,21 +117,14 @@ func SendClose(t *testing.T, plugin *ShellPlugin) {
 	assert.NotEmpty(t, respstr)
 }
 
-func b64Encode(b []byte) []byte {
-	// Adds quotes as the base64 encoded strings which receive gets over the data channel has quotes
-	return []byte("\"" + base64.StdEncoding.EncodeToString(b) + "\"")
-}
-
 func SendToStdIn(t *testing.T, plugin *ShellPlugin, stdinstr string) {
 	action := "shell/input"
 
-	b64input := base64.StdEncoding.EncodeToString([]byte(stdinstr))
 	inputPayload, _ := json.Marshal(bzshell.ShellInputMessage{
-		Data: b64input,
+		Data: base64.StdEncoding.EncodeToString([]byte(stdinstr)),
 	})
-	b64payload := b64Encode(inputPayload)
 
-	respstr, respbytes, err := plugin.Receive(action, b64payload)
+	respstr, respbytes, err := plugin.Receive(action, inputPayload)
 	if err != nil {
 		t.Errorf("Shell input threw error: %v", err)
 	}
@@ -241,10 +230,9 @@ func TestClose(t *testing.T) {
 	inputPayload, _ := json.Marshal(bzshell.ShellInputMessage{
 		Data: b64instr,
 	})
-	b64payload := b64Encode(inputPayload)
 
 	// Throw an error because the shell is now closed
-	_, _, err = plugin.Receive(action, b64payload)
+	_, _, err = plugin.Receive(action, inputPayload)
 	if err == nil {
 		t.Errorf("Error expected. shell/close should cause shell/input to fail")
 	}

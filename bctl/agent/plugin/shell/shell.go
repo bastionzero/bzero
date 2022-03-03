@@ -138,7 +138,7 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 		// We ignore the RunAsUser in the second Shell/Open message since it was set in the first one processed by .New.
 		//  This is important because the RunAsUser is part of policy and the policy check happens in the first Shell/Open message.
 		if err := k.open(); err != nil {
-			errorString := fmt.Errorf("unable to start shell: %s", err)
+			errorString := fmt.Errorf("Unable to start shell: %s", err)
 			k.logger.Error(errorString)
 			time.Sleep(2 * time.Second)
 			return "", []byte{}, errorString
