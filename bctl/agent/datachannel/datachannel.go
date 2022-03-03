@@ -85,6 +85,7 @@ func New(parentTmb *tomb.Tomb,
 				time.Sleep(10 * time.Second) // allow the datachannel to close gracefully TODO: Figure out a better way to gracefully die
 				return nil
 			case agentMessage := <-datachannel.inputChan: // receive messages
+				// Process each message in its own thread
 				go func() {
 					datachannel.processInput(agentMessage)
 				}()
