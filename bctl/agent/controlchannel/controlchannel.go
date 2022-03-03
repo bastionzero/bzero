@@ -99,9 +99,12 @@ func Start(logger *logger.Logger,
 				}
 				return nil
 			case agentMessage := <-control.inputChan:
-				if err := control.processInput(agentMessage); err != nil {
-					logger.Error(err)
-				}
+				// Process each message in its own thread
+				go func() {
+					if err := control.processInput(agentMessage); err != nil {
+						logger.Error(err)
+					}
+				}()
 			}
 		}
 	})
