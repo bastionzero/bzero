@@ -150,11 +150,9 @@ func Start(logger *logger.Logger,
 		for {
 			select {
 			case <-control.tmb.Dying():
-				// We need to close all open client connections if the control channel has been closed
 				logger.Info("Stopping alive check go function")
 				aliveCheckTicker.Stop()
 				return nil
-
 			}
 		}
 	})
