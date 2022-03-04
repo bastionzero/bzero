@@ -25,6 +25,7 @@ type wsMeta struct {
 	Client       *websocket.Websocket
 	DataChannels map[string]websocket.IChannel
 }
+
 type ControlChannel struct {
 	websocket *websocket.Websocket
 	logger    *logger.Logger
@@ -99,9 +100,12 @@ func Start(logger *logger.Logger,
 				}
 				return nil
 			case agentMessage := <-control.inputChan:
-				if err := control.processInput(agentMessage); err != nil {
-					logger.Error(err)
-				}
+				// Process each message in its own thread
+				go func() {
+					if err := control.processInput(agentMessage); err != nil {
+						logger.Error(err)
+					}
+				}()
 			}
 		}
 	})
@@ -120,7 +124,7 @@ func (c *ControlChannel) Receive(agentMessage am.AgentMessage) {
 
 // Wraps and sends the payload
 func (c *ControlChannel) send(messageType am.MessageType, messagePayload interface{}) error {
-	c.logger.Tracef("control channel is sending %s message", messageType)
+	c.logger.Debugf("control channel is sending %s message", messageType)
 	messageBytes, _ := json.Marshal(messagePayload)
 	agentMessage := am.AgentMessage{
 		ChannelId:      c.id,
