@@ -129,32 +129,22 @@ func Start(logger *logger.Logger,
 		logger.Infof("Starting alive check poller, running every %d seconds", aliveCheckInterval)
 
 		// Start a go function that will keep sending an alive check every so often
-		go func() {
-			for {
-				select {
-				case <-control.tmb.Dying():
-					return
-				case <-aliveCheckTicker.C:
-					// Check if we have sent a health check message in the past aliveCheckBastionPoll sec (i.e. if we missed the last poll event)
-					if control.lastHealthCheck.Before(time.Now().Add(-aliveCheckBastionPoll * time.Second)) {
-						// Send our alive check over the websocket
-						if msg, err := control.checkHealth(HealthCheckMessage{}); err != nil {
-							logger.Errorf("error processing health check message: %s", err)
-						} else {
-							control.send(am.HealthCheck, msg)
-						}
-					}
-				}
-			}
-		}()
-
-		// Listen to our tomb
 		for {
 			select {
 			case <-control.tmb.Dying():
 				logger.Info("Stopping alive check go function")
 				aliveCheckTicker.Stop()
 				return nil
+			case <-aliveCheckTicker.C:
+				// Check if we have sent a health check message in the past aliveCheckBastionPoll sec (i.e. if we missed the last poll event)
+				if control.lastHealthCheck.Before(time.Now().Add(-aliveCheckBastionPoll * time.Second)) {
+					// Send our alive check over the websocket
+					if msg, err := control.checkHealth(HealthCheckMessage{}); err != nil {
+						logger.Errorf("error processing health check message: %s", err)
+					} else {
+						control.send(am.HealthCheck, msg)
+					}
+				}
 			}
 		}
 	})
