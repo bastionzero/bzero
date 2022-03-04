@@ -264,11 +264,9 @@ func (c *ControlChannel) checkHealth(healthCheckMessage HealthCheckMessage) (Ali
 		return AliveCheckAgentToBastionMessage{}, err
 	}
 
-	// Update the vault value if we are receiving a message
-	if healthCheckMessage.TargetName != "" {
-		secretData.Data.TargetName = healthCheckMessage.TargetName
-		secretData.Save()
-	}
+	// Update the vault value
+	secretData.Data.TargetName = healthCheckMessage.TargetName
+	secretData.Save()
 
 	// Also let bastion know a list of valid cluster roles
 	// Create our api object
