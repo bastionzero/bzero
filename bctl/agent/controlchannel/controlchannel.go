@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
-	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/datachannel"
 	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
@@ -68,7 +67,6 @@ func Start(logger *logger.Logger,
 		serviceUrl:            serviceUrl,
 		dcTargetSelectHandler: targetSelectHandler,
 		targetType:            targetType,
-		lastHealthCheck:       time.Now().Add(time.Duration(100) * time.Minute),
 		inputChan:             make(chan am.AgentMessage, 25),
 		connections:           make(map[string]wsMeta),
 	}
