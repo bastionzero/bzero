@@ -234,7 +234,7 @@ func TestClose(t *testing.T) {
 	// Throw an error because the shell is now closed
 	_, _, err = plugin.Receive(action, inputPayload)
 	if err == nil {
-		t.Errorf("Error expected. shell/close should cause shell/input to fail")
+		t.Errorf("error expected. shell/close should cause shell/input to fail")
 	}
 }
 
@@ -252,10 +252,10 @@ func TestNoUserExistsErr(t *testing.T) {
 	})
 	plugin, err := New(&tmb, subLogger, streamOutputChan, synPayload)
 	if err != nil {
-		t.Errorf("Shell plugin new failed: %v", err.Error())
+		t.Errorf("shell plugin new failed: %v", err.Error())
 	}
 	if plugin == nil {
-		t.Errorf("Plugin is nil")
+		t.Errorf("plugin is nil")
 	}
 	var action = "shell/open"
 
@@ -264,5 +264,5 @@ func TestNoUserExistsErr(t *testing.T) {
 
 	_, _, err = plugin.Receive(action, b64payload)
 
-	assert.EqualError(t, err, "Unable to start shell: failed to start pty since RunAs user NoSuchUser does not exist")
+	assert.EqualError(t, err, "unable to start shell: failed to start pty since RunAs user NoSuchUser does not exist")
 }

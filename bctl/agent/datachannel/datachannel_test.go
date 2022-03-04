@@ -132,7 +132,7 @@ func CreateInputShellDataMsg() []byte {
 		Type:          string(ksmsg.Data),
 		Action:        "shell/input",
 		ActionPayload: dataActionPayload,
-		TargetId:      "currently unused",
+		TargetId:      "fake",
 		BZCertHash:    "fake",
 	}
 

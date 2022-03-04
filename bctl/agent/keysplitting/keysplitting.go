@@ -99,7 +99,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 		// Verify received hash pointer matches expected
 		if dataPayload.HPointer != k.expectedHPointer {
-			return fmt.Errorf("Data hash pointer did not match expected, got %v, expected %v", dataPayload.HPointer, k.expectedHPointer)
+			return fmt.Errorf("data hash pointer did not match expected, got %v, expected %v", dataPayload.HPointer, k.expectedHPointer)
 		}
 
 		// Make sure targetId matches

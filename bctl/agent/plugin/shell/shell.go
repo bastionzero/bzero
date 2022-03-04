@@ -117,20 +117,6 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 
 	shellAction := parsedAction[1]
 
-	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
-	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
-	// so that we can murder its family
-	// if len(actionPayload) > 0 {
-	// 	actionPayload = actionPayload[1 : len(actionPayload)-1]
-	// }
-
-	// Json unmarshalling encodes bytes in base64
-	// actionPayloadSafe, base64Err := base64.StdEncoding.DecodeString(string(actionPayload))
-	// if base64Err != nil {
-	// 	k.logger.Infof("actionpayload: %v", string(actionPayload))
-	// 	k.logger.Errorf("error decoding actionPayload: %v", base64Err)
-	// 	return "", []byte{}, base64Err
-	// }
 	actionPayloadSafe := []byte(string(actionPayload))
 
 	switch bzshell.ShellAction(shellAction) {
@@ -138,7 +124,7 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 		// We ignore the RunAsUser in the second Shell/Open message since it was set in the first one processed by .New.
 		//  This is important because the RunAsUser is part of policy and the policy check happens in the first Shell/Open message.
 		if err := k.open(); err != nil {
-			errorString := fmt.Errorf("Unable to start shell: %s", err)
+			errorString := fmt.Errorf("unable to start shell: %s", err)
 			k.logger.Error(errorString)
 			time.Sleep(2 * time.Second)
 			return "", []byte{}, errorString
@@ -226,6 +212,7 @@ func (k *ShellPlugin) open() error {
 	// Catch that the tomb is dying and signal shell to close
 	go func() {
 		<-k.tmb.Dying()
+		k.logger.Errorf("shell plugin is terminating")
 		if k.execCmd != nil {
 			if err := k.execCmd.Kill(); err != nil {
 				k.logger.Errorf("unable to terminate pty: %s", err)
@@ -313,7 +300,19 @@ func (k *ShellPlugin) writePump(logger *logger.Logger) int {
 
 	for {
 		stdoutBytesLen, err := reader.Read(stdoutBytes)
+
 		if err != nil {
+			message := smsg.StreamMessage{
+				Type:           string(smsg.ShellQuit),
+				RequestId:      "shell", // not needed for shell because we aren't multiplexing sessions over a shared data channel
+				SequenceNumber: sequenceNumber,
+				Content:        "",
+				LogId:          "", // only used for kube plugin
+			}
+
+			k.streamOutputChan <- message
+			sequenceNumber++
+
 			fmt.Println("WritePump failed when reading from stdout: \n", err)
 			logger.Errorf("Stacktrace:\n%s", debug.Stack())
 			return config.ErrorExitCode
@@ -326,7 +325,7 @@ func (k *ShellPlugin) writePump(logger *logger.Logger) int {
 		str := base64.StdEncoding.EncodeToString(stdoutBytes[:stdoutBytesLen])
 
 		message := smsg.StreamMessage{
-			Type:           string(smsg.StdOut),
+			Type:           string(smsg.ShellStdOut),
 			RequestId:      "shell", // not needed for shell because we aren't multiplexing sessions over a shared data channel
 			SequenceNumber: sequenceNumber,
 			Content:        str,
