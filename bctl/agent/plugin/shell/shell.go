@@ -66,9 +66,8 @@ import (
 //
 //		This should allow use to mock at the level of the ShellPlugin since none of the pty details are exposed
 type ShellPlugin struct {
-	tmb    *tomb.Tomb // datachannel's tomb
-	logger *logger.Logger
-	// name             string
+	tmb              *tomb.Tomb // datachannel's tomb
+	logger           *logger.Logger
 	stdin            *os.File
 	stdout           *os.File
 	execCmd          execcmd.IExecCmd
