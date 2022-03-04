@@ -27,14 +27,6 @@ type wsMeta struct {
 	DataChannels map[string]websocket.IChannel
 }
 
-const (
-	// The rate at which we should check if we missed a poll event
-	aliveCheckInterval = 15
-
-	// The rate at which bastion ill be polling the agent
-	aliveCheckBastionPoll = 20
-)
-
 type ControlChannel struct {
 	websocket *websocket.Websocket
 	logger    *logger.Logger
@@ -56,9 +48,6 @@ type ControlChannel struct {
 	// struct for keeping track of all connections key'ed with connectionId (websockets with associated datachannels)
 	connections     map[string]wsMeta
 	connectionsLock sync.Mutex
-
-	lastHealthCheck     time.Time
-	lastHealthCheckLock sync.Mutex
 
 	SocketLock sync.Mutex // Ref: https://github.com/gorilla/websocket/issues/119#issuecomment-198710015
 }
@@ -119,32 +108,6 @@ func Start(logger *logger.Logger,
 						logger.Error(err)
 					}
 				}()
-			}
-		}
-	})
-
-	// Setup a handler to deal with staying online
-	control.tmb.Go(func() error {
-		aliveCheckTicker := time.NewTicker(aliveCheckInterval * time.Second)
-		logger.Infof("Starting alive check poller, running every %d seconds", aliveCheckInterval)
-
-		// Start a go function that will keep sending an alive check every so often
-		for {
-			select {
-			case <-control.tmb.Dying():
-				logger.Info("Stopping alive check go function")
-				aliveCheckTicker.Stop()
-				return nil
-			case <-aliveCheckTicker.C:
-				// Check if we have sent a health check message in the past aliveCheckBastionPoll sec (i.e. if we missed the last poll event)
-				if control.lastHealthCheck.Before(time.Now().Add(-aliveCheckBastionPoll * time.Second)) {
-					// Send our alive check over the websocket
-					if msg, err := control.checkHealth(HealthCheckMessage{}); err != nil {
-						logger.Errorf("error processing health check message: %s", err)
-					} else {
-						control.send(am.HealthCheck, msg)
-					}
-				}
 			}
 		}
 	})
@@ -309,9 +272,6 @@ func (c *ControlChannel) checkHealth(healthCheckMessage HealthCheckMessage) (Ali
 		secretData.Save()
 	}
 
-	// Update the last health check message time
-	c.updateLastHealthCheck(time.Now())
-
 	// Also let bastion know a list of valid cluster roles
 	// Create our api object
 	if vault.InCluster() {
@@ -404,10 +364,4 @@ func (c *ControlChannel) getConnectionMap(id string) (wsMeta, bool) {
 	defer c.connectionsLock.Unlock()
 	meta, ok := c.connections[id]
 	return meta, ok
-}
-
-func (c *ControlChannel) updateLastHealthCheck(newTime time.Time) {
-	c.lastHealthCheckLock.Lock()
-	defer c.lastHealthCheckLock.Unlock()
-	c.lastHealthCheck = time.Now()
 }
