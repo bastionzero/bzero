@@ -1,6 +1,7 @@
 package datachannel
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -160,7 +161,7 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 	case am.Keysplitting:
 		var ksMessage ksmsg.KeysplittingMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
-			rerr := fmt.Errorf("malformed Keysplitting message")
+			rerr := fmt.Errorf("malformed Keysplitting message: %s", base64.StdEncoding.EncodeToString(agentMessage.MessagePayload))
 			d.sendError(rrr.KeysplittingValidationError, rerr)
 		} else {
 			d.handleKeysplittingMessage(&ksMessage)
