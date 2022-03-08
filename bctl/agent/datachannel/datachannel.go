@@ -171,18 +171,15 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 			d.sendError(rrr.KeysplittingExecutionError, rerr)
 			return
 		} else {
-			if d.plugin != nil { // Don't start plugin if there's already one started
-				rerr := fmt.Errorf("plugin already exists")
-				d.sendError(rrr.KeysplittingExecutionError, rerr)
-				return
+			if d.plugin == nil { // Don't start plugin if there's already one started
+				// Start plugin based on action
+				actionPrefix := parsedAction[0]
+				if err := d.startPlugin(plgn.PluginName(actionPrefix), synPayload.ActionPayload); err != nil {
+					d.sendError(rrr.ComponentStartupError, err)
+					return
+				}
 			}
 
-			// Start plugin based on action
-			actionPrefix := parsedAction[0]
-			if err := d.startPlugin(plgn.PluginName(actionPrefix), synPayload.ActionPayload); err != nil {
-				d.sendError(rrr.ComponentStartupError, err)
-				return
-			}
 			d.sendKeysplitting(keysplittingMessage, "", []byte{}) // empty payload
 		}
 	case ksmsg.Data:
