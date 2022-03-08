@@ -14,7 +14,7 @@
 package shell
 
 type ShellOpenMessage struct {
-	RunAsUser string `json:"runasuser"`
+	TargetUser string `json:"targetUser"`
 }
 
 type ShellCloseMessage struct{}

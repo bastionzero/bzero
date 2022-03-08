@@ -20,6 +20,9 @@ const (
 	StdOut StreamType = "kube/exec/stdout"
 	StdIn  StreamType = "kube/exec/stdin"
 
+	ShellStdOut StreamType = "shell/stdout"
+	ShellQuit   StreamType = "shell/quit"
+
 	LogOut StreamType = "kube/log/stdout"
 
 	PortForwardData  StreamType = "kube/portforward/data"
