@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -21,6 +21,7 @@ type WebDialSubAction string
 const (
 	WebDialStart  WebDialSubAction = "web/dial/start"
 	WebDialDataIn WebDialSubAction = "web/dial/datain"
+	chunkSize     int              = 32 * 1024
 )
 
 type WebDial struct {
@@ -143,42 +144,67 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 			header[key] = value
 		}
 
-		// Parse out the body
-		bodyBytes, readErr := ioutil.ReadAll(res.Body)
-		if readErr != nil {
-			w.logger.Errorf("bad read on response body: %s", err)
-			// Do not quit, just return the user the info regarding the api request
-			responsePayload = WebDataOutActionPayload{
-				StatusCode: http.StatusBadGateway,
-				RequestId:  dataIn.RequestId,
-				Headers:    map[string][]string{},
-				Content:    []byte{},
-			}
-		}
+		sequenceNumber := 0
+		buf := make([]byte, chunkSize)
 
-		// Now we need to send that data back to the client
-		responsePayload = WebDataOutActionPayload{
-			StatusCode: res.StatusCode,
-			RequestId:  dataIn.RequestId,
-			Headers:    header,
-			Content:    bodyBytes,
+		for {
+			numBytes, err := res.Body.Read(buf)
+			w.logger.Infof("err is %s, numBytes %d", err, numBytes)
+
+			if err != nil && err != io.EOF {
+				w.logger.Errorf("bad read on response body: %s", err)
+				// Do not quit, just return the user the info regarding the api request
+				responsePayload = WebDataOutActionPayload{
+					StatusCode: http.StatusBadGateway,
+					RequestId:  dataIn.RequestId,
+					Headers:    map[string][]string{},
+					Content:    []byte{},
+				}
+
+				w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, smsg.WebError)
+			}
+
+			if numBytes > 0 {
+				w.logger.Debugf("sending chunk of size %d. Sequence Number %d", numBytes, sequenceNumber)
+
+				// Now we need to send that data back to the client
+				responsePayload = WebDataOutActionPayload{
+					StatusCode: res.StatusCode,
+					RequestId:  dataIn.RequestId,
+					Headers:    header,
+					Content:    buf[:numBytes],
+				}
+
+				streamMessage := smsg.WebStream
+				if err == io.EOF {
+					streamMessage = smsg.WebStreamEnd
+				}
+
+				w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, streamMessage)
+			}
+
+			if err == io.EOF {
+				break
+			}
+
+			sequenceNumber += 1
 		}
 	}
 
-	responsePayloadBytes, _ := json.Marshal(responsePayload)
+	return "", []byte{}, nil
+}
 
-	// Now send this to bastion
+func (w *WebDial) sendWebDataStreamMessage(payload *WebDataOutActionPayload, sequenceNumber int, streamType smsg.StreamType) {
+	responsePayloadBytes, _ := json.Marshal(payload)
 	str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
 	message := smsg.StreamMessage{
-		Type:           string(smsg.WebOut),
+		Type:           string(streamType),
 		RequestId:      w.requestId,
-		SequenceNumber: 0, // Always just 1 sequence
+		SequenceNumber: sequenceNumber, // Always just 1 sequence
 		Content:        str,
 		LogId:          "", // No log id for web messages
 	}
 	w.streamOutputChan <- message
-
-	return "", []byte{}, nil
 }
 
 func (e *WebDial) startDial(dialActionRequest WebDialActionPayload, action string) (string, []byte, error) {

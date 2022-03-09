@@ -102,7 +102,12 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 		select {
 		case data := <-s.streamInputChan:
 			switch smsg.StreamType(data.Type) {
-			case smsg.WebOut:
+			case smsg.WebStream, smsg.WebStreamEnd:
+				flusher, ok := writer.(http.Flusher)
+				if !ok {
+					panic("expected http.ResponseWriter to be an http.Flusher")
+				}
+
 				contentBytes, base64Err := base64.StdEncoding.DecodeString(data.Content)
 				if base64Err != nil {
 					return base64Err
@@ -122,11 +127,16 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 					}
 				}
 
+				writer.Header().Set("X-Content-Type-Options", "nosniff")
+
 				// write response to user
 				writer.WriteHeader(response.StatusCode)
 				writer.Write(response.Content)
+				flusher.Flush() // Trigger "chunked" encoding and send a chunk...
 
-				return nil
+				if smsg.StreamType(data.Type) == smsg.WebStreamEnd {
+					return nil
+				}
 			default:
 				s.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
