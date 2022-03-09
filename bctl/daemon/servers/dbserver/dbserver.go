@@ -82,13 +82,6 @@ func StartDbServer(logger *logger.Logger,
 		return err
 	}
 
-	// Create a single datachannel for all of our db calls
-	if datachannel, err := listener.newDataChannel(string(bzdb.Dial), listener.websocket); err == nil {
-		listener.datachannel = datachannel
-	} else {
-		return err
-	}
-
 	// Now create our local listener for TCP connections
 	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
 	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
@@ -107,9 +100,6 @@ func StartDbServer(logger *logger.Logger,
 	// Always ensure we close the local tcp connection when we exit
 	defer localTcpListener.Close()
 
-	// Wait until the datachannel is ready, block here?
-	// TODO: This
-
 	// Block and keep listening for new tcp events
 	for {
 		conn, err := localTcpListener.AcceptTCP()
@@ -121,7 +111,6 @@ func StartDbServer(logger *logger.Logger,
 		logger.Infof("Accepting new tcp connection")
 		go func() {
 			if datachannel, err := listener.newDataChannel(string(bzdb.Dial), listener.websocket); err == nil {
-				// if datachannel, err := h.newDataChannel(bzdb.Dial, h.websocket); err == nil {
 				// Start the dial plugin
 				food := bzdb.DbFood{
 					Action: bzdb.Dial,
@@ -129,7 +118,6 @@ func StartDbServer(logger *logger.Logger,
 				}
 
 				datachannel.Feed(food)
-				logger.Info("HJERE?")
 			} else {
 				logger.Errorf("error starting datachannel: %s", err)
 			}
@@ -138,11 +126,6 @@ func StartDbServer(logger *logger.Logger,
 
 	}
 }
-
-// func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger) {
-
-// 	h.datachannel.Feed(food)
-// }
 
 // for creating new websockets
 func (h *DbServer) newWebsocket(wsId string) error {
@@ -200,11 +183,6 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 					}
 					h.websocket.Send(cdMessage)
 
-					// close our websocket if the datachannel we closed was the last
-					if h.websocket.SubscriberCount() == 0 {
-						h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
-					}
-					h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
 					return
 				}
 			}
