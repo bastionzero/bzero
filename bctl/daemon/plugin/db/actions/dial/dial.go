@@ -22,6 +22,8 @@ type DialAction struct {
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
 
+	closed bool
+
 	sequenceNumber  int
 	localConnection *net.TCPConn
 }
@@ -46,6 +48,7 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 	// this action ends at the end of this function, in order to signal that to the parent plugin,
 	// we close the output channel which will close the go routine listening on it
 	defer close(s.outputChan)
+	close := false
 
 	// Set our local connection
 	s.localConnection = lconn
@@ -79,7 +82,11 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				case smsg.DbAgentClose:
 					// The agent has closed the connection, close the local connection as well
 					s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-					lconn.Close()
+					if close != true {
+						lconn.Close()
+						close = true
+					}
+
 					return
 				default:
 					s.logger.Errorf("unhandled stream type: %s", data.Type)
@@ -96,18 +103,21 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 			// Tell the agent to stop the dial session
 			s.logger.Info("local tcp connection has been closed")
 
-			// Build the action payload
-			payload := dial.DialActionPayload{
-				RequestId: s.requestId,
+			if !close {
+				// Build the action payload
+				payload := dial.DialActionPayload{
+					RequestId: s.requestId,
+				}
+
+				// Send payload to plugin output queue
+				payloadBytes, _ := json.Marshal(payload)
+				s.outputChan <- plugin.ActionWrapper{
+					Action:        string(dial.DialEnd),
+					ActionPayload: payloadBytes,
+				}
+				lconn.Close()
 			}
 
-			// Send payload to plugin output queue
-			payloadBytes, _ := json.Marshal(payload)
-			s.outputChan <- plugin.ActionWrapper{
-				Action:        string(dial.DialEnd),
-				ActionPayload: payloadBytes,
-			}
-			lconn.Close()
 			return nil
 		}
 		if err != nil {
@@ -117,6 +127,8 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 		}
 
 		buff := tmp[:n]
+
+		s.logger.Infof("BYTES RECV CLIENT: %d", len(buff))
 
 		dataToSend := base64.StdEncoding.EncodeToString(buff)
 
@@ -136,6 +148,7 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 		s.sequenceNumber += 1
 	}
+
 }
 
 func (s *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {

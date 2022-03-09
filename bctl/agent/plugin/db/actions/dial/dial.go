@@ -82,11 +82,12 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			break
 		}
 
+		d.logger.Infof("BYTES RECV SERVER: %d", len(dataToWrite))
+
 		// Send this data to our remote connection
 		d.logger.Info("Received data from bastion, forwarding to remote tcp connection")
 		_, err = d.remoteConnection.Write(dataToWrite)
 	case dial.DialEnd:
-		d.logger.
 		// Deserialize the action payload, the only action passed is DataIn
 		var dataEnd dial.DialInputActionPayload
 		if err := json.Unmarshal(actionPayload, &dataEnd); err != nil {

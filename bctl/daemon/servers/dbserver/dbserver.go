@@ -121,6 +121,7 @@ func StartDbServer(logger *logger.Logger,
 		// Always generate a requestId, each new proxy connection is its own request
 		requestId := uuid.New().String()
 
+		logger.Infof("Accepting new tcp connection")
 		go listener.handleProxy(conn, logger, requestId)
 	}
 }
