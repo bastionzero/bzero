@@ -69,6 +69,7 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 			case data := <-s.streamInputChan:
 				switch smsg.StreamType(data.Type) {
 				case smsg.DbOut:
+					s.logger.Infof("SEQ NUMBER: %d", data.SequenceNumber)
 					contentBytes, _ := base64.StdEncoding.DecodeString(data.Content)
 
 					_, err := lconn.Write(contentBytes)
@@ -79,6 +80,7 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 					// The agent has closed the connection, close the local connection as well
 					s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
 					lconn.Close()
+					return
 				default:
 					s.logger.Errorf("unhandled stream type: %s", data.Type)
 				}
@@ -94,6 +96,18 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 			// Tell the agent to stop the dial session
 			s.logger.Info("local tcp connection has been closed")
 
+			// Build the action payload
+			payload := dial.DialActionPayload{
+				RequestId: s.requestId,
+			}
+
+			// Send payload to plugin output queue
+			payloadBytes, _ := json.Marshal(payload)
+			s.outputChan <- plugin.ActionWrapper{
+				Action:        string(dial.DialEnd),
+				ActionPayload: payloadBytes,
+			}
+			lconn.Close()
 			return nil
 		}
 		if err != nil {

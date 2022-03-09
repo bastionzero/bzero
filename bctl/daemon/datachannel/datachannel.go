@@ -373,6 +373,8 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 			d.Close(rerr)
 		}
 
+		d.logger.Infof("HERE ERROR: %s - %v", rerr, errMessage)
+
 		return rerr
 	}
 }

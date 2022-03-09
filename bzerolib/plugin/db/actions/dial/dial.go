@@ -5,6 +5,7 @@ type DialSubAction string
 const (
 	DialStart DialSubAction = "db/dial/start"
 	DialInput DialSubAction = "db/dial/input"
+	DialEnd   DialSubAction = "db/dial/end"
 )
 
 type DialActionPayload struct {

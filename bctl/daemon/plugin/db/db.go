@@ -116,8 +116,8 @@ func (k *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte
 	}
 
 	// No keysplitting data comes from dial plugins on the agent
-	k.logger.Errorf("keysplitting message received. This should not happen")
-	return nil
+	err := fmt.Errorf("keysplitting message received. This should not happen")
+	return err
 }
 
 func (k *DbDaemonPlugin) Feed(food interface{}) error {
