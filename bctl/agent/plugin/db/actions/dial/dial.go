@@ -126,7 +126,24 @@ func (d *Dial) startDial(dialActionRequest dial.DialActionPayload, action string
 	remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress)
 	if err != nil {
 		d.logger.Errorf("Failed to dial remote address: %s", err)
-		// Let the agent know that there was an error
+		// Let our daemon know that we have got the error and we need to close the connection
+		// message := smsg.StreamMessage{
+		// 	Type:           string(smsg.DbAgentClose),
+		// 	RequestId:      d.requestId,
+		// 	SequenceNumber: 0,
+		// 	Content:        "", // No content for dbAgent Close
+		// 	LogId:          "", // No log id for db messages
+		// }
+		// d.logger.Infof("HERE?: %s", d.streamOutputChan)
+		// d.streamOutputChan <- message
+		// d.logger.Infof("AFTER??: %s", d.streamOutputChan)
+
+		// // Ensure that we close the dial action
+		// d.closed = true
+
+		// // Close this connection
+		// // remoteConnection.Close()
+
 		return action, []byte{}, err
 	}
 

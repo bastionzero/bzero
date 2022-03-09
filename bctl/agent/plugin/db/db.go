@@ -127,7 +127,6 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 		case db.Dial:
 			// Create a new dbdial action
 			a, err := dial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
-			k.updateActionsMap(a, rid) // save action for later input
 
 			if err != nil {
 				rerr := fmt.Errorf("could not start new action object: %s", err)
@@ -142,6 +141,13 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 				return "", []byte{}, rerr
 			}
 			action, payload, err := a.Receive(action, actionPayloadSafe)
+
+			// The start dial action can cause the action to close initally
+			// (i.e. if there is nothing on the other end and we are unable to resolve that tcp addr)
+			if !a.Closed() {
+				k.updateActionsMap(a, rid) // save action for later input
+			}
+
 			return action, payload, err
 		default:
 			rerr := fmt.Errorf("unhandled db action: %v", action)

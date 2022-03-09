@@ -349,10 +349,13 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) error {
 
 func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 	var errMessage rrr.ErrorMessage
+	d.logger.Infof("HERE ERROR: %v", errMessage)
 	if err := json.Unmarshal(agentMessage.MessagePayload, &errMessage); err != nil {
+		d.logger.Infof("MALFORMED?")
 		return fmt.Errorf("malformed Error message")
 	} else {
 		rerr := fmt.Errorf("received error from agent: %s", errMessage.Message)
+		d.logger.Infof("HERE ERROR: %v", errMessage)
 
 		// Keysplitting validation errors are probably going to be mostly bzcert renewals and
 		// we don't want to break every time that happens so we need to get back on the ks train
@@ -367,9 +370,11 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 			// In order to get back on the keysplitting train, we need to resend the syn, get the synack
 			// so that our input message handler is pointing to the right thing.
 			if err := d.sendSyn(d.getOnDeck().Action); err != nil {
+				d.logger.Infof("HERE ERROR: %s - %v", err, errMessage)
 				return err
 			}
 		} else {
+			d.logger.Infof("HERE ERROR CLOSE?")
 			d.Close(rerr)
 		}
 

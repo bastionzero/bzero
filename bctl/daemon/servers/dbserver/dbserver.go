@@ -118,22 +118,31 @@ func StartDbServer(logger *logger.Logger,
 			continue
 		}
 
-		// Always generate a requestId, each new proxy connection is its own request
-		requestId := uuid.New().String()
-
 		logger.Infof("Accepting new tcp connection")
-		go listener.handleProxy(conn, logger, requestId)
+		go func() {
+			if datachannel, err := listener.newDataChannel(string(bzdb.Dial), listener.websocket); err == nil {
+				// if datachannel, err := h.newDataChannel(bzdb.Dial, h.websocket); err == nil {
+				// Start the dial plugin
+				food := bzdb.DbFood{
+					Action: bzdb.Dial,
+					Conn:   conn,
+				}
+
+				datachannel.Feed(food)
+				logger.Info("HJERE?")
+			} else {
+				logger.Errorf("error starting datachannel: %s", err)
+			}
+			// go listener.handleProxy(conn, logger)
+		}()
+
 	}
 }
 
-func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger, requestId string) {
-	// Start the dial plugin
-	food := bzdb.DbFood{
-		Action: bzdb.Dial,
-		Conn:   lconn,
-	}
-	h.datachannel.Feed(food)
-}
+// func (h *DbServer) handleProxy(lconn *net.TCPConn, logger *logger.Logger) {
+
+// 	h.datachannel.Feed(food)
+// }
 
 // for creating new websockets
 func (h *DbServer) newWebsocket(wsId string) error {
@@ -191,7 +200,10 @@ func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 					}
 					h.websocket.Send(cdMessage)
 
-					// close our websocket
+					// close our websocket if the datachannel we closed was the last
+					if h.websocket.SubscriberCount() == 0 {
+						h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
+					}
 					h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
 					return
 				}
