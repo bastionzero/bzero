@@ -47,7 +47,7 @@ func New(parentTmb *tomb.Tomb,
 	// Unmarshal the Syn payload
 	var actionPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &actionPayload); err != nil {
-		return nil, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
+		return nil, fmt.Errorf("malformed web plugin SYN payload %v", string(payload))
 	}
 
 	plugin := &WebPlugin{
@@ -82,7 +82,7 @@ func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte
 	// Json unmarshalling encodes bytes in base64
 	actionPayloadSafe, base64Err := base64.StdEncoding.DecodeString(string(actionPayload))
 	if base64Err != nil {
-		k.logger.Errorf("error decoding actionPayload: %v", base64Err)
+		k.logger.Errorf("error decoding actionPayload: %s", base64Err)
 		return "", []byte{}, base64Err
 	}
 
@@ -90,7 +90,7 @@ func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte
 	var justrid JustRequestId
 	var rid string
 	if err := json.Unmarshal(actionPayloadSafe, &justrid); err != nil {
-		return "", []byte{}, fmt.Errorf("could not unmarshal json: %v", err.Error())
+		return "", []byte{}, fmt.Errorf("could not unmarshal json: %s, payload: %s", err, string(actionPayloadSafe))
 	} else {
 		rid = justrid.RequestId
 	}

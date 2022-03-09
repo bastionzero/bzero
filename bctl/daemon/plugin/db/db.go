@@ -35,8 +35,6 @@ type DbDaemonPlugin struct {
 	actionMapLock sync.RWMutex // for keeping the action map thread-safe
 
 	// Db-specific vars
-	targetHost     string
-	targetPort     string
 	sequenceNumber int
 }
 
@@ -66,42 +64,42 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 	return &plugin, nil
 }
 
-func (k *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
-	k.logger.Debugf("Stream action received %v stream", smessage.Type)
-	k.streamInputChan <- smessage
+func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
+	d.logger.Debugf("Stream action received %v stream", smessage.Type)
+	d.streamInputChan <- smessage
 }
 
-func (k *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
+func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	// find action by requestid in map and push stream message to it
-	if act, ok := k.getActionsMap(smessage.RequestId); ok {
+	if act, ok := d.getActionsMap(smessage.RequestId); ok {
 		act.ReceiveStream(smessage)
 		return nil
 	}
 
-	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been compleated", smessage.RequestId)
-	k.logger.Error(rerr)
+	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
+	d.logger.Error(rerr)
 	return rerr
 }
 
-func (k *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
 	// First, process the incoming message
-	if err := k.processKeysplitting(action, actionPayload); err != nil {
+	if err := d.processKeysplitting(action, actionPayload); err != nil {
 		return "", []byte{}, err
 	}
 
 	// Now that we've received, we wait for any new outgoing commands.  Because the existence of any
 	// such command is dependent on the user, there may not be one waiting so we wait for it.
-	k.logger.Info("Waiting for input...")
+	d.logger.Info("Waiting for input...")
 
 	select {
-	case <-k.tmb.Dying():
+	case <-d.tmb.Dying():
 		return "", []byte{}, nil
-	case actionMessage := <-k.outputQueue: // some action's got something to say
-		k.logger.Infof("Sending input from action: %v", actionMessage.Action)
+	case actionMessage := <-d.outputQueue: // some action's got something to say
+		d.logger.Infof("Sending input from action: %v", actionMessage.Action)
 
 		// turn the actionPayload into bytes and return it
 		if actionPayloadBytes, err := json.Marshal(actionMessage.ActionPayload); err != nil {
-			k.logger.Infof("actionPayload: %+v", actionPayload)
+			d.logger.Infof("actionPayload: %+v", actionPayload)
 			return "", []byte{}, fmt.Errorf("could not marshal actionPayload json: %s", err)
 		} else {
 			return actionMessage.Action, actionPayloadBytes, nil
@@ -109,18 +107,18 @@ func (k *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte
 	}
 }
 
-func (k *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+func (d *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
 	// if actionPayload is empty, then there's nothing we need to process
 	if len(actionPayload) == 0 {
 		return nil
 	}
 
 	// No keysplitting data comes from dial plugins on the agent
-	k.logger.Errorf("keysplitting message received. This should not happen")
+	d.logger.Errorf("keysplitting message received. This should not happen")
 	return nil
 }
 
-func (k *DbDaemonPlugin) Feed(food interface{}) error {
+func (d *DbDaemonPlugin) Feed(food interface{}) error {
 	// Make sure our food matches the nutrition label
 	dbFood, ok := food.(bzdb.DbFood)
 	if !ok {
@@ -131,7 +129,7 @@ func (k *DbDaemonPlugin) Feed(food interface{}) error {
 	requestId := uuid.New().String()
 
 	// Create action logger
-	actLogger := k.logger.GetActionLogger(string(dbFood.Action))
+	actLogger := d.logger.GetActionLogger(string(dbFood.Action))
 	actLogger.AddRequestId(requestId)
 
 	var act IDbDaemonAction
@@ -142,59 +140,59 @@ func (k *DbDaemonPlugin) Feed(food interface{}) error {
 		act, actOutputChan = dial.New(actLogger, requestId)
 	default:
 		rerr := fmt.Errorf("unrecognized db action: %v", string(dbFood.Action))
-		k.logger.Error(rerr)
+		d.logger.Error(rerr)
 		return rerr
 	}
 
 	// add the action to the action map for future interaction
-	k.updateActionsMap(act, requestId)
+	d.updateActionsMap(act, requestId)
 
 	// listen to action output channel, remove action from map if channel is closed
 	go func() {
 		for {
 			select {
-			case <-k.tmb.Dying():
+			case <-d.tmb.Dying():
 				return
 			case m, more := <-actOutputChan:
 				if more {
-					k.outputQueue <- m
+					d.outputQueue <- m
 				} else {
-					k.deleteActionsMap(requestId)
+					d.deleteActionsMap(requestId)
 					return
 				}
 			}
 		}
 	}()
 
-	k.logger.Infof("Created %s action with requestId %v", string(dbFood.Action), requestId)
+	d.logger.Infof("Created %s action with requestId %v", string(dbFood.Action), requestId)
 
 	// send local tcp connection to action
-	if err := act.Start(k.tmb, dbFood.Conn); err != nil {
-		k.logger.Error(fmt.Errorf("%s error: %s", string(dbFood.Action), err))
+	if err := act.Start(d.tmb, dbFood.Conn); err != nil {
+		d.logger.Error(fmt.Errorf("%s error: %s", string(dbFood.Action), err))
 	}
 
 	return nil
 }
 
-func (k *DbDaemonPlugin) updateActionsMap(newAction IDbDaemonAction, id string) {
+func (d *DbDaemonPlugin) updateActionsMap(newAction IDbDaemonAction, id string) {
 	// Helper function so we avoid writing to this map at the same time
-	k.actionMapLock.Lock()
-	defer k.actionMapLock.Unlock()
+	d.actionMapLock.Lock()
+	defer d.actionMapLock.Unlock()
 
-	k.actions[id] = newAction
+	d.actions[id] = newAction
 }
 
-func (k *DbDaemonPlugin) deleteActionsMap(rid string) {
-	k.actionMapLock.Lock()
-	defer k.actionMapLock.Unlock()
+func (d *DbDaemonPlugin) deleteActionsMap(rid string) {
+	d.actionMapLock.Lock()
+	defer d.actionMapLock.Unlock()
 
-	delete(k.actions, rid)
+	delete(d.actions, rid)
 }
 
-func (k *DbDaemonPlugin) getActionsMap(rid string) (IDbDaemonAction, bool) {
-	k.actionMapLock.Lock()
-	defer k.actionMapLock.Unlock()
+func (d *DbDaemonPlugin) getActionsMap(rid string) (IDbDaemonAction, bool) {
+	d.actionMapLock.Lock()
+	defer d.actionMapLock.Unlock()
 
-	act, ok := k.actions[rid]
+	act, ok := d.actions[rid]
 	return act, ok
 }

@@ -8,20 +8,18 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"gopkg.in/tomb.v2"
 
+	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
-type WebDialSubAction string
-
 const (
-	WebDialStart  WebDialSubAction = "web/dial/start"
-	WebDialDataIn WebDialSubAction = "web/dial/datain"
-	chunkSize     int              = 32 * 1024
+	chunkSize = 32 * 1024
 )
 
 type WebDial struct {
@@ -36,6 +34,8 @@ type WebDial struct {
 	remotePort int
 
 	requestId string
+
+	interruptChan chan bool
 }
 
 func New(logger *logger.Logger,
@@ -51,42 +51,55 @@ func New(logger *logger.Logger,
 		streamOutputChan: ch,
 		remoteHost:       remoteHost,
 		remotePort:       remotePort,
+		interruptChan:    make(chan bool),
 	}, nil
 }
 
-func (s *WebDial) Closed() bool {
-	return s.closed
+func (w *WebDial) Closed() bool {
+	return w.closed
 }
 
-func (e *WebDial) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch WebDialSubAction(action) {
-	case WebDialStart:
+func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	var rerr error
+
+	switch bzwebdial.WebDialSubAction(action) {
+	case bzwebdial.WebDialStart:
 		var webDialActionRequest WebDialActionPayload
 		if err := json.Unmarshal(actionPayload, &webDialActionRequest); err != nil {
-			rerr := fmt.Errorf("malformed web dial Action payload %v", actionPayload)
-			e.logger.Error(rerr)
-			return action, []byte{}, rerr
+			rerr := fmt.Errorf("malformed web dial action payload: %s", actionPayload)
+			w.logger.Error(rerr)
+		} else {
+			return w.startDial(webDialActionRequest, action)
 		}
-
-		return e.startDial(webDialActionRequest, action)
-	case WebDialDataIn:
-		// Deserialize the action payload, the only action passed is DataIn
-		var dataIn WebDataInActionPayload
+	case bzwebdial.WebDialInput:
+		var dataIn WebInputActionPayload
 		if err := json.Unmarshal(actionPayload, &dataIn); err != nil {
-			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
-			e.logger.Error(rerr)
-			return "", []byte{}, rerr
+			rerr := fmt.Errorf("unable to unmarshal web dial input message: %s", err)
+			w.logger.Error(rerr)
+		} else {
+			return w.HandleNewHttpRequest(action, dataIn)
 		}
+	case bzwebdial.WebDialInterrupt:
+		w.interruptChan <- true
 
-		return e.HandleNewHttpRequest(action, dataIn)
+		// give our streamoutputchan time to process all the messages we sent while the interrupt was getting here
+		time.Sleep(2 * time.Second)
+
+		// this return payload tells the daemon to close the action on their side
+		returnPayload := bzwebdial.WebInterruptActionPayload{
+			RequestId: w.requestId,
+		}
+		responsePayloadBytes, _ := json.Marshal(returnPayload)
+		return action, responsePayloadBytes, nil
 	default:
 		rerr := fmt.Errorf("unhandled stream action: %v", action)
-		e.logger.Error(rerr)
-		return "", []byte{}, rerr
+		w.logger.Error(rerr)
 	}
+
+	return "", []byte{}, rerr
 }
 
-func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayload) (string, []byte, error) {
+func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPayload) (string, []byte, error) {
 	// First validate the requestId
 	if err := w.validateRequestId(dataIn.RequestId); err != nil {
 		return "", []byte{}, err
@@ -124,100 +137,114 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebDataInActionPayl
 		},
 	}
 	res, err := httpClient.Do(req)
-	var responsePayload WebDataOutActionPayload
+	var responsePayload WebOutputActionPayload
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		w.logger.Error(rerr)
 		// Do not quit, just return the user the info regarding the api request
-		responsePayload = WebDataOutActionPayload{
+		responsePayload = WebOutputActionPayload{
 			StatusCode: http.StatusBadGateway,
 			RequestId:  dataIn.RequestId,
 			Headers:    map[string][]string{},
 			Content:    []byte{},
 		}
 	} else {
-		defer res.Body.Close()
-
 		// Build the header response
 		header := make(map[string][]string)
 		for key, value := range res.Header {
 			header[key] = value
 		}
 
-		sequenceNumber := 0
-		buf := make([]byte, chunkSize)
+		// Make a routine to listen to interrupts
+		go func() {
+			defer res.Body.Close()
 
-		for {
-			numBytes, err := res.Body.Read(buf)
-			w.logger.Infof("err is %s, numBytes %d", err, numBytes)
+			sequenceNumber := 0
+			buf := make([]byte, chunkSize)
 
-			if err != nil && err != io.EOF {
-				w.logger.Errorf("bad read on response body: %s", err)
-				// Do not quit, just return the user the info regarding the api request
-				responsePayload = WebDataOutActionPayload{
-					StatusCode: http.StatusBadGateway,
-					RequestId:  dataIn.RequestId,
-					Headers:    map[string][]string{},
-					Content:    []byte{},
+			for {
+				select {
+				case <-w.tmb.Dying():
+					return
+				case <-w.interruptChan:
+					return
+				default:
+					numBytes, err := res.Body.Read(buf)
+
+					// check for error and if it's serious then report it
+					if err != nil && err != io.EOF {
+						w.logger.Errorf("bad read on response body: %s", err)
+
+						// Do not quit, just return the user the api request info
+						responsePayload = WebOutputActionPayload{
+							StatusCode: http.StatusBadGateway,
+							RequestId:  dataIn.RequestId,
+							Headers:    map[string][]string{},
+							Content:    []byte{},
+						}
+
+						w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, smsg.WebError)
+					}
+
+					// if we've got something to send, send it
+					if numBytes > 0 {
+						w.logger.Debugf("Building response for %d chunk of size %d", sequenceNumber, numBytes)
+
+						// Now we need to send that data back to the client
+						responsePayload = WebOutputActionPayload{
+							StatusCode: res.StatusCode,
+							RequestId:  dataIn.RequestId,
+							Headers:    header,
+							Content:    buf[:numBytes],
+						}
+
+						// if we got an io.EOF, this is the final message so let the daemon know
+						streamMessage := smsg.WebStream
+						if err == io.EOF {
+							streamMessage = smsg.WebStreamEnd
+						}
+
+						w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, streamMessage)
+					}
+
+					// we get io.EOFs on whichever buffer processes the final byte, not on the empty buffer
+					if err == io.EOF {
+						break
+					}
+
+					sequenceNumber += 1
 				}
-
-				w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, smsg.WebError)
 			}
-
-			if numBytes > 0 {
-				w.logger.Debugf("sending chunk of size %d. Sequence Number %d", numBytes, sequenceNumber)
-
-				// Now we need to send that data back to the client
-				responsePayload = WebDataOutActionPayload{
-					StatusCode: res.StatusCode,
-					RequestId:  dataIn.RequestId,
-					Headers:    header,
-					Content:    buf[:numBytes],
-				}
-
-				streamMessage := smsg.WebStream
-				if err == io.EOF {
-					streamMessage = smsg.WebStreamEnd
-				}
-
-				w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, streamMessage)
-			}
-
-			if err == io.EOF {
-				break
-			}
-
-			sequenceNumber += 1
-		}
+		}()
 	}
 
 	return "", []byte{}, nil
 }
 
-func (w *WebDial) sendWebDataStreamMessage(payload *WebDataOutActionPayload, sequenceNumber int, streamType smsg.StreamType) {
+func (w *WebDial) sendWebDataStreamMessage(payload *WebOutputActionPayload, sequenceNumber int, streamType smsg.StreamType) {
 	responsePayloadBytes, _ := json.Marshal(payload)
 	str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
 	message := smsg.StreamMessage{
 		Type:           string(streamType),
 		RequestId:      w.requestId,
-		SequenceNumber: sequenceNumber, // Always just 1 sequence
+		SequenceNumber: sequenceNumber,
 		Content:        str,
 		LogId:          "", // No log id for web messages
 	}
 	w.streamOutputChan <- message
 }
 
-func (e *WebDial) startDial(dialActionRequest WebDialActionPayload, action string) (string, []byte, error) {
+func (w *WebDial) startDial(dialActionRequest WebDialActionPayload, action string) (string, []byte, error) {
 	// Set our requestId
-	e.requestId = dialActionRequest.RequestId
+	w.requestId = dialActionRequest.RequestId
 
 	return action, []byte{}, nil
 }
 
-func (e *WebDial) validateRequestId(requestId string) error {
-	if requestId != e.requestId {
+func (w *WebDial) validateRequestId(requestId string) error {
+	if requestId != w.requestId {
 		rerr := fmt.Errorf("invalid request ID passed")
-		e.logger.Error(rerr)
+		w.logger.Error(rerr)
 		return rerr
 	}
 	return nil
