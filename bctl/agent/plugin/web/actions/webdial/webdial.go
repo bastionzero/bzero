@@ -83,6 +83,7 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 		w.interruptChan <- true
 
 		// give our streamoutputchan time to process all the messages we sent while the interrupt was getting here
+		// CWC-1588: We need to revisit the assumption of one plugin to many actions in order to solve this better
 		time.Sleep(2 * time.Second)
 
 		// this return payload tells the daemon to close the action on their side

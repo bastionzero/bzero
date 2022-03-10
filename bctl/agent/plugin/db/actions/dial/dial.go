@@ -106,6 +106,7 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 		d.closed = true // Ensure that we close the dial action
 
 		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
+		// CWC-1588: We need to revisit the assumption of one plugin to many actions in order to solve this better
 		time.Sleep(2 * time.Second)
 		return action, actionPayload, nil
 	default:
