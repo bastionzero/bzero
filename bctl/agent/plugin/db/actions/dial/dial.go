@@ -87,6 +87,7 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			// Send this data to our remote connection
 			d.logger.Info("Received data from daemon, forwarding to remote tcp connection")
 			_, err = d.remoteConnection.Write(dataToWrite)
+			break
 		}
 
 	case dial.DialStop:
