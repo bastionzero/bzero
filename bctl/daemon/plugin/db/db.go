@@ -13,6 +13,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
+	bzdial "bastionzero.com/bctl/v1/bzerolib/plugin/db/actions/dial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -108,14 +109,23 @@ func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte
 }
 
 func (d *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
-	// if actionPayload is empty, then there's nothing we need to process
-	if len(actionPayload) == 0 {
-		return nil
-	}
 
-	// No keysplitting data comes from dial plugins on the agent
-	err := fmt.Errorf("keysplitting message received. This should not happen")
-	return err
+	// currently the only keysplitting message we care about is the acknowledgement of our request for the agent to stop the dial action
+	if action == string(bzdial.DialStop) {
+		var dbStop bzdial.DialActionPayload
+		if err := json.Unmarshal(actionPayload, &dbStop); err != nil {
+			return fmt.Errorf("could not unmarshal json: %s", err)
+		} else {
+			if act, ok := d.getActionsMap(dbStop.RequestId); ok {
+				act.ReceiveKeysplitting(plugin.ActionWrapper{
+					Action:        action,
+					ActionPayload: actionPayload,
+				})
+				return nil
+			}
+		}
+	}
+	return nil
 }
 
 func (d *DbDaemonPlugin) Feed(food interface{}) error {
