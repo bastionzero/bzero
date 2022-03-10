@@ -14,6 +14,10 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
+const (
+	chunkSize = 64 * 1024
+)
+
 type DialAction struct {
 	logger    *logger.Logger
 	requestId string
@@ -22,8 +26,10 @@ type DialAction struct {
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
 
-	sequenceNumber  int
-	localConnection *net.TCPConn
+	closed bool
+
+	// this channel lets us communicate between our agent listener and our local tcp conn listener
+	doneChan chan bool
 }
 
 func New(logger *logger.Logger,
@@ -36,99 +42,112 @@ func New(logger *logger.Logger,
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
 
-		sequenceNumber: 0,
+		doneChan: make(chan bool),
 	}
 
 	return stream, stream.outputChan
 }
 
-func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
-	// this action ends at the end of this function, in order to signal that to the parent plugin,
-	// we close the output channel which will close the go routine listening on it
-	defer close(s.outputChan)
+func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
-	// Set our local connection
-	s.localConnection = lconn
-
-	// Build the action payload
+	// Build and send the action payload to start the tcp connection on the agent
 	payload := dial.DialActionPayload{
-		RequestId: s.requestId,
+		RequestId: d.requestId,
 	}
+	d.sendOutputMessage(dial.DialStart, payload)
 
-	// Send payload to plugin output queue
-	payloadBytes, _ := json.Marshal(payload)
-	s.outputChan <- plugin.ActionWrapper{
-		Action:        string(dial.DialStart),
-		ActionPayload: payloadBytes,
-	}
-
-	// Listen to stream messages coming from bastion, and forward to our local connection
+	// Listen to stream messages coming from the agent, and forward to our local connection
 	go func() {
+		defer lconn.Close()
+
 		for {
 			select {
-			case data := <-s.streamInputChan:
+			case <-tmb.Dying():
+				return
+			case <-d.doneChan:
+				return
+			case data := <-d.streamInputChan:
 				switch smsg.StreamType(data.Type) {
-				case smsg.DbOut:
-					contentBytes, _ := base64.StdEncoding.DecodeString(data.Content)
 
-					_, err := lconn.Write(contentBytes)
-					if err != nil {
-						s.logger.Errorf("write failed: %s", err)
+				case smsg.DbStream:
+					if contentBytes, err := base64.StdEncoding.DecodeString(data.Content); err != nil {
+						d.logger.Errorf("could not decode db stream content: %s", err)
+					} else if _, err := lconn.Write(contentBytes); err != nil {
+						d.logger.Errorf("failed to write to local tcp connection: %s", err)
 					}
-				case smsg.DbAgentClose:
+
+				case smsg.DbStreamEnd:
+
 					// The agent has closed the connection, close the local connection as well
-					s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-					lconn.Close()
+					d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
+					d.closed = true
+					return
+
 				default:
-					s.logger.Errorf("unhandled stream type: %s", data.Type)
+					d.logger.Errorf("unhandled stream type: %s", data.Type)
 				}
 			}
 		}
 	}()
 
-	// Keep looping till we hit EOF
-	tmp := make([]byte, 0xffff)
+	// listen to messages coming from the local tcp connection and sends them to the agent
+	buf := make([]byte, chunkSize)
+	sequenceNumber := 0
+
 	for {
-		n, err := lconn.Read(tmp)
-		if err == io.EOF {
-			// Tell the agent to stop the dial session
-			s.logger.Info("local tcp connection has been closed")
+		if n, err := lconn.Read(buf); err != nil {
+			// print our error message
+			if err == io.EOF {
+				d.logger.Info("local tcp connection has been closed")
+			} else {
+				d.logger.Errorf("error reading from local tcp connection: %s", err)
+			}
 
-			return nil
+			// let the agent know we need to stop
+			payload := dial.DialActionPayload{
+				RequestId: d.requestId,
+			}
+			d.sendOutputMessage(dial.DialStop, payload)
+
+			// tell our agent message listener to stop processing incoming stream messages
+			d.doneChan <- true
+			break
+		} else {
+			// Build and send whatever we get from the local tcp connection to the agent
+			dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
+			payload := dial.DialInputActionPayload{
+				RequestId:      d.requestId,
+				SequenceNumber: sequenceNumber,
+				Data:           dataToSend,
+			}
+			d.sendOutputMessage(dial.DialInput, payload)
+
+			sequenceNumber += 1
 		}
-		if err != nil {
-			s.logger.Errorf("Read failed '%s'\n", err)
-			// Tell the agent to stop the dial session
-			return nil
-		}
+	}
 
-		buff := tmp[:n]
+	return nil
+}
 
-		dataToSend := base64.StdEncoding.EncodeToString(buff)
+func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interface{}) {
+	// Send payload to plugin output queue
+	payloadBytes, _ := json.Marshal(payload)
+	d.outputChan <- plugin.ActionWrapper{
+		Action:        string(action),
+		ActionPayload: payloadBytes,
+	}
 
-		// Build the action payload
-		payload := dial.DialInputActionPayload{
-			RequestId:      s.requestId,
-			SequenceNumber: s.sequenceNumber,
-			Data:           dataToSend,
-		}
+}
 
-		// Send payload to plugin output queue
-		payloadBytes, _ := json.Marshal(payload)
-		s.outputChan <- plugin.ActionWrapper{
-			Action:        string(dial.DialInput),
-			ActionPayload: payloadBytes,
-		}
+func (d *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
+	if wrappedAction.Action == string(dial.DialStop) {
 
-		s.sequenceNumber += 1
+		// this signals to the parent plugin that we're done with the action
+		close(d.outputChan)
 	}
 }
 
-func (s *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	// We do not need to receive any keysplitting messages
-}
-
-func (s *DialAction) ReceiveStream(smessage smsg.StreamMessage) {
-	s.logger.Debugf("Stream action received %v stream", smessage.Type)
-	s.streamInputChan <- smessage
+func (d *DialAction) ReceiveStream(smessage smsg.StreamMessage) {
+	d.logger.Debugf("Stream action received %v stream", smessage.Type)
+	d.streamInputChan <- smessage
 }

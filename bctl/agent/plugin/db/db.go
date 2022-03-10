@@ -75,8 +75,8 @@ func New(parentTmb *tomb.Tomb,
 	return plugin, nil
 }
 
-func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	k.logger.Infof("Plugin received Data message with %v action", action)
+func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	d.logger.Infof("Plugin received Data message with %v action", action)
 
 	// parse action
 	parsedAction := strings.Split(action, "/")
@@ -95,7 +95,7 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 	// Json unmarshalling encodes bytes in base64
 	actionPayloadSafe, base64Err := base64.StdEncoding.DecodeString(string(actionPayload))
 	if base64Err != nil {
-		k.logger.Errorf("error decoding actionPayload: %v", base64Err)
+		d.logger.Errorf("error decoding actionPayload: %v", base64Err)
 		return "", []byte{}, base64Err
 	}
 
@@ -109,37 +109,43 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 	}
 
 	// Lookup if we already started an action for this requestId
-	if act, ok := k.getActionsMap(rid); ok {
+	if act, ok := d.getActionsMap(rid); ok {
 		// If we did, send the payload data to this action
 		action, payload, err := act.Receive(action, actionPayloadSafe)
 
 		// Check if that last message closed the action, if so delete from map
 		if act.Closed() {
-			k.deleteActionsMap(rid)
+			d.deleteActionsMap(rid)
 		}
 
 		return action, payload, err
 	} else {
-		subLogger := k.logger.GetActionLogger(action)
+		subLogger := d.logger.GetActionLogger(action)
 		subLogger.AddRequestId(rid)
 		switch db.DbAction(dbAction) {
 		case db.Dial:
 			// Create a new dbdial action
-			a, err := dial.New(subLogger, k.tmb, k.streamOutputChan, k.remoteAddress)
-			k.updateActionsMap(a, rid) // save action for later input
+			a, err := dial.New(subLogger, d.tmb, d.streamOutputChan, d.remoteAddress)
 
 			if err != nil {
 				rerr := fmt.Errorf("could not start new action object: %s", err)
-				k.logger.Error(rerr)
+				d.logger.Error(rerr)
 				return "", []byte{}, rerr
 			}
 
 			// Send the payload to the action and add it to the map for future incoming requests
 			action, payload, err := a.Receive(action, actionPayloadSafe)
+
+			// The start dial action can cause the action to close initally
+			// (i.e. if there is nothing on the other end and we are unable to resolve that tcp addr)
+			if !a.Closed() {
+				d.updateActionsMap(a, rid) // save action for later input
+			}
+
 			return action, payload, err
 		default:
 			rerr := fmt.Errorf("unhandled db action: %v", action)
-			k.logger.Error(rerr)
+			d.logger.Error(rerr)
 			return "", []byte{}, rerr
 		}
 	}
