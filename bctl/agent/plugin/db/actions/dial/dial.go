@@ -191,7 +191,6 @@ func (d *Dial) sendStreamMessage(streamType smsg.StreamType, sequenceNumber int,
 func (d *Dial) validateRequestId(requestId string) error {
 	if requestId != d.requestId {
 		rerr := fmt.Errorf("invalid request ID passed")
-		d.logger.Error(rerr)
 		return rerr
 	}
 	return nil
