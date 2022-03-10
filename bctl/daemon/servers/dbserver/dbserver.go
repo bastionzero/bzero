@@ -121,7 +121,6 @@ func StartDbServer(logger *logger.Logger,
 			} else {
 				logger.Errorf("error starting datachannel: %s", err)
 			}
-			// go listener.handleProxy(conn, logger)
 		}()
 
 	}
