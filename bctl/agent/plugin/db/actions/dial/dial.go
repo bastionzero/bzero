@@ -66,7 +66,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 
 		return d.start(dialActionRequest, action)
 	case dial.DialInput:
-
 		// Deserialize the action payload, the only action passed is input
 		var dbInput dial.DialInputActionPayload
 		if err = json.Unmarshal(actionPayload, &dbInput); err != nil {

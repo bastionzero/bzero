@@ -96,7 +96,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 	for {
 		if n, err := lconn.Read(buf); err != nil {
-
 			// print our error message
 			if err == io.EOF {
 				d.logger.Info("local tcp connection has been closed")
@@ -114,7 +113,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 			d.doneChan <- true
 			break
 		} else {
-
 			// Build and send whatever we get from the local tcp connection to the agent
 			dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
 			payload := dial.DialInputActionPayload{
