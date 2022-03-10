@@ -67,9 +67,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			err = fmt.Errorf("unable to unmarshal dial input message: %s", err)
 			break
 		}
-		d.logger.Infof("PASSED REQ ID: %s", dataIn.RequestId)
-		d.logger.Infof("SAVED REQ ID: %s", d.requestId)
-		d.logger.Infof("ACTION: %s", action)
 
 		// First validate the requestId
 		if err = d.validateRequestId(dataIn.RequestId); err != nil {
@@ -82,8 +79,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			break
 		}
 
-		d.logger.Infof("BYTES RECV SERVER: %d", len(dataToWrite))
-
 		// Send this data to our remote connection
 		d.logger.Info("Received data from bastion, forwarding to remote tcp connection")
 		_, err = d.remoteConnection.Write(dataToWrite)
@@ -94,9 +89,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			err = fmt.Errorf("unable to unmarshal dial input message: %s", err)
 			break
 		}
-		d.logger.Infof("PASSED REQ ID: %s", dataEnd.RequestId)
-		d.logger.Infof("SAVED REQ ID: %s", d.requestId)
-		d.logger.Infof("ACTION: %s", action)
 
 		// First validate the requestId
 		if err = d.validateRequestId(dataEnd.RequestId); err != nil {
@@ -126,24 +118,6 @@ func (d *Dial) startDial(dialActionRequest dial.DialActionPayload, action string
 	remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress)
 	if err != nil {
 		d.logger.Errorf("Failed to dial remote address: %s", err)
-		// Let our daemon know that we have got the error and we need to close the connection
-		// message := smsg.StreamMessage{
-		// 	Type:           string(smsg.DbAgentClose),
-		// 	RequestId:      d.requestId,
-		// 	SequenceNumber: 0,
-		// 	Content:        "", // No content for dbAgent Close
-		// 	LogId:          "", // No log id for db messages
-		// }
-		// d.logger.Infof("HERE?: %s", d.streamOutputChan)
-		// d.streamOutputChan <- message
-		// d.logger.Infof("AFTER??: %s", d.streamOutputChan)
-
-		// // Ensure that we close the dial action
-		// d.closed = true
-
-		// // Close this connection
-		// // remoteConnection.Close()
-
 		return action, []byte{}, err
 	}
 
@@ -159,7 +133,6 @@ func (d *Dial) startDial(dialActionRequest dial.DialActionPayload, action string
 				if err != io.EOF {
 					d.logger.Errorf("Read failed '%s'\n", err)
 				}
-				d.logger.Errorf("HERE RCON ERR: %s", err)
 
 				// Let our daemon know that we have got the error and we need to close the connection
 				message := smsg.StreamMessage{

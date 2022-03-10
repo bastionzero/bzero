@@ -11,7 +11,6 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/db/actions/dial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/db"
-	dial2 "bastionzero.com/bctl/v1/bzerolib/plugin/db/actions/dial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
@@ -135,11 +134,6 @@ func (k *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 			}
 
 			// Send the payload to the action and add it to the map for future incoming requests
-			if action != string(dial2.DialStart) {
-				k.logger.Infof("HERE WHY??? %s", action)
-				rerr := fmt.Errorf("unhandled db action: %v", action)
-				return "", []byte{}, rerr
-			}
 			action, payload, err := a.Receive(action, actionPayloadSafe)
 
 			// The start dial action can cause the action to close initally

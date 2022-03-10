@@ -72,7 +72,6 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 			case data := <-s.streamInputChan:
 				switch smsg.StreamType(data.Type) {
 				case smsg.DbOut:
-					s.logger.Infof("SEQ NUMBER: %d", data.SequenceNumber)
 					contentBytes, _ := base64.StdEncoding.DecodeString(data.Content)
 
 					_, err := lconn.Write(contentBytes)
@@ -82,7 +81,7 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				case smsg.DbAgentClose:
 					// The agent has closed the connection, close the local connection as well
 					s.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-					if close != true {
+					if !close {
 						lconn.Close()
 						close = true
 					}
@@ -127,8 +126,6 @@ func (s *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 		}
 
 		buff := tmp[:n]
-
-		s.logger.Infof("BYTES RECV CLIENT: %d", len(buff))
 
 		dataToSend := base64.StdEncoding.EncodeToString(buff)
 
