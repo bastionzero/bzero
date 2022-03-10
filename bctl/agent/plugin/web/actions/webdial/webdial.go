@@ -141,6 +141,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		w.logger.Error(rerr)
+
 		// Do not quit, just return the user the info regarding the api request
 		responsePayload = WebOutputActionPayload{
 			StatusCode: http.StatusBadGateway,
@@ -155,7 +156,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 			header[key] = value
 		}
 
-		// Make a routine to listen to interrupts
+		// Make a routine to read the response body and send chunks to the daemon
 		go func() {
 			defer res.Body.Close()
 
@@ -169,11 +170,14 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 				case <-w.interruptChan:
 					return
 				default:
+					// golang does the chunking for us, here. We just need to read from the body in the chunk size we want
+					// "The response body is streamed on demand as the Body field is read"
+					// ref: https://go.dev/src/net/http/response.go
 					numBytes, err := res.Body.Read(buf)
 
 					// check for error and if it's serious then report it
 					if err != nil && err != io.EOF {
-						w.logger.Errorf("bad read on response body: %s", err)
+						w.logger.Errorf("error reading response body: %s", err)
 
 						// Do not quit, just return the user the api request info
 						responsePayload = WebOutputActionPayload{
@@ -188,7 +192,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 
 					// if we've got something to send, send it
 					if numBytes > 0 {
-						w.logger.Debugf("Building response for %d chunk of size %d", sequenceNumber, numBytes)
+						w.logger.Debugf("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
 
 						// Now we need to send that data back to the client
 						responsePayload = WebOutputActionPayload{
@@ -207,7 +211,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 						w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, streamMessage)
 					}
 
-					// we get io.EOFs on whichever buffer processes the final byte, not on the empty buffer
+					// we get io.EOFs on whichever read call processes the final byte
 					if err == io.EOF {
 						break
 					}
