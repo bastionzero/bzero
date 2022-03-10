@@ -1,5 +1,13 @@
 package webdial
 
+type WebDialSubAction string
+
+const (
+	WebDialStart     WebDialSubAction = "web/dial/start"
+	WebDialInput     WebDialSubAction = "web/dial/datain"
+	WebDialInterrupt WebDialSubAction = "web/dial/interrupt"
+)
+
 type WebDialActionPayload struct {
 	RequestId string `json:"requestId"`
 }

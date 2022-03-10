@@ -28,7 +28,9 @@ const (
 	DbOut        StreamType = "db/dataout"
 	DbAgentClose StreamType = "db/agentClose"
 
-	WebOut StreamType = "web/dataout"
+	WebError     StreamType = "web/error"
+	WebStream    StreamType = "web/stream"
+	WebStreamEnd StreamType = "web/stream/end"
 
 	StreamData  StreamType = "kube/stream/stdout"
 	StreamStart StreamType = "kube/stream/start"

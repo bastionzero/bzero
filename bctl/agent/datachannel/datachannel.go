@@ -208,6 +208,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 		dataPayload := keysplittingMessage.KeysplittingPayload.(ksmsg.DataPayload)
 
 		// Send message to plugin and catch response action payload
+		// TODO: if we're ignoring the action we should really not be sending it up here
 		if _, returnPayload, err := d.plugin.Receive(dataPayload.Action, dataPayload.ActionPayload); err == nil {
 
 			// Build and send response
