@@ -114,13 +114,15 @@ func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byt
 }
 
 func (w *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
-	w.logger.Infof("action received at web plugin: %s", action)
 
+	// we only care about a single action right now
 	if action == string(bzwebdial.WebDialInterrupt) {
 		var webInterrupt bzwebdial.WebInterruptActionPayload
 		if err := json.Unmarshal(actionPayload, &webInterrupt); err != nil {
 			return fmt.Errorf("could not unmarshal json: %s", err)
 		} else {
+
+			// push the keysplitting message to the action
 			if act, ok := w.getActionsMap(webInterrupt.RequestId); ok {
 				act.ReceiveKeysplitting(plugin.ActionWrapper{
 					Action:        action,
@@ -130,13 +132,6 @@ func (w *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byt
 			}
 		}
 	}
-	// if actionPayload is empty, then there's nothing we need to process
-	if len(actionPayload) == 0 {
-		return nil
-	}
-
-	// No keysplitting data comes from dial plugins on the agent
-	w.logger.Errorf("keysplitting message received. This should not happen")
 	return nil
 }
 

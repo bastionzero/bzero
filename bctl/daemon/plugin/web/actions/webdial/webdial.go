@@ -46,24 +46,20 @@ func New(logger *logger.Logger,
 	return stream, stream.outputChan
 }
 
-func (s *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error {
-	// this action ends at the end of this function, in order to signal that to the parent plugin,
-	// we close the output channel which will close the go routine listening on it
-	defer close(s.outputChan)
-
+func (w *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error {
 	// Build the action payload to start the web action dial
 	payload := webdial.WebDialActionPayload{
-		RequestId: s.requestId,
+		RequestId: w.requestId,
 	}
 
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
-	s.outputChan <- plugin.ActionWrapper{
+	w.outputChan <- plugin.ActionWrapper{
 		Action:        string(bzwebdial.WebDialStart),
 		ActionPayload: payloadBytes,
 	}
 
-	return s.handleHttpRequest(Writer, Request)
+	return w.handleHttpRequest(Writer, Request)
 }
 
 func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
@@ -102,6 +98,9 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	headerSet := false
 	// Listen to stream messages coming from bastion, and forward to our local connection
 	for {
+		// this signals to the parent plugin that the action is done
+		defer close(w.outputChan)
+
 		select {
 		case <-w.doneChan:
 			return nil

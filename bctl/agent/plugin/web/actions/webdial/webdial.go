@@ -190,34 +190,31 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 						w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, smsg.WebError)
 					}
 
-					// if we've got something to send, send it
-					if numBytes > 0 {
-						w.logger.Debugf("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
+					w.logger.Debugf("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
 
-						// Now we need to send that data back to the client
-						responsePayload = WebOutputActionPayload{
-							StatusCode: res.StatusCode,
-							RequestId:  dataIn.RequestId,
-							Headers:    header,
-							Content:    buf[:numBytes],
-						}
-
-						// if we got an io.EOF, this is the final message so let the daemon know
-						streamMessage := smsg.WebStream
-						if err == io.EOF {
-							streamMessage = smsg.WebStreamEnd
-						}
-
-						w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, streamMessage)
+					// Now we need to send that data back to the client
+					responsePayload = WebOutputActionPayload{
+						StatusCode: res.StatusCode,
+						RequestId:  dataIn.RequestId,
+						Headers:    header,
+						Content:    buf[:numBytes],
 					}
 
-					// we get io.EOFs on whichever read call processes the final byte
+					// if we got an io.EOF, this is the final message so let the daemon know
+					streamMessage := smsg.WebStream
 					if err == io.EOF {
-						break
+						streamMessage = smsg.WebStreamEnd
 					}
 
-					sequenceNumber += 1
+					w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, streamMessage)
 				}
+
+				// we get io.EOFs on whichever read call processes the final byte
+				if err == io.EOF {
+					break
+				}
+
+				sequenceNumber += 1
 			}
 		}()
 	}
