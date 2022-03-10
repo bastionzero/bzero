@@ -10,14 +10,10 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 
 	"gopkg.in/tomb.v2"
-)
-
-const (
-	startDial  = "web/dial/start"
-	dialDataIn = "web/dial/datain"
 )
 
 type WebDialAction struct {
@@ -28,6 +24,9 @@ type WebDialAction struct {
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
+
+	// done chan to return our main function once our interrupt is acknowledged
+	doneChan chan bool
 }
 
 func New(logger *logger.Logger,
@@ -40,32 +39,30 @@ func New(logger *logger.Logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 10),
+
+		doneChan: make(chan bool),
 	}
 
 	return stream, stream.outputChan
 }
 
-func (s *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error {
-	// this action ends at the end of this function, in order to signal that to the parent plugin,
-	// we close the output channel which will close the go routine listening on it
-	defer close(s.outputChan)
-
+func (w *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error {
 	// Build the action payload to start the web action dial
 	payload := webdial.WebDialActionPayload{
-		RequestId: s.requestId,
+		RequestId: w.requestId,
 	}
 
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
-	s.outputChan <- plugin.ActionWrapper{
-		Action:        startDial,
+	w.outputChan <- plugin.ActionWrapper{
+		Action:        string(bzwebdial.WebDialStart),
 		ActionPayload: payloadBytes,
 	}
 
-	return s.handleHttpRequest(Writer, Request)
+	return w.handleHttpRequest(Writer, Request)
 }
 
-func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
+func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
 	// First modify the host header to reflect what we are trying to connect too
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
 	request.Header.Set("X-Forwarded-Host", request.Host)
@@ -76,13 +73,13 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	// Now extract the body
 	bodyInBytes, err := bzhttp.GetBodyBytes(request.Body)
 	if err != nil {
-		s.logger.Error(err)
+		w.logger.Error(err)
 		return err
 	}
 
 	// Build the action payload
-	dataInPayload := webdial.WebDataInActionPayload{
-		RequestId:      s.requestId,
+	dataInPayload := webdial.WebInputActionPayload{
+		RequestId:      w.requestId,
 		SequenceNumber: 0, // currently do not implement sequence number
 		Endpoint:       request.URL.String(),
 		Headers:        headers,
@@ -92,26 +89,61 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 	// Send payload to plugin output queue
 	dataInPayloadBytes, _ := json.Marshal(dataInPayload)
-	s.outputChan <- plugin.ActionWrapper{
-		Action:        dialDataIn,
+	w.outputChan <- plugin.ActionWrapper{
+		Action:        string(bzwebdial.WebDialInput),
 		ActionPayload: dataInPayloadBytes,
 	}
 
+	processInput := true
+	headerSet := false
 	// Listen to stream messages coming from bastion, and forward to our local connection
 	for {
+		// this signals to the parent plugin that the action is done
+		defer close(w.outputChan)
+
 		select {
-		case data := <-s.streamInputChan:
+		case <-w.doneChan:
+			return nil
+		case <-request.Context().Done():
+			// only send one interrupt message to the agent
+			if !processInput {
+				continue
+			}
+
+			w.logger.Infof("Sending interrupt signal to agent")
+
+			returnPayload := bzwebdial.WebInterruptActionPayload{
+				RequestId: w.requestId,
+			}
+			payloadBytes, _ := json.Marshal(returnPayload)
+
+			// send the agent our interrupt message
+			w.outputChan <- plugin.ActionWrapper{
+				Action:        string(bzwebdial.WebDialInterrupt),
+				ActionPayload: payloadBytes,
+			}
+
+			// now that we've recieved the interrupt, we should process any more stream message from the agent
+			// but the agent has been sending us messages in the meantime and we need to quietly consume and ignore those
+			// that's why we stop processing input (processInput = false) and only return once we recieve the ack
+			// for our interrupt message
+			processInput = false
+		case data := <-w.streamInputChan:
+			if !processInput {
+				continue
+			}
+
 			switch smsg.StreamType(data.Type) {
-			case smsg.WebOut:
+			case smsg.WebStream, smsg.WebStreamEnd:
 				contentBytes, base64Err := base64.StdEncoding.DecodeString(data.Content)
 				if base64Err != nil {
 					return base64Err
 				}
 
-				var response webdial.WebDataOutActionPayload
+				var response webdial.WebOutputActionPayload
 				if err := json.Unmarshal(contentBytes, &response); err != nil {
 					rerr := fmt.Errorf("could not unmarshal Action Response Payload: %s", err)
-					s.logger.Error(rerr)
+					w.logger.Error(rerr)
 					return err
 				}
 
@@ -122,23 +154,34 @@ func (s *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 					}
 				}
 
+				// we should only set this header once
+				// ref: https://stackoverflow.com/questions/57828645/how-to-handle-superfluous-response-writeheader-call-in-order-to-return-500
+				if !headerSet {
+					writer.WriteHeader(response.StatusCode)
+					headerSet = true
+				}
+
 				// write response to user
-				writer.WriteHeader(response.StatusCode)
 				writer.Write(response.Content)
 
-				return nil
+				// if this is our last stream message, then we can return
+				if smsg.StreamType(data.Type) == smsg.WebStreamEnd {
+					return nil
+				}
 			default:
-				s.logger.Errorf("unhandled stream type: %s", data.Type)
+				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}
 	}
 }
 
-func (s *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	// We dont get any keysplitting messages
+func (w *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
+	if wrappedAction.Action == string(bzwebdial.WebDialInterrupt) {
+		w.doneChan <- true
+	}
 }
 
-func (s *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {
-	s.logger.Debugf("Stream action received %v stream", smessage.Type)
-	s.streamInputChan <- smessage
+func (w *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {
+	w.logger.Debugf("Stream action received %v stream", smessage.Type)
+	w.streamInputChan <- smessage
 }

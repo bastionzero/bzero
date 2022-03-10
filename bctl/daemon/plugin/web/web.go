@@ -14,6 +14,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
+	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -81,7 +82,7 @@ func (k *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 		return nil
 	}
 
-	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been compleated", smessage.RequestId)
+	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
 	k.logger.Error(rerr)
 	return rerr
 }
@@ -112,18 +113,29 @@ func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byt
 	}
 }
 
-func (k *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
-	// if actionPayload is empty, then there's nothing we need to process
-	if len(actionPayload) == 0 {
-		return nil
-	}
+func (w *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
 
-	// No keysplitting data comes from dial plugins on the agent
-	k.logger.Errorf("keysplitting message received. This should not happen")
+	// we only care about a single action right now
+	if action == string(bzwebdial.WebDialInterrupt) {
+		var webInterrupt bzwebdial.WebInterruptActionPayload
+		if err := json.Unmarshal(actionPayload, &webInterrupt); err != nil {
+			return fmt.Errorf("could not unmarshal json: %s", err)
+		} else {
+
+			// push the keysplitting message to the action
+			if act, ok := w.getActionsMap(webInterrupt.RequestId); ok {
+				act.ReceiveKeysplitting(plugin.ActionWrapper{
+					Action:        action,
+					ActionPayload: actionPayload,
+				})
+				return nil
+			}
+		}
+	}
 	return nil
 }
 
-func (k *WebDaemonPlugin) Feed(food interface{}) error {
+func (w *WebDaemonPlugin) Feed(food interface{}) error {
 	// Make sure food matches what it says on the label
 	webFood, ok := food.(bzweb.WebFood)
 	if !ok {
@@ -133,7 +145,7 @@ func (k *WebDaemonPlugin) Feed(food interface{}) error {
 	requestId := uuid.New().String()
 
 	// Create action logger
-	actLogger := k.logger.GetActionLogger(string(webFood.Action))
+	actLogger := w.logger.GetActionLogger(string(webFood.Action))
 	actLogger.AddRequestId(requestId)
 
 	var act IWebDaemonAction
@@ -146,35 +158,35 @@ func (k *WebDaemonPlugin) Feed(food interface{}) error {
 		act, actOutputChan = webwebsocket.New(actLogger, requestId)
 	default:
 		rerr := fmt.Errorf("unrecognized web action: %v", string(webFood.Action))
-		k.logger.Error(rerr)
+		w.logger.Error(rerr)
 		return rerr
 	}
 
 	// add the action to the action map for future interaction
-	k.updateActionsMap(act, requestId)
+	w.updateActionsMap(act, requestId)
 
 	// listen to action output channel, remove action from map if channel is closed
 	go func() {
 		for {
 			select {
-			case <-k.tmb.Dying():
+			case <-w.tmb.Dying():
 				return
 			case m, more := <-actOutputChan:
 				if more {
-					k.outputQueue <- m
+					w.outputQueue <- m
 				} else {
-					k.deleteActionsMap(requestId)
+					w.deleteActionsMap(requestId)
 					return
 				}
 			}
 		}
 	}()
 
-	k.logger.Infof("Created %s action with requestId %v", string(webFood.Action), requestId)
+	w.logger.Infof("Created %s action with requestId %v", string(webFood.Action), requestId)
 
 	// send local tcp connection to action
-	if err := act.Start(k.tmb, webFood.Writer, webFood.Request); err != nil {
-		k.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
+	if err := act.Start(w.tmb, webFood.Writer, webFood.Request); err != nil {
+		w.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
 	}
 
 	return nil
