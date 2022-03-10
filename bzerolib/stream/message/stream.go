@@ -25,8 +25,8 @@ const (
 	PortForwardData  StreamType = "kube/portforward/data"
 	PortForwardError StreamType = "kube/portforward/error"
 
-	DbStream    StreamType = "db/stream"
-	DbStreamEnd StreamType = "db/stream/end"
+	DbStream    StreamType = "db/dataout"
+	DbStreamEnd StreamType = "db/agentClose"
 
 	WebError     StreamType = "web/error"
 	WebStream    StreamType = "web/stream"
