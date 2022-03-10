@@ -68,18 +68,21 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				return
 			case data := <-d.streamInputChan:
 				switch smsg.StreamType(data.Type) {
+
 				case smsg.DbStream:
 					if contentBytes, err := base64.StdEncoding.DecodeString(data.Content); err != nil {
 						d.logger.Errorf("could not decode db stream content: %s", err)
 					} else if _, err := lconn.Write(contentBytes); err != nil {
 						d.logger.Errorf("failed to write to local tcp connection: %s", err)
 					}
+
 				case smsg.DbStreamEnd:
 
 					// The agent has closed the connection, close the local connection as well
 					d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
 					d.closed = true
 					return
+
 				default:
 					d.logger.Errorf("unhandled stream type: %s", data.Type)
 				}
@@ -87,50 +90,43 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 		}
 	}()
 
-	go func() {
-		<-tmb.Dying()
-		lconn.Close()
-	}()
-
 	// listen to messages coming from the local tcp connection and sends them to the agent
-	go func() {
-		buf := make([]byte, chunkSize)
-		sequenceNumber := 0
+	buf := make([]byte, chunkSize)
+	sequenceNumber := 0
 
-		for {
-			if n, err := lconn.Read(buf); err != nil {
+	for {
+		if n, err := lconn.Read(buf); err != nil {
 
-				// print our error message
-				if err == io.EOF {
-					d.logger.Info("local tcp connection has been closed")
-				} else {
-					d.logger.Errorf("error reading from local tcp connection: %s", err)
-				}
-
-				// let the agent know we need to stop
-				payload := dial.DialActionPayload{
-					RequestId: d.requestId,
-				}
-				d.sendOutputMessage(dial.DialStop, payload)
-
-				// tell our agent message listener to stop listening and processing incoming streams
-				d.doneChan <- true
-				return
+			// print our error message
+			if err == io.EOF {
+				d.logger.Info("local tcp connection has been closed")
 			} else {
-
-				// Build and send whatever we get from the local tcp connection to the agent
-				dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
-				payload := dial.DialInputActionPayload{
-					RequestId:      d.requestId,
-					SequenceNumber: sequenceNumber,
-					Data:           dataToSend,
-				}
-				d.sendOutputMessage(dial.DialInput, payload)
-
-				sequenceNumber += 1
+				d.logger.Errorf("error reading from local tcp connection: %s", err)
 			}
+
+			// let the agent know we need to stop
+			payload := dial.DialActionPayload{
+				RequestId: d.requestId,
+			}
+			d.sendOutputMessage(dial.DialStop, payload)
+
+			// tell our agent message listener to stop processing incoming stream messages
+			d.doneChan <- true
+			break
+		} else {
+
+			// Build and send whatever we get from the local tcp connection to the agent
+			dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
+			payload := dial.DialInputActionPayload{
+				RequestId:      d.requestId,
+				SequenceNumber: sequenceNumber,
+				Data:           dataToSend,
+			}
+			d.sendOutputMessage(dial.DialInput, payload)
+
+			sequenceNumber += 1
 		}
-	}()
+	}
 
 	return nil
 }

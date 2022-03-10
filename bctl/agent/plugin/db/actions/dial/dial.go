@@ -91,21 +91,10 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 		}
 
 	case dial.DialStop:
-		d.remoteConnection.Close()
-		d.closed = true
-
-		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
-		time.Sleep(2 * time.Second)
-
-		// Send this data to our remote connection
-		d.logger.Info("Received data from bastion, forwarding to remote tcp connection")
-		_, err = d.remoteConnection.Write(dataToWrite)
-
-	case dial.DialEnd:
 		// Deserialize the action payload, the only action passed is DataIn
 		var dataEnd dial.DialInputActionPayload
-		if err := json.Unmarshal(actionPayload, &dataEnd); err != nil {
-			err = fmt.Errorf("unable to unmarshal dial input message: %s", err)
+		if jerr := json.Unmarshal(actionPayload, &dataEnd); jerr != nil {
+			err = fmt.Errorf("unable to unmarshal dial input message: %s", jerr)
 			break
 		}
 
@@ -114,11 +103,12 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			break
 		}
 
-		// Close the remote connection
-		err = d.remoteConnection.Close()
+		d.remoteConnection.Close()
+		d.closed = true // Ensure that we close the dial action
 
-		// Ensure that we close the dial action
-		d.closed = true
+		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
+		time.Sleep(2 * time.Second)
+		return action, actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %v", action)
 	}
