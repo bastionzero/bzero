@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	chunkSize = 32 * 1024
+	chunkSize = 64 * 1024
 )
 
 type WebDial struct {
