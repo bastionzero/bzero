@@ -227,7 +227,7 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	// create channel and listener and pass it to the new plugin
-	streamOutputChan := make(chan smsg.StreamMessage, 20)
+	streamOutputChan := make(chan smsg.StreamMessage, 30)
 	go func() {
 		for {
 			select {

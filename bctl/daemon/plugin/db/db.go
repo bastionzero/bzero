@@ -66,14 +66,16 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 }
 
 func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
-	d.logger.Debugf("Stream action received %v stream", smessage.Type)
+	d.logger.Debugf("db plugin received %v stream", smessage.Type)
 	d.streamInputChan <- smessage
 }
 
 func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	// find action by requestid in map and push stream message to it
 	if act, ok := d.getActionsMap(smessage.RequestId); ok {
+		d.logger.Infof("BLOCKED HERE?")
 		act.ReceiveStream(smessage)
+		d.logger.Infof("NO")
 		return nil
 	}
 
@@ -83,6 +85,7 @@ func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 }
 
 func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+	d.logger.Infof("Received a keysplitting message with action: %s", action)
 	// First, process the incoming message
 	if err := d.processKeysplitting(action, actionPayload); err != nil {
 		return "", []byte{}, err
@@ -109,6 +112,7 @@ func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte
 }
 
 func (d *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+	d.logger.Infof("WE GOT SOMETHING")
 
 	// currently the only keysplitting message we care about is the acknowledgement of our request for the agent to stop the dial action
 	if action == string(bzdial.DialStop) {
@@ -167,6 +171,7 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 				if more {
 					d.outputQueue <- m
 				} else {
+					d.logger.Infof("CLOSING ACTION ON DAEMON")
 					d.deleteActionsMap(requestId)
 					return
 				}

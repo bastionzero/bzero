@@ -37,8 +37,8 @@ func New(logger *logger.Logger,
 
 		requestId: requestId,
 
-		outputChan:      make(chan plugin.ActionWrapper, 10),
-		streamInputChan: make(chan smsg.StreamMessage, 10),
+		outputChan:      make(chan plugin.ActionWrapper, 50),
+		streamInputChan: make(chan smsg.StreamMessage, 50),
 
 		doneChan: make(chan bool),
 	}
@@ -182,6 +182,6 @@ func (w *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) 
 }
 
 func (w *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {
-	w.logger.Debugf("Stream action received %v stream", smessage.Type)
+	w.logger.Debugf("web dial action received %v stream", smessage.Type)
 	w.streamInputChan <- smessage
 }

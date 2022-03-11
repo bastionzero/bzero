@@ -247,7 +247,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 					return fmt.Errorf("agent does not have a datachannel with id: %s", cdRequest.DataChannelId)
 				}
 			} else {
-				return fmt.Errorf("agent does not have a websocket with id: %s", cdRequest.ConnectionId)
+				return fmt.Errorf("agent does not have a datachannel with id: %s", cdRequest.DataChannelId)
 			}
 		}
 	default:

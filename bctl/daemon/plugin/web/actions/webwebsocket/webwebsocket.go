@@ -173,6 +173,6 @@ func (s *WebWebsocketAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrap
 }
 
 func (s *WebWebsocketAction) ReceiveStream(smessage smsg.StreamMessage) {
-	s.logger.Debugf("Stream action received %v stream", smessage.Type)
+	s.logger.Debugf("web websocket action received %v stream", smessage.Type)
 	s.streamInputChan <- smessage
 }

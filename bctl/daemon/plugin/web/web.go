@@ -71,7 +71,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActi
 }
 
 func (k *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
-	k.logger.Debugf("Stream action received %v stream", smessage.Type)
+	k.logger.Debugf("Web dial action received %v stream", smessage.Type)
 	k.streamInputChan <- smessage
 }
 
