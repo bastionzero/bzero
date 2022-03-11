@@ -44,7 +44,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 		tmb:             parentTmb,
 		logger:          logger,
 		streamInputChan: make(chan smsg.StreamMessage, 25),
-		outputQueue:     make(chan plugin.ActionWrapper, 25),
+		outputQueue:     make(chan plugin.ActionWrapper, 100),
 		actions:         make(map[string]IDbDaemonAction),
 		sequenceNumber:  0,
 	}

@@ -153,15 +153,17 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 				if err != io.EOF {
 					d.logger.Errorf("failed to read from tcp connection: %s", err)
 				}
+				if !d.closed {
+					// Let our daemon know that we have got the error and we need to close the connection
+					d.sendStreamMessage(smsg.DbStreamEnd, sequenceNumber, "")
 
-				// Let our daemon know that we have got the error and we need to close the connection
-				d.sendStreamMessage(smsg.DbStreamEnd, sequenceNumber, "")
-
-				// Ensure that we close the dial action
-				d.closed = true
+					// Ensure that we close the dial action
+					d.closed = true
+				}
 
 				// Close this connection
 				remoteConnection.Close()
+
 				return
 			}
 
