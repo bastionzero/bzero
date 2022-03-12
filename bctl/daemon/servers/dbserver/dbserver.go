@@ -26,9 +26,6 @@ type DbServer struct {
 	websocket *websocket.Websocket
 	tmb       tomb.Tomb
 
-	// Db connections only require a single datachannel
-	// datachannel *datachannel.DataChannel
-
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
@@ -127,12 +124,12 @@ func StartDbServer(logger *logger.Logger,
 }
 
 // for creating new websockets
-func (h *DbServer) newWebsocket(wsId string) error {
-	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Db); err != nil {
+func (d *DbServer) newWebsocket(wsId string) error {
+	subLogger := d.logger.GetWebsocketLogger(wsId)
+	if wsClient, err := websocket.New(subLogger, d.serviceUrl, d.params, d.headers, d.targetSelectHandler, autoReconnect, getChallenge, d.refreshTokenCommand, websocket.Db); err != nil {
 		return err
 	} else {
-		h.websocket = wsClient
+		d.websocket = wsClient
 		return nil
 	}
 }

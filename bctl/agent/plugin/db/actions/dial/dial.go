@@ -109,7 +109,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 
 		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
 		time.Sleep(5 * time.Second)
-		d.logger.Debugf("GOT HERE: %+v", dataEnd)
 		return action, actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %v", action)

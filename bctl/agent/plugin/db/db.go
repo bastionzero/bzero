@@ -116,7 +116,7 @@ func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 
 		// Check if that last message closed the action, if so delete from map
 		if act.Closed() {
-			d.logger.Infof("ACTION CLOSED. DELETING")
+			d.logger.Infof("Action closed. request id: %s", rid)
 			d.deleteActionsMap(rid)
 		}
 
