@@ -176,6 +176,7 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 					w.outputQueue <- m
 				} else {
 					w.deleteActionsMap(requestId)
+					w.tmb.Kill(fmt.Errorf("killing the action only a mother plugin could ever love"))
 					return
 				}
 			}

@@ -73,9 +73,7 @@ func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	// find action by requestid in map and push stream message to it
 	if act, ok := d.getActionsMap(smessage.RequestId); ok {
-		d.logger.Infof("BLOCKED HERE?")
 		act.ReceiveStream(smessage)
-		d.logger.Infof("NO")
 		return nil
 	}
 
@@ -112,7 +110,7 @@ func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte
 }
 
 func (d *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
-	d.logger.Infof("WE GOT SOMETHING")
+	d.logger.Infof("Db plugin received keysplitting message with action: %s", action)
 
 	// currently the only keysplitting message we care about is the acknowledgement of our request for the agent to stop the dial action
 	if action == string(bzdial.DialStop) {
@@ -171,8 +169,11 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 				if more {
 					d.outputQueue <- m
 				} else {
-					d.logger.Infof("CLOSING ACTION ON DAEMON")
+					d.logger.Infof("Closing db %s action with request id: %s", dbFood.Action, requestId)
 					d.deleteActionsMap(requestId)
+
+					d.tmb.Kill(fmt.Errorf("done with the only action this datachannel will ever do"))
+
 					return
 				}
 			}

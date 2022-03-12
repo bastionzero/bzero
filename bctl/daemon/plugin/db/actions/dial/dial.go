@@ -3,7 +3,6 @@ package dial
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"time"
@@ -150,13 +149,10 @@ func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interf
 }
 
 func (d *DialAction) closeAction() {
-	d.logger.Infof("Closing dial action with request id: %s", d.requestId)
 	d.closed = true
 
 	// this signals to the parent plugin that we're done with the action
 	close(d.outputChan)
-
-	d.tmb.Kill(fmt.Errorf("done with the only action this datachannel will ever do"))
 }
 
 func (d *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
