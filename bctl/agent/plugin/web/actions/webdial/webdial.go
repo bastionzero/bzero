@@ -176,6 +176,8 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 					// ref: https://go.dev/src/net/http/response.go
 					numBytes, err := res.Body.Read(buf)
 
+					w.logger.Infof("%s", err)
+
 					// check for error and if it's serious then report it
 					if err != nil && err != io.EOF {
 						w.logger.Errorf("error reading response body: %s", err)
@@ -208,14 +210,14 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 					}
 
 					w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, streamMessage)
-				}
 
-				// we get io.EOFs on whichever read call processes the final byte
-				if err == io.EOF {
-					break
-				}
+					// we get io.EOFs on whichever read call processes the final byte
+					if err == io.EOF {
+						return
+					}
 
-				sequenceNumber += 1
+					sequenceNumber += 1
+				}
 			}
 		}()
 	}
