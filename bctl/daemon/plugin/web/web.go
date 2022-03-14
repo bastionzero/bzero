@@ -176,14 +176,14 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 					w.outputQueue <- m
 				} else {
 					w.deleteActionsMap(requestId)
-					w.tmb.Kill(fmt.Errorf("killing the action only a mother plugin could ever love"))
+					w.tmb.Kill(fmt.Errorf("killing web action with request id: %s", requestId))
 					return
 				}
 			}
 		}
 	}()
 
-	w.logger.Infof("Created %s action with requestId %v", string(webFood.Action), requestId)
+	w.logger.Infof("Web plugin created a %s action with requestId %v", string(webFood.Action), requestId)
 
 	// send local tcp connection to action
 	if err := act.Start(w.tmb, webFood.Writer, webFood.Request); err != nil {
