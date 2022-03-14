@@ -19,9 +19,9 @@ import (
 
 // Declaring flags as package-accessible variables
 var (
-	sessionId, authHeader, targetId, serviceUrl, plugin string
-	logPath, refreshTokenCommand, localPort, localHost  string
-	agentPubKey                                         string
+	sessionId, authHeader, targetId, serviceUrl, plugin, logLevel string
+	logPath, refreshTokenCommand, localPort, localHost            string
+	agentPubKey                                                   string
 
 	// Kube server specifc values
 	targetGroupsRaw, targetUser, certPath, keyPath string
@@ -42,8 +42,7 @@ func main() {
 	flagErr := parseFlags()
 
 	// Setup our loggers
-	// TODO: Pass in debug level as flag or put it in the config
-	if logger, err := logger.New(logger.Debug, logPath); err != nil {
+	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logPath); err != nil {
 		reportError(logger, err)
 	} else {
 		logger.AddDaemonVersion(daemonVersion)
@@ -189,6 +188,7 @@ func targetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 func parseFlags() error {
 	flag.StringVar(&sessionId, "sessionId", "", "Session ID From Zli")
 	flag.StringVar(&authHeader, "authHeader", "", "Auth Header From Zli")
+	flag.StringVar(&logLevel, "logLevel", logger.Debug.String(), "The log level to use")
 
 	// Our expected flags we need to start
 	flag.StringVar(&serviceUrl, "serviceURL", prodServiceUrl, "Service URL to use")

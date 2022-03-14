@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // This is here for translation, so that the rest of the program doesn't need to care or know
@@ -29,33 +29,65 @@ type Logger struct {
 	ready bool
 }
 
-func New(debugLevel DebugLevel, logFilePath string) (*Logger, error) {
+type LoggerConfig struct {
+	// The default global log level
+	LogLevel DebugLevel
+
+	// MaxSize the max size in MB of the logfile before it's rolled
+	MaxSize int
+
+	// MaxBackups the max number of rolled files to keep
+	MaxBackups int
+
+	// MaxAge the max age in days to keep a logfile
+	MaxAge int
+}
+
+func DefaultLoggerConfig(logLevel string) *LoggerConfig {
+	level, err := zerolog.ParseLevel(logLevel)
+	if err != nil {
+		level = zerolog.DebugLevel
+	}
+
+	return &LoggerConfig{
+		LogLevel:   DebugLevel(level),
+		MaxSize:    100,
+		MaxBackups: 10,
+		MaxAge:     30,
+	}
+}
+
+func New(config *LoggerConfig, logFilePath string) (*Logger, error) {
 	// Let's us display stack info on errors
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
-	zerolog.SetGlobalLevel(debugLevel)
+	zerolog.SetGlobalLevel(config.LogLevel)
 
 	// If the log file doesn't exist, create it, or append to the file
 	if logFilePath != "" {
 		// make our directory if it doesn't exist already
 		// TODO: do this in our install process
-		err := os.MkdirAll(filepath.Dir(logFilePath), os.ModePerm)
+		logDir := filepath.Dir(logFilePath)
+		if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
+			return nil, fmt.Errorf("Failed to create log directory %s", logDir)
+		}
 
-		// create or open our file
-		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Printf("error: %s", err)
-			return &Logger{
-				ready: false,
-			}, err
+		logFileWithRotation := &lumberjack.Logger{
+			Filename:   logFilePath,
+			MaxSize:    config.MaxSize, // megabytes
+			MaxBackups: config.MaxBackups,
+			MaxAge:     config.MaxAge, //days
+			// Compress:   true
 		}
 
 		consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
-		multi := zerolog.MultiLevelWriter(consoleWriter, logFile)
+		multi := zerolog.MultiLevelWriter(consoleWriter, logFileWithRotation)
 
-		return &Logger{
+		logger := Logger{
 			logger: zerolog.New(multi).With().Timestamp().Logger(),
 			ready:  true,
-		}, nil
+		}
+
+		return &logger, nil
 	} else {
 		return &Logger{
 			logger: zerolog.New(os.Stdout).With().Timestamp().Logger(),
