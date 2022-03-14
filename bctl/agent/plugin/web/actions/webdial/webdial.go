@@ -176,8 +176,6 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 					// ref: https://go.dev/src/net/http/response.go
 					numBytes, err := res.Body.Read(buf)
 
-					w.logger.Infof("%s", err)
-
 					// check for error and if it's serious then report it
 					if err != nil && err != io.EOF {
 						w.logger.Errorf("error reading response body: %s", err)
