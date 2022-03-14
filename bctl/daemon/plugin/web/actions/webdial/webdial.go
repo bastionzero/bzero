@@ -37,8 +37,8 @@ func New(logger *logger.Logger,
 
 		requestId: requestId,
 
-		outputChan:      make(chan plugin.ActionWrapper, 10),
-		streamInputChan: make(chan smsg.StreamMessage, 10),
+		outputChan:      make(chan plugin.ActionWrapper, 50),
+		streamInputChan: make(chan smsg.StreamMessage, 50),
 
 		doneChan: make(chan bool),
 	}
@@ -46,7 +46,7 @@ func New(logger *logger.Logger,
 	return stream, stream.outputChan
 }
 
-func (w *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error {
+func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
 	// Build the action payload to start the web action dial
 	payload := webdial.WebDialActionPayload{
 		RequestId: w.requestId,
@@ -59,7 +59,7 @@ func (w *WebDialAction) Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Reques
 		ActionPayload: payloadBytes,
 	}
 
-	return w.handleHttpRequest(Writer, Request)
+	return w.handleHttpRequest(writer, request)
 }
 
 func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
@@ -110,7 +110,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				continue
 			}
 
-			w.logger.Infof("Sending interrupt signal to agent")
+			w.logger.Info("HTTP request cancelled. Sending interrupt signal to agent.")
 
 			returnPayload := bzwebdial.WebInterruptActionPayload{
 				RequestId: w.requestId,
@@ -142,7 +142,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 				var response webdial.WebOutputActionPayload
 				if err := json.Unmarshal(contentBytes, &response); err != nil {
-					rerr := fmt.Errorf("could not unmarshal Action Response Payload: %s", err)
+					rerr := fmt.Errorf("could not unmarshal web dial output action payload: %s", err)
 					w.logger.Error(rerr)
 					return err
 				}
@@ -182,6 +182,6 @@ func (w *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) 
 }
 
 func (w *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {
-	w.logger.Debugf("Stream action received %v stream", smessage.Type)
+	w.logger.Debugf("web dial action received %v stream", smessage.Type)
 	w.streamInputChan <- smessage
 }

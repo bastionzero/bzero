@@ -208,14 +208,14 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 					}
 
 					w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, streamMessage)
-				}
 
-				// we get io.EOFs on whichever read call processes the final byte
-				if err == io.EOF {
-					break
-				}
+					// we get io.EOFs on whichever read call processes the final byte
+					if err == io.EOF {
+						return
+					}
 
-				sequenceNumber += 1
+					sequenceNumber += 1
+				}
 			}
 		}()
 	}

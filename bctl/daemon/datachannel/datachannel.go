@@ -438,6 +438,11 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 	// Send message to plugin's input message handler
 	if d.plugin != nil {
 		if action, returnPayload, err := d.plugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
+			// sometimes when we kill the datachannel from the action, there is a final empty payload that sneaks out because
+			// the process dies but that last messages are processed
+			if action == "" {
+				return nil
+			}
 
 			// We need to know the last message for invisible response to keysplitting validation errors
 			d.setLastMessage(bzplugin.ActionWrapper{

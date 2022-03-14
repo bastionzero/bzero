@@ -66,7 +66,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 }
 
 func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
-	d.logger.Debugf("Stream action received %v stream", smessage.Type)
+	d.logger.Debugf("db plugin received %v stream", smessage.Type)
 	d.streamInputChan <- smessage
 }
 
@@ -83,6 +83,7 @@ func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 }
 
 func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+	d.logger.Infof("Received a keysplitting message with action: %s", action)
 	// First, process the incoming message
 	if err := d.processKeysplitting(action, actionPayload); err != nil {
 		return "", []byte{}, err
@@ -109,6 +110,7 @@ func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte
 }
 
 func (d *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
+	d.logger.Infof("Db plugin received keysplitting message with action: %s", action)
 
 	// currently the only keysplitting message we care about is the acknowledgement of our request for the agent to stop the dial action
 	if action == string(bzdial.DialStop) {
@@ -167,7 +169,11 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 				if more {
 					d.outputQueue <- m
 				} else {
+					d.logger.Infof("Closing db %s action with request id: %s", dbFood.Action, requestId)
 					d.deleteActionsMap(requestId)
+
+					d.tmb.Kill(fmt.Errorf("done with the only action this datachannel will ever do"))
+
 					return
 				}
 			}

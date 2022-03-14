@@ -3,7 +3,6 @@ package dbserver
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 
@@ -26,9 +25,6 @@ type DbServer struct {
 	logger    *logger.Logger
 	websocket *websocket.Websocket
 	tmb       tomb.Tomb
-
-	// Db connections only require a single datachannel
-	datachannel *datachannel.DataChannel
 
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
@@ -109,83 +105,79 @@ func StartDbServer(logger *logger.Logger,
 		}
 
 		logger.Infof("Accepting new tcp connection")
+
+		// create our new datachannel in its own go routine so that we can accept other tcp connections
 		go func() {
-			if datachannel, err := listener.newDataChannel(string(bzdb.Dial), listener.websocket); err == nil {
+			if dc, err := listener.newDataChannel(string(bzdb.Dial), listener.websocket); err == nil {
+
 				// Start the dial plugin
 				food := bzdb.DbFood{
 					Action: bzdb.Dial,
 					Conn:   conn,
 				}
-
-				datachannel.Feed(food)
+				dc.Feed(food)
 			} else {
 				logger.Errorf("error starting datachannel: %s", err)
 			}
 		}()
-
 	}
 }
 
 // for creating new websockets
-func (h *DbServer) newWebsocket(wsId string) error {
-	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Db); err != nil {
+func (d *DbServer) newWebsocket(wsId string) error {
+	subLogger := d.logger.GetWebsocketLogger(wsId)
+	if wsClient, err := websocket.New(subLogger, d.serviceUrl, d.params, d.headers, d.targetSelectHandler, autoReconnect, getChallenge, d.refreshTokenCommand, websocket.Db); err != nil {
 		return err
 	} else {
-		h.websocket = wsClient
+		d.websocket = wsClient
 		return nil
 	}
 }
 
 // for creating new datachannels
-func (h *DbServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
+func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
-	subLogger := h.logger.GetDatachannelLogger(dcId)
+	subLogger := d.logger.GetDatachannelLogger(dcId)
 
-	h.logger.Infof("Creating new datachannel id: %v", dcId)
+	d.logger.Infof("Creating new datachannel id: %s", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
 	actionParams := bzdb.DbActionParams{
-		RemotePort: h.remotePort,
-		RemoteHost: h.remoteHost,
+		RemotePort: d.remotePort,
+		RemoteHost: d.remoteHost,
 	}
-
-	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
-	if marshalErr != nil {
-		h.logger.Error(fmt.Errorf("error marshalling action params for db"))
-		return nil, marshalErr
-	}
+	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
 	action = "db/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey); err != nil {
-		h.logger.Error(err)
-		return datachannel, err
+	if dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, d.refreshTokenCommand, d.configPath, action, actionParamsMarshalled, d.agentPubKey); err != nil {
+		d.logger.Error(err)
+		return nil, err
 	} else {
 
 		// create a function to listen to the datachannel dying and then laugh
 		go func() {
 			for {
 				select {
-				case <-h.tmb.Dying():
-					datachannel.Close(errors.New("db server closing"))
+				case <-d.tmb.Dying():
+					dc.Close(errors.New("db server closing"))
 					return
 				case <-dcTmb.Dying():
 					// Wait until everything is dead and any close processes are sent before killing the datachannel
 					dcTmb.Wait()
 
 					// notify agent to close the datachannel
-					h.logger.Info("Sending DataChannel Close")
+					d.logger.Info("Sending DataChannel Close")
 					cdMessage := am.AgentMessage{
 						ChannelId:   dcId,
 						MessageType: string(am.CloseDataChannel),
 					}
-					h.websocket.Send(cdMessage)
+					d.websocket.Send(cdMessage)
 
 					return
 				}
 			}
 		}()
-		return datachannel, nil
+		return dc, nil
 	}
 }

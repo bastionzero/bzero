@@ -76,7 +76,8 @@ func New(parentTmb *tomb.Tomb,
 }
 
 func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	d.logger.Infof("Plugin received Data message with %v action", action)
+	d.logger.Infof("DB plugin received Data message with %v action", action)
+	d.logger.Infof("actionPayload: %s", string(actionPayload))
 
 	// parse action
 	parsedAction := strings.Split(action, "/")
@@ -115,6 +116,7 @@ func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte,
 
 		// Check if that last message closed the action, if so delete from map
 		if act.Closed() {
+			d.logger.Infof("Action closed. request id: %s", rid)
 			d.deleteActionsMap(rid)
 		}
 
