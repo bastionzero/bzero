@@ -26,9 +26,6 @@ type WebServer struct {
 	websocket *bzwebsocket.Websocket
 	tmb       tomb.Tomb
 
-	// Web connections only require a single datachannel
-	datachannel *datachannel.DataChannel
-
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
@@ -82,13 +79,6 @@ func StartWebServer(logger *logger.Logger,
 		return err
 	}
 
-	// Create a single datachannel for all of our db calls
-	if datachannel, err := listener.newDataChannel(string(bzweb.Dial), listener.websocket); err == nil {
-		listener.datachannel = datachannel
-	} else {
-		return err
-	}
-
 	// Create HTTP Server listens for incoming kubectl commands
 	go func() {
 		// Define our http handlers
@@ -104,9 +94,9 @@ func StartWebServer(logger *logger.Logger,
 	return nil
 }
 
-func (h *WebServer) handleHttp(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
+func (w *WebServer) handleHttp(logger *logger.Logger, writer http.ResponseWriter, reader *http.Request) {
 	// Determine if we are trying to upgrade the request
-	isWebsocketRequest := r.Header.Get("Upgrade")
+	isWebsocketRequest := reader.Header.Get("Upgrade")
 
 	action := bzweb.Dial
 	// This will work for http 1.1 and that is what we need to support
@@ -115,13 +105,21 @@ func (h *WebServer) handleHttp(logger *logger.Logger, w http.ResponseWriter, r *
 	if isWebsocketRequest == "websocket" {
 		action = bzweb.Websocket
 	}
+
 	food := bzweb.WebFood{
 		Action:  action,
-		Request: r,
-		Writer:  w,
+		Request: reader,
+		Writer:  writer,
 	}
-	// Start the dial plugin
-	h.datachannel.Feed(food)
+
+	// create our new datachannel in its own go routine so that we can accept other http connections
+	go func() {
+		if dc, err := w.newDataChannel(string(action), w.websocket); err == nil {
+			dc.Feed(food)
+		} else {
+			logger.Errorf("error starting datachannel: %s", err)
+		}
+	}()
 }
 
 // for creating new websockets
