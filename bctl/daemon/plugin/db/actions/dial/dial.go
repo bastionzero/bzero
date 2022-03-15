@@ -116,9 +116,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 					RequestId: d.requestId,
 				}
 				d.sendOutputMessage(dial.DialStop, payload)
-
-				// tell our agent message listener to stop processing incoming stream messages
-				d.closed = true
 				return
 			} else {
 
