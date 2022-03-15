@@ -30,6 +30,7 @@ var (
 	activationToken, registrationKey string
 	idpProvider, namespace, idpOrgId string
 	targetId, targetName, agentType  string
+	logLevel                         string
 	forceReRegistration              bool
 	wait                             bool
 )
@@ -43,33 +44,40 @@ const (
 
 func main() {
 	setAgentType()
+
+	parseErr := parseFlags()
+
 	if logger, err := setupLogger(); err != nil {
 		reportError(logger, err)
-	} else if err := parseFlags(); err != nil {
-
-		// catch our parser errors now that we have a logger to print them
-		reportError(logger, err)
 	} else {
-		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
+		logger.AddAgentVersion(getAgentVersion())
 
-		// Check if the agent is registered or not.  If not, generate signing keys,
-		// check kube permissions and setup, and register with the Bastion.
-		if err := handleRegistration(logger); err != nil {
-
-			// our systemd agent waits for a successful new registration
-			if wait {
-				vault.WaitForNewRegistration(logger)
-				logger.Infof("New registration detected. Loading registration information!")
-
-				// double check and set our local variables
-				if registered, err := isRegistered(); err != nil {
-					logger.Error(err)
-				} else if registered {
-					run(logger)
-				}
-			}
+		if parseErr != nil {
+			// catch our parser errors now that we have a logger to print them
+			reportError(logger, err)
 		} else {
-			run(logger)
+
+			logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
+
+			// Check if the agent is registered or not.  If not, generate signing keys,
+			// check kube permissions and setup, and register with the Bastion.
+			if err := handleRegistration(logger); err != nil {
+
+				// our systemd agent waits for a successful new registration
+				if wait {
+					vault.WaitForNewRegistration(logger)
+					logger.Infof("New registration detected. Loading registration information!")
+
+					// double check and set our local variables
+					if registered, err := isRegistered(); err != nil {
+						logger.Error(err)
+					} else if registered {
+						run(logger)
+					}
+				}
+			} else {
+				run(logger)
+			}
 		}
 	}
 
@@ -116,7 +124,7 @@ func setupLogger() (*logger.Logger, error) {
 	}
 
 	// setup our loggers
-	if logger, err := logger.New(logger.Debug, logFile); err != nil {
+	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile); err != nil {
 		return logger, err
 	} else {
 		logger.AddAgentVersion(getAgentVersion())
@@ -245,6 +253,7 @@ func parseFlags() error {
 	flag.StringVar(&targetId, "targetId", "", "Target ID to use")
 	flag.StringVar(&environmentId, "environmentId", "", "Policy environment ID to associate with agent")
 	flag.StringVar(&environmentName, "environmentName", "", "Policy environment Name to associate with agent")
+	flag.StringVar(&logLevel, "logLevel", logger.Debug.String(), "The log level to use")
 
 	// Parse any flag
 	flag.Parse()
