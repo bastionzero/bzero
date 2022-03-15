@@ -134,7 +134,7 @@ func New(logger *logger.Logger,
 	go func() {
 		if err := ws.Connect(); err != nil {
 			logger.Error(err)
-			go ws.Close(fmt.Errorf("Process was unable to connect to BastionZero"))
+			go ws.Close(fmt.Errorf("process was unable to connect to BastionZero"))
 
 			// If this is a daemon connection (i.e. we are not getting a challenge)
 			// we also need to make sure we close the connection in the backend

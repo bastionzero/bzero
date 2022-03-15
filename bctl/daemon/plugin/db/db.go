@@ -77,9 +77,10 @@ func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 		return nil
 	}
 
-	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
-	d.logger.Error(rerr)
-	return rerr
+	// rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
+	// d.logger.Error(rerr)
+	// return rerr
+	return nil
 }
 
 func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
