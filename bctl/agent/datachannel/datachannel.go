@@ -151,7 +151,9 @@ func (d *DataChannel) sendError(errType rrr.ErrorType, err error) {
 }
 
 func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
-	d.inputChan <- agentMessage
+	if d.tmb.Err() == tomb.ErrStillAlive {
+		d.inputChan <- agentMessage
+	}
 }
 
 func (d *DataChannel) processInput(agentMessage am.AgentMessage) {

@@ -138,7 +138,7 @@ func New(logger *logger.Logger,
 				return errors.New("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
 				dc.logger.Infof("Killing datachannel and its subsidiaries because %s", dc.tmb.Err())
-				time.Sleep(30 * time.Second) // give datachannel time to close correctly
+				time.Sleep(10 * time.Second) // give datachannel time to close correctly
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
 				// Keysplitting needs to be its own routine because the function will get stuck waiting for user input after a DATA/ACK,
@@ -327,7 +327,9 @@ func (d *DataChannel) sendSyn(action string) error {
 }
 
 func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
-	d.inputChan <- agentMessage
+	if d.tmb.Err() == tomb.ErrStillAlive {
+		d.inputChan <- agentMessage
+	}
 }
 
 func (d *DataChannel) processInput(agentMessage am.AgentMessage) error {

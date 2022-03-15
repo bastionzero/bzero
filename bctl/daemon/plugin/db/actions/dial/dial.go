@@ -56,13 +56,14 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 	// Listen to stream messages coming from the agent, and forward to our local connection
 	go func() {
+		defer lconn.Close()
 		for {
 			select {
 			case <-tmb.Dying():
 				return
 			case data := <-d.streamInputChan:
 				if d.closed {
-					continue
+					return
 				}
 
 				switch smsg.StreamType(data.Type) {
@@ -79,8 +80,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 					// The agent has closed the connection, close the local connection as well
 					d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-					d.closeAction()
-					lconn.Close()
+					d.closed = true
 
 					return
 				default:
@@ -91,7 +91,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 	}()
 
 	go func() {
-		defer lconn.Close()
+		defer close(d.outputChan)
 
 		// listen to messages coming from the local tcp connection and sends them to the agent
 		buf := make([]byte, chunkSize)
@@ -100,7 +100,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 		for {
 			if n, err := lconn.Read(buf); err != nil {
 				if d.closed {
-					break
+					return
 				}
 
 				// print our error message
@@ -116,11 +116,8 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				}
 				d.sendOutputMessage(dial.DialStop, payload)
 
-				// tell our agent message listener to stop processing incoming stream messages
-				d.closed = true
-				break
+				return
 			} else {
-
 				// Build and send whatever we get from the local tcp connection to the agent
 				dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
 				payload := dial.DialInputActionPayload{
@@ -145,19 +142,11 @@ func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interf
 		Action:        string(action),
 		ActionPayload: payloadBytes,
 	}
-
-}
-
-func (d *DialAction) closeAction() {
-	d.closed = true
-
-	// this signals to the parent plugin that we're done with the action
-	close(d.outputChan)
 }
 
 func (d *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
 	if wrappedAction.Action == string(dial.DialStop) {
-		d.closeAction()
+		d.closed = true
 	}
 }
 

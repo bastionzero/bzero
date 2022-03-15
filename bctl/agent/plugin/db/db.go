@@ -77,7 +77,6 @@ func New(parentTmb *tomb.Tomb,
 
 func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	d.logger.Infof("DB plugin received Data message with %v action", action)
-	d.logger.Infof("actionPayload: %s", string(actionPayload))
 
 	// parse action
 	parsedAction := strings.Split(action, "/")

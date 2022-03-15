@@ -74,12 +74,10 @@ func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	// find action by requestid in map and push stream message to it
 	if act, ok := d.getActionsMap(smessage.RequestId); ok {
 		act.ReceiveStream(smessage)
-		return nil
 	}
 
-	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
-	d.logger.Error(rerr)
-	return rerr
+	d.logger.Tracef("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
+	return nil
 }
 
 func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
