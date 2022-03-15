@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"time"
 
 	"gopkg.in/tomb.v2"
 
@@ -104,11 +103,10 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			break
 		}
 
-		d.remoteConnection.Close()
 		d.closed = true // Ensure that we close the dial action
+		d.remoteConnection.Close()
 
 		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
-		time.Sleep(5 * time.Second)
 		return action, actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %v", action)
@@ -141,6 +139,11 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
 	go func() {
+		defer d.remoteConnection.Close()
+		defer func() {
+			d.closed = true
+		}()
+
 		sequenceNumber := 1
 		buff := make([]byte, chunkSize)
 
@@ -155,9 +158,6 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 			if err != nil {
 				if err != io.EOF {
 					d.logger.Errorf("failed to read from tcp connection: %s", err)
-
-					// Close this connection
-					d.remoteConnection.Close()
 				} else {
 					d.logger.Errorf("connection closed")
 				}
@@ -165,9 +165,6 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 				// Let our daemon know that we have got the error and we need to close the connection
 				content := base64.StdEncoding.EncodeToString(buff[:n])
 				d.sendStreamMessage(smsg.DbStreamEnd, sequenceNumber, content)
-
-				// Ensure that we close the dial action
-				d.closed = true
 
 				return
 			}

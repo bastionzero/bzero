@@ -56,6 +56,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 	// Listen to stream messages coming from the agent, and forward to our local connection
 	go func() {
+		defer lconn.Close()
 		for {
 			select {
 			case <-tmb.Dying():
@@ -80,7 +81,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 					// The agent has closed the connection, close the local connection as well
 					d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
 					d.closed = true
-					lconn.Close()
 
 					return
 				default:
@@ -92,7 +92,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 	go func() {
 		defer close(d.outputChan)
-		defer lconn.Close()
 
 		// listen to messages coming from the local tcp connection and sends them to the agent
 		buf := make([]byte, chunkSize)
@@ -116,6 +115,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 					RequestId: d.requestId,
 				}
 				d.sendOutputMessage(dial.DialStop, payload)
+
 				return
 			} else {
 
@@ -143,7 +143,6 @@ func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interf
 		Action:        string(action),
 		ActionPayload: payloadBytes,
 	}
-
 }
 
 func (d *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
