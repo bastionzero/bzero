@@ -118,7 +118,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 				return
 			} else {
-
 				// Build and send whatever we get from the local tcp connection to the agent
 				dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
 				payload := dial.DialInputActionPayload{

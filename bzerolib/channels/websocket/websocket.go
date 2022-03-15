@@ -248,7 +248,9 @@ func (w *Websocket) receive() error {
 					agentMessage := message.Arguments[0]
 
 					if channel, ok := w.getChannel(agentMessage.ChannelId); ok {
-						channel.Receive(agentMessage)
+						go func() {
+							channel.Receive(agentMessage)
+						}()
 					} else {
 						err := fmt.Errorf("received message that did not correspond to existing channel: %s", agentMessage.ChannelId)
 						w.logger.Error(err)
