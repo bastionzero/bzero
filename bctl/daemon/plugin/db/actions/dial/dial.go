@@ -62,7 +62,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				return
 			case data := <-d.streamInputChan:
 				if d.closed {
-					continue
+					return
 				}
 
 				switch smsg.StreamType(data.Type) {
@@ -79,7 +79,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 					// The agent has closed the connection, close the local connection as well
 					d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-					d.closeAction()
+					d.closed = true
 					lconn.Close()
 
 					return
@@ -91,6 +91,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 	}()
 
 	go func() {
+		defer close(d.outputChan)
 		defer lconn.Close()
 
 		// listen to messages coming from the local tcp connection and sends them to the agent
@@ -100,7 +101,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 		for {
 			if n, err := lconn.Read(buf); err != nil {
 				if d.closed {
-					break
+					return
 				}
 
 				// print our error message
@@ -118,7 +119,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 				// tell our agent message listener to stop processing incoming stream messages
 				d.closed = true
-				break
+				return
 			} else {
 
 				// Build and send whatever we get from the local tcp connection to the agent
@@ -157,7 +158,7 @@ func (d *DialAction) closeAction() {
 
 func (d *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
 	if wrappedAction.Action == string(dial.DialStop) {
-		d.closeAction()
+		d.closed = true
 	}
 }
 
