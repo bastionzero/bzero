@@ -149,13 +149,6 @@ func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interf
 
 }
 
-func (d *DialAction) closeAction() {
-	d.closed = true
-
-	// this signals to the parent plugin that we're done with the action
-	close(d.outputChan)
-}
-
 func (d *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
 	if wrappedAction.Action == string(dial.DialStop) {
 		d.closed = true
