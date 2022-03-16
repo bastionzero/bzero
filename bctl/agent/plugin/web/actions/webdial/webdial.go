@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -84,7 +83,7 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 
 		// give our streamoutputchan time to process all the messages we sent while the interrupt was getting here
 		// CWC-1588: We need to revisit the assumption of one plugin to many actions in order to solve this better
-		time.Sleep(2 * time.Second)
+		//time.Sleep(2 * time.Second)
 
 		// this return payload tells the daemon to close the action on their side
 		returnPayload := bzwebdial.WebInterruptActionPayload{
@@ -185,7 +184,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 							StatusCode: http.StatusBadGateway,
 							RequestId:  dataIn.RequestId,
 							Headers:    map[string][]string{},
-							Content:    []byte{},
+							Content:    buf[:numBytes],
 						}
 
 						w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, smsg.WebError)

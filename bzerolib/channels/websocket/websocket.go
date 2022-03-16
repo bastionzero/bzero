@@ -250,7 +250,6 @@ func (w *Websocket) receive() error {
 
 					if channel, ok := w.getChannel(agentMessage.ChannelId); ok {
 						go func() {
-							w.logger.Infof("WEBSOCKET RECEIVING %s", agentMessage.MessageType)
 							channel.Receive(agentMessage)
 						}()
 					} else {
@@ -325,7 +324,6 @@ func (w *Websocket) processOutput(agentMessage am.AgentMessage) {
 
 // Function to write signalr message to websocket
 func (w *Websocket) Send(agentMessage am.AgentMessage) {
-	w.logger.Infof("WEBSOCKET SENDING %s", agentMessage.MessageType)
 	w.sendQueue <- agentMessage
 }
 

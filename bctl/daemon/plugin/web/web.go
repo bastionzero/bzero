@@ -75,16 +75,17 @@ func (k *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 	k.streamInputChan <- smessage
 }
 
-func (k *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
+func (w *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	// find action by requestid in map and push stream message to it
-	if act, ok := k.getActionsMap(smessage.RequestId); ok {
+	if act, ok := w.getActionsMap(smessage.RequestId); ok {
 		act.ReceiveStream(smessage)
-		return nil
 	}
 
-	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
-	k.logger.Error(rerr)
-	return rerr
+	w.logger.Tracef("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
+	return nil
+	// rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
+	// k.logger.Error(rerr)
+	// return rerr
 }
 
 func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {

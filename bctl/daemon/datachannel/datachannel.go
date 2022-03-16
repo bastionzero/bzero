@@ -306,7 +306,6 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 	}
 
 	// Push message to websocket channel output
-	d.logger.Infof("SENDING %s", messageType)
 	d.websocket.Send(agentMessage)
 	return nil
 }
