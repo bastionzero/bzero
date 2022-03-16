@@ -185,13 +185,14 @@ func New(logger *logger.Logger,
 }
 
 func (w *Websocket) Close(reason error) {
+	w.logger.Infof("websocket closing because: %s", reason)
+
 	// close all of our existing datachannels
 	for _, channel := range w.channels {
 		channel.Close(reason)
 	}
 
 	// tell our tmb to clean up after us
-	w.logger.Infof("websocket closed because: %s", reason)
 	w.tmb.Kill(reason)
 	w.tmb.Wait()
 }
@@ -249,6 +250,7 @@ func (w *Websocket) receive() error {
 
 					if channel, ok := w.getChannel(agentMessage.ChannelId); ok {
 						go func() {
+							w.logger.Infof("WEBSOCKET RECEIVING %s", agentMessage.MessageType)
 							channel.Receive(agentMessage)
 						}()
 					} else {
@@ -323,6 +325,7 @@ func (w *Websocket) processOutput(agentMessage am.AgentMessage) {
 
 // Function to write signalr message to websocket
 func (w *Websocket) Send(agentMessage am.AgentMessage) {
+	w.logger.Infof("WEBSOCKET SENDING %s", agentMessage.MessageType)
 	w.sendQueue <- agentMessage
 }
 

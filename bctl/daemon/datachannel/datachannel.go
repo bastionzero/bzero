@@ -118,6 +118,7 @@ func New(logger *logger.Logger,
 	websocket.Subscribe(id, dc)
 
 	// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
+	logger.Info("Sending request to agent to open a new datachannel")
 	if err := dc.openDataChannel(action, actionParams); err != nil {
 		logger.Error(err)
 		return nil, &tomb.Tomb{}, err
@@ -188,6 +189,7 @@ func (d *DataChannel) openDataChannel(action string, actionParams []byte) error 
 		return fmt.Errorf("error marshalling syn: %s", err)
 	}
 
+	d.logger.Infof("actionParams: %s", string(actionParams))
 	messagePayload := OpenDataChannelPayload{
 		Syn:    synBytes,
 		Action: action,
@@ -255,7 +257,6 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		}
 
 		// start web plugin
-		subLogger := d.logger.GetPluginLogger("WebDaemon")
 		if plugin, err := web.New(&d.tmb, subLogger, webParams); err != nil {
 			return fmt.Errorf("could not start db daemon plugin: %s", err)
 		} else {
@@ -291,6 +292,9 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 
 	// if the datachannel isn't ready, wait until it is
 	if !d.ready {
+		d.logger.Info("Datachannel not ready yet, waiting until it is")
+
+		// starts a ticket to check if the datachannel is ready
 		ticker := time.NewTicker(10 * time.Millisecond)
 		for {
 			<-ticker.C
@@ -302,6 +306,7 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 	}
 
 	// Push message to websocket channel output
+	d.logger.Infof("SENDING %s", messageType)
 	d.websocket.Send(agentMessage)
 	return nil
 }

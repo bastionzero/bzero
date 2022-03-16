@@ -24,9 +24,6 @@ type WebDialAction struct {
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-
-	// done chan to return our main function once our interrupt is acknowledged
-	doneChan chan bool
 }
 
 func New(logger *logger.Logger,
@@ -39,8 +36,6 @@ func New(logger *logger.Logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 50),
 		streamInputChan: make(chan smsg.StreamMessage, 50),
-
-		doneChan: make(chan bool),
 	}
 
 	return stream, stream.outputChan
@@ -94,16 +89,15 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 		ActionPayload: dataInPayloadBytes,
 	}
 
+	// this signals to the parent plugin that the action is done
+	defer close(w.outputChan)
+
 	processInput := true
 	headerSet := false
+
 	// Listen to stream messages coming from bastion, and forward to our local connection
 	for {
-		// this signals to the parent plugin that the action is done
-		defer close(w.outputChan)
-
 		select {
-		case <-w.doneChan:
-			return nil
 		case <-request.Context().Done():
 			// only send one interrupt message to the agent
 			if !processInput {
@@ -128,6 +122,8 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 			// that's why we stop processing input (processInput = false) and only return once we recieve the ack
 			// for our interrupt message
 			processInput = false
+
+			return nil
 		case data := <-w.streamInputChan:
 			if !processInput {
 				continue
@@ -166,6 +162,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 				// if this is our last stream message, then we can return
 				if smsg.StreamType(data.Type) == smsg.WebStreamEnd {
+					w.logger.Info("GOT HERE")
 					return nil
 				}
 			default:
@@ -176,9 +173,6 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 }
 
 func (w *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	if wrappedAction.Action == string(bzwebdial.WebDialInterrupt) {
-		w.doneChan <- true
-	}
 }
 
 func (w *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {

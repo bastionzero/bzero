@@ -151,6 +151,7 @@ func (d *DataChannel) sendError(errType rrr.ErrorType, err error) {
 }
 
 func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
+	// only push to input channel if we're alive (aka not in the process of dying or already dead)
 	if d.tmb.Err() == tomb.ErrStillAlive {
 		d.inputChan <- agentMessage
 	}
