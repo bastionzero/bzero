@@ -41,6 +41,8 @@ func New(logger *logger.Logger,
 		outputChan:      make(chan plugin.ActionWrapper, 50),
 		streamInputChan: make(chan smsg.StreamMessage, 50),
 
+		expectedSequenceNumber: 0,
+
 		streamMessages: make(map[int]smsg.StreamMessage),
 	}
 
@@ -137,6 +139,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 			switch smsg.StreamType(data.Type) {
 			case smsg.WebStream, smsg.WebStreamEnd:
+				w.logger.Infof("DATA SEQ: %d", data.SequenceNumber)
 				w.streamMessages[data.SequenceNumber] = data
 
 				nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]
@@ -166,11 +169,12 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						}
 
 						// write response to user
-						w.logger.Infof("SEQUENCE #%d", data.SequenceNumber)
+						w.logger.Infof("SEQUENCE #%d", w.expectedSequenceNumber)
+						w.logger.Infof("SEQUENCE #%d", nextMessage.Type)
 						writer.Write(response.Content)
 
 						// if this is our last stream message, then we can return
-						if smsg.StreamType(data.Type) == smsg.WebStreamEnd {
+						if smsg.StreamType(nextMessage.Type) == smsg.WebStreamEnd {
 							return nil
 						}
 
