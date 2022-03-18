@@ -143,8 +143,6 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 		RemoteHost: w.targetHost,
 	}
 
-	w.logger.Infof("REMOTE HOST: %s, REMOTE PORT: %s", w.targetHost, w.targetPort)
-
 	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
 	if marshalErr != nil {
 		w.logger.Error(fmt.Errorf("error marshalling action params for web"))

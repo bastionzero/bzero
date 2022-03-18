@@ -142,6 +142,7 @@ func New(logger *logger.Logger,
 				time.Sleep(10 * time.Second) // give datachannel time to close correctly
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
+
 				// Keysplitting needs to be its own routine because the function will get stuck waiting for user input after a DATA/ACK,
 				// but still need to receive streams
 				if err := dc.processInput(agentMessage); err != nil {
@@ -189,7 +190,6 @@ func (d *DataChannel) openDataChannel(action string, actionParams []byte) error 
 		return fmt.Errorf("error marshalling syn: %s", err)
 	}
 
-	d.logger.Infof("actionParams: %s", string(actionParams))
 	messagePayload := OpenDataChannelPayload{
 		Syn:    synBytes,
 		Action: action,
@@ -314,13 +314,8 @@ func (d *DataChannel) sendSyn(action string) error {
 	d.logger.Info("Sending SYN")
 
 	d.handshook = false
-	payload := map[string]string{
-		// "TargetUser":   d.targetUser,
-		// "TargetGroups": strings.Join(d.targetGroups, ","),
-	}
-	payloadBytes, _ := json.Marshal(payload)
 
-	if synMessage, err := d.keysplitting.BuildSyn(action, payloadBytes); err != nil {
+	if synMessage, err := d.keysplitting.BuildSyn(action, []byte{}); err != nil {
 		rerr := fmt.Errorf("error building Syn: %s", err)
 		d.logger.Error(rerr)
 		return rerr
@@ -428,6 +423,7 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 			return d.sendKeysplitting(&ksMessage, next.Action, next.ActionPayload)
 		}
 	case ksmsg.DataAck:
+
 		// If we had something on deck, then this was the ack for it and we can remove it
 		d.setOnDeck(bzplugin.ActionWrapper{})
 
@@ -444,6 +440,7 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 	// Send message to plugin's input message handler
 	if d.plugin != nil {
 		if action, returnPayload, err := d.plugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
+
 			// sometimes when we kill the datachannel from the action, there is a final empty payload that sneaks out because
 			// the process dies but that last messages are processed
 			if action == "" {
@@ -467,6 +464,7 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 }
 
 func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
+
 	// Build and send response
 	if respKSMessage, err := d.keysplitting.BuildResponse(keysplittingMessage, action, payload); err != nil {
 		rerr := fmt.Errorf("could not build response message: %s", err)

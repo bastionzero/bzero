@@ -81,10 +81,6 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 	case bzwebdial.WebDialInterrupt:
 		w.interruptChan <- true
 
-		// give our streamoutputchan time to process all the messages we sent while the interrupt was getting here
-		// CWC-1588: We need to revisit the assumption of one plugin to many actions in order to solve this better
-		//time.Sleep(2 * time.Second)
-
 		// this return payload tells the daemon to close the action on their side
 		returnPayload := bzwebdial.WebInterruptActionPayload{
 			RequestId: w.requestId,
@@ -170,6 +166,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 				case <-w.interruptChan:
 					return
 				default:
+
 					// golang does the chunking for us, here. We just need to read from the body in the chunk size we want
 					// "The response body is streamed on demand as the Body field is read"
 					// ref: https://go.dev/src/net/http/response.go
@@ -190,7 +187,7 @@ func (w *WebDial) HandleNewHttpRequest(action string, dataIn WebInputActionPaylo
 						w.sendWebDataStreamMessage(&responsePayload, sequenceNumber, smsg.WebError)
 					}
 
-					w.logger.Debugf("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
+					w.logger.Tracef("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
 
 					// Now we need to send that data back to the client
 					responsePayload = WebOutputActionPayload{
@@ -257,6 +254,7 @@ func buildHttpRequest(endpoint string, body []byte, method string, headers map[s
 
 	// Add any headers
 	for name, values := range headers {
+
 		// Loop over all values for the name.
 		for _, value := range values {
 			req.Header.Set(name, value)
