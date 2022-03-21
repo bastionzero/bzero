@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net"
-	"time"
 
 	"gopkg.in/tomb.v2"
 
@@ -57,6 +56,11 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 	// Listen to stream messages coming from the agent, and forward to our local connection
 	go func() {
 		defer lconn.Close()
+
+		// variables for ensuring we receive stream messages in order
+		expectedSequenceNumber := 0
+		streamMessages := make(map[int]smsg.StreamMessage)
+
 		for {
 			select {
 			case <-tmb.Dying():
@@ -65,26 +69,37 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				if d.closed {
 					return
 				}
+				streamMessages[data.SequenceNumber] = data
 
-				switch smsg.StreamType(data.Type) {
-				case smsg.DbStream:
-					if contentBytes, err := base64.StdEncoding.DecodeString(data.Content); err != nil {
-						d.logger.Errorf("could not decode db stream content: %s", err)
-					} else {
-						go func() {
-							time.Sleep(time.Millisecond)
+				// process the incoming stream messages *in order*
+				streamMessage, ok := streamMessages[expectedSequenceNumber]
+				for ok {
+					switch smsg.StreamType(streamMessage.Type) {
+					case smsg.DbStream:
+						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
+							d.logger.Errorf("could not decode db stream content: %s", err)
+						} else {
 							lconn.Write(contentBytes) // did you know this blocks forever if you write too fast to it? yeah.
-						}()
+						}
+					case smsg.DbStreamEnd:
+
+						// The agent has closed the connection, close the local connection as well
+						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
+						d.closed = true
+
+						return
+					default:
+						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 					}
-				case smsg.DbStreamEnd:
 
-					// The agent has closed the connection, close the local connection as well
-					d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-					d.closed = true
+					// remove the message we've already processed
+					delete(streamMessages, expectedSequenceNumber)
 
-					return
-				default:
-					d.logger.Errorf("unhandled stream type: %s", data.Type)
+					// increment our sequence number
+					expectedSequenceNumber += 1
+
+					// grab our next message, if there is one
+					streamMessage, ok = streamMessages[expectedSequenceNumber]
 				}
 			}
 		}

@@ -340,7 +340,7 @@ func (w *Websocket) Connect() error {
 
 		// If we have a private key, we must solve the challenge
 		if solvedChallenge, err := agentController.GetChallenge(w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["version"]); err != nil {
-			return fmt.Errorf("error getting challenge: %s", err)
+			return fmt.Errorf("error getting challenge for agent with public key %s: %s", config.Data.PublicKey, err)
 		} else {
 			w.params["solved_challenge"] = solvedChallenge
 		}
