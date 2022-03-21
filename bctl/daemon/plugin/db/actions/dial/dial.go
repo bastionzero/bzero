@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net"
-	"time"
 
 	"gopkg.in/tomb.v2"
 
@@ -80,7 +79,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
-							time.Sleep(time.Millisecond)
 							lconn.Write(contentBytes) // did you know this blocks forever if you write too fast to it? yeah.
 						}
 					case smsg.DbStreamEnd:
