@@ -72,7 +72,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				if d.closed {
 					return
 				}
-
 				d.streamMessages[data.SequenceNumber] = data
 
 				// process the incoming stream messages *in order*
@@ -83,10 +82,8 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
-							go func() {
-								time.Sleep(time.Millisecond)
-								lconn.Write(contentBytes) // did you know this blocks forever if you write too fast to it? yeah.
-							}()
+							time.Sleep(time.Millisecond)
+							lconn.Write(contentBytes) // did you know this blocks forever if you write too fast to it? yeah.
 						}
 					case smsg.DbStreamEnd:
 
