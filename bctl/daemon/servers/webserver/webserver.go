@@ -135,7 +135,7 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 	dcId := uuid.New().String()
 	subLogger := w.logger.GetDatachannelLogger(dcId)
 
-	w.logger.Infof("Creating new datachannel id: %v", dcId)
+	w.logger.Infof("Creating new datachannel for web with id: %v", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
 	actionParams := bzweb.WebActionParams{

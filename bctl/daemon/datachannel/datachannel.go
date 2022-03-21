@@ -118,6 +118,7 @@ func New(logger *logger.Logger,
 	websocket.Subscribe(id, dc)
 
 	// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
+	logger.Info("Sending request to agent to open a new datachannel")
 	if err := dc.openDataChannel(action, actionParams); err != nil {
 		logger.Error(err)
 		return nil, &tomb.Tomb{}, err
@@ -141,6 +142,7 @@ func New(logger *logger.Logger,
 				time.Sleep(10 * time.Second) // give datachannel time to close correctly
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
+
 				// Keysplitting needs to be its own routine because the function will get stuck waiting for user input after a DATA/ACK,
 				// but still need to receive streams
 				if err := dc.processInput(agentMessage); err != nil {
@@ -255,7 +257,6 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		}
 
 		// start web plugin
-		subLogger := d.logger.GetPluginLogger("WebDaemon")
 		if plugin, err := web.New(&d.tmb, subLogger, webParams); err != nil {
 			return fmt.Errorf("could not start db daemon plugin: %s", err)
 		} else {
@@ -291,6 +292,9 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 
 	// if the datachannel isn't ready, wait until it is
 	if !d.ready {
+		d.logger.Info("Datachannel not ready yet, waiting until it is")
+
+		// starts a ticket to check if the datachannel is ready
 		ticker := time.NewTicker(10 * time.Millisecond)
 		for {
 			<-ticker.C
@@ -310,13 +314,8 @@ func (d *DataChannel) sendSyn(action string) error {
 	d.logger.Info("Sending SYN")
 
 	d.handshook = false
-	payload := map[string]string{
-		// "TargetUser":   d.targetUser,
-		// "TargetGroups": strings.Join(d.targetGroups, ","),
-	}
-	payloadBytes, _ := json.Marshal(payload)
 
-	if synMessage, err := d.keysplitting.BuildSyn(action, payloadBytes); err != nil {
+	if synMessage, err := d.keysplitting.BuildSyn(action, []byte{}); err != nil {
 		rerr := fmt.Errorf("error building Syn: %s", err)
 		d.logger.Error(rerr)
 		return rerr
@@ -424,6 +423,7 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 			return d.sendKeysplitting(&ksMessage, next.Action, next.ActionPayload)
 		}
 	case ksmsg.DataAck:
+
 		// If we had something on deck, then this was the ack for it and we can remove it
 		d.setOnDeck(bzplugin.ActionWrapper{})
 
@@ -440,6 +440,7 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 	// Send message to plugin's input message handler
 	if d.plugin != nil {
 		if action, returnPayload, err := d.plugin.ReceiveKeysplitting(action, actionResponsePayload); err == nil {
+
 			// sometimes when we kill the datachannel from the action, there is a final empty payload that sneaks out because
 			// the process dies but that last messages are processed
 			if action == "" {
@@ -463,6 +464,7 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 }
 
 func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
+
 	// Build and send response
 	if respKSMessage, err := d.keysplitting.BuildResponse(keysplittingMessage, action, payload); err != nil {
 		rerr := fmt.Errorf("could not build response message: %s", err)

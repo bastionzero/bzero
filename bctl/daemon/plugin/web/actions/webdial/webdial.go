@@ -25,8 +25,9 @@ type WebDialAction struct {
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
 
-	// done chan to return our main function once our interrupt is acknowledged
-	doneChan chan bool
+	// keep track of our expected streams
+	expectedSequenceNumber int
+	streamMessages         map[int]smsg.StreamMessage
 }
 
 func New(logger *logger.Logger,
@@ -40,7 +41,9 @@ func New(logger *logger.Logger,
 		outputChan:      make(chan plugin.ActionWrapper, 50),
 		streamInputChan: make(chan smsg.StreamMessage, 50),
 
-		doneChan: make(chan bool),
+		expectedSequenceNumber: 0,
+
+		streamMessages: make(map[int]smsg.StreamMessage),
 	}
 
 	return stream, stream.outputChan
@@ -63,7 +66,7 @@ func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 }
 
 func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
-	// First modify the host header to reflect what we are trying to connect too
+	// First modify the host header to reflect what we are trying to connect to
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
 	request.Header.Set("X-Forwarded-Host", request.Host)
 
@@ -94,16 +97,15 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 		ActionPayload: dataInPayloadBytes,
 	}
 
+	// this signals to the parent plugin that the action is done
+	defer close(w.outputChan)
+
 	processInput := true
 	headerSet := false
+
 	// Listen to stream messages coming from bastion, and forward to our local connection
 	for {
-		// this signals to the parent plugin that the action is done
-		defer close(w.outputChan)
-
 		select {
-		case <-w.doneChan:
-			return nil
 		case <-request.Context().Done():
 			// only send one interrupt message to the agent
 			if !processInput {
@@ -128,6 +130,8 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 			// that's why we stop processing input (processInput = false) and only return once we recieve the ack
 			// for our interrupt message
 			processInput = false
+
+			return nil
 		case data := <-w.streamInputChan:
 			if !processInput {
 				continue
@@ -135,38 +139,49 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 			switch smsg.StreamType(data.Type) {
 			case smsg.WebStream, smsg.WebStreamEnd:
-				contentBytes, base64Err := base64.StdEncoding.DecodeString(data.Content)
-				if base64Err != nil {
-					return base64Err
-				}
+				w.streamMessages[data.SequenceNumber] = data
 
-				var response webdial.WebOutputActionPayload
-				if err := json.Unmarshal(contentBytes, &response); err != nil {
-					rerr := fmt.Errorf("could not unmarshal web dial output action payload: %s", err)
-					w.logger.Error(rerr)
-					return err
-				}
+				// process the incoming stream messages *in order*
+				for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
+					var response webdial.WebOutputActionPayload
+					if contentBytes, err := base64.StdEncoding.DecodeString(nextMessage.Content); err != nil {
+						return err
+					} else if err := json.Unmarshal(contentBytes, &response); err != nil {
+						rerr := fmt.Errorf("could not unmarshal web dial output action payload: %s", err)
+						w.logger.Error(rerr)
+						return rerr
+					} else {
 
-				// extract and build our writer headers
-				for name, values := range response.Headers {
-					for _, value := range values {
-						writer.Header().Add(name, value)
+						// we only write this header once
+						// ref: https://stackoverflow.com/questions/57828645/how-to-handle-superfluous-response-writeheader-call-in-order-to-return-500
+						if !headerSet {
+
+							// extract and build our writer headers
+							for name, values := range response.Headers {
+								for _, value := range values {
+									writer.Header().Add(name, value)
+								}
+							}
+
+							writer.WriteHeader(response.StatusCode)
+							headerSet = true
+						}
+
+						// write response to user
+						w.logger.Tracef("Writing chunk #%d of size %d", w.expectedSequenceNumber, len(response.Content))
+						writer.Write(response.Content)
+
+						// if this is our last stream message, then we can return
+						if smsg.StreamType(nextMessage.Type) == smsg.WebStreamEnd {
+							return nil
+						}
+
+						// remove the message we've already processed
+						delete(w.streamMessages, w.expectedSequenceNumber)
+
+						// increment our sequence number
+						w.expectedSequenceNumber += 1
 					}
-				}
-
-				// we should only set this header once
-				// ref: https://stackoverflow.com/questions/57828645/how-to-handle-superfluous-response-writeheader-call-in-order-to-return-500
-				if !headerSet {
-					writer.WriteHeader(response.StatusCode)
-					headerSet = true
-				}
-
-				// write response to user
-				writer.Write(response.Content)
-
-				// if this is our last stream message, then we can return
-				if smsg.StreamType(data.Type) == smsg.WebStreamEnd {
-					return nil
 				}
 			default:
 				w.logger.Errorf("unhandled stream type: %s", data.Type)
@@ -176,9 +191,6 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 }
 
 func (w *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	if wrappedAction.Action == string(bzwebdial.WebDialInterrupt) {
-		w.doneChan <- true
-	}
 }
 
 func (w *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {

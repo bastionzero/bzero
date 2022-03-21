@@ -144,7 +144,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 			d.closed = true
 		}()
 
-		sequenceNumber := 1
+		sequenceNumber := 0
 		buff := make([]byte, chunkSize)
 
 		for {

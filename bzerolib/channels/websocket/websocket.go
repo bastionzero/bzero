@@ -185,13 +185,14 @@ func New(logger *logger.Logger,
 }
 
 func (w *Websocket) Close(reason error) {
+	w.logger.Infof("websocket closing because: %s", reason)
+
 	// close all of our existing datachannels
 	for _, channel := range w.channels {
 		channel.Close(reason)
 	}
 
 	// tell our tmb to clean up after us
-	w.logger.Infof("websocket closed because: %s", reason)
 	w.tmb.Kill(reason)
 	w.tmb.Wait()
 }
@@ -339,7 +340,7 @@ func (w *Websocket) Connect() error {
 
 		// If we have a private key, we must solve the challenge
 		if solvedChallenge, err := agentController.GetChallenge(w.params["target_id"], config.Data.TargetName, config.Data.PrivateKey, w.params["version"]); err != nil {
-			return fmt.Errorf("error getting challenge: %s", err)
+			return fmt.Errorf("error getting challenge for agent with public key %s: %s", config.Data.PublicKey, err)
 		} else {
 			w.params["solved_challenge"] = solvedChallenge
 		}

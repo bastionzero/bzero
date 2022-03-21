@@ -14,7 +14,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
-	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -70,42 +69,40 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActi
 	return &plugin, nil
 }
 
-func (k *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
-	k.logger.Debugf("Web dial action received %v stream", smessage.Type)
-	k.streamInputChan <- smessage
+func (w *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
+	w.logger.Debugf("Web dial action received %v stream", smessage.Type)
+	w.streamInputChan <- smessage
 }
 
-func (k *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
+func (w *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	// find action by requestid in map and push stream message to it
-	if act, ok := k.getActionsMap(smessage.RequestId); ok {
+	if act, ok := w.getActionsMap(smessage.RequestId); ok {
 		act.ReceiveStream(smessage)
-		return nil
 	}
 
-	rerr := fmt.Errorf("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
-	k.logger.Error(rerr)
-	return rerr
+	w.logger.Tracef("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
+	return nil
 }
 
-func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (w *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
 	// First, process the incoming message
-	if err := k.processKeysplitting(action, actionPayload); err != nil {
+	if err := w.processKeysplitting(action, actionPayload); err != nil {
 		return "", []byte{}, err
 	}
 
 	// Now that we've received, we wait for any new outgoing commands.  Because the existence of any
 	// such command is dependent on the user, there may not be one waiting so we wait for it.
-	k.logger.Info("Waiting for input...")
+	w.logger.Info("Waiting for input...")
 
 	select {
-	case <-k.tmb.Dying():
+	case <-w.tmb.Dying():
 		return "", []byte{}, nil
-	case actionMessage := <-k.outputQueue: // some action's got something to say
-		k.logger.Infof("Sending input from action: %v", actionMessage.Action)
+	case actionMessage := <-w.outputQueue: // some action's got something to say
+		w.logger.Infof("Sending input from action: %v", actionMessage.Action)
 
 		// turn the actionPayload into bytes and return it
 		if actionPayloadBytes, err := json.Marshal(actionMessage.ActionPayload); err != nil {
-			k.logger.Infof("actionPayload: %+v", actionPayload)
+			w.logger.Infof("actionPayload: %+v", actionPayload)
 			return "", []byte{}, fmt.Errorf("could not marshal actionPayload json: %s", err)
 		} else {
 			return actionMessage.Action, actionPayloadBytes, nil
@@ -114,24 +111,9 @@ func (k *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byt
 }
 
 func (w *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
-
-	// we only care about a single action right now
-	if action == string(bzwebdial.WebDialInterrupt) {
-		var webInterrupt bzwebdial.WebInterruptActionPayload
-		if err := json.Unmarshal(actionPayload, &webInterrupt); err != nil {
-			return fmt.Errorf("could not unmarshal json: %s", err)
-		} else {
-
-			// push the keysplitting message to the action
-			if act, ok := w.getActionsMap(webInterrupt.RequestId); ok {
-				act.ReceiveKeysplitting(plugin.ActionWrapper{
-					Action:        action,
-					ActionPayload: actionPayload,
-				})
-				return nil
-			}
-		}
-	}
+	// the only keysplitting message that we would receive is the ack for our web action interrupt
+	// we don't do anything with it on the daemon side, so we receive it here and it will get logged
+	// but no particular action will be taken
 	return nil
 }
 
@@ -193,25 +175,25 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 	return nil
 }
 
-func (k *WebDaemonPlugin) updateActionsMap(newAction IWebDaemonAction, id string) {
+func (w *WebDaemonPlugin) updateActionsMap(newAction IWebDaemonAction, id string) {
 	// Helper function so we avoid writing to this map at the same time
-	k.actionMapLock.Lock()
-	defer k.actionMapLock.Unlock()
+	w.actionMapLock.Lock()
+	defer w.actionMapLock.Unlock()
 
-	k.actions[id] = newAction
+	w.actions[id] = newAction
 }
 
-func (k *WebDaemonPlugin) deleteActionsMap(rid string) {
-	k.actionMapLock.Lock()
-	defer k.actionMapLock.Unlock()
+func (w *WebDaemonPlugin) deleteActionsMap(rid string) {
+	w.actionMapLock.Lock()
+	defer w.actionMapLock.Unlock()
 
-	delete(k.actions, rid)
+	delete(w.actions, rid)
 }
 
-func (k *WebDaemonPlugin) getActionsMap(rid string) (IWebDaemonAction, bool) {
-	k.actionMapLock.Lock()
-	defer k.actionMapLock.Unlock()
+func (w *WebDaemonPlugin) getActionsMap(rid string) (IWebDaemonAction, bool) {
+	w.actionMapLock.Lock()
+	defer w.actionMapLock.Unlock()
 
-	act, ok := k.actions[rid]
+	act, ok := w.actions[rid]
 	return act, ok
 }
