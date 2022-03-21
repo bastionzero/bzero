@@ -73,11 +73,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			break
 		}
 
-		// First validate the requestId
-		if err = d.validateRequestId(dbInput.RequestId); err != nil {
-			break
-		}
-
 		// Then send the data to our remote connection, decode the data first
 		if dataToWrite, nerr := base64.StdEncoding.DecodeString(dbInput.Data); nerr != nil {
 			err = nerr
@@ -95,11 +90,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 		var dataEnd dial.DialActionPayload
 		if jerr := json.Unmarshal(actionPayload, &dataEnd); jerr != nil {
 			err = fmt.Errorf("unable to unmarshal dial input message: %s", jerr)
-			break
-		}
-
-		// First validate the requestId
-		if err = d.validateRequestId(dataEnd.RequestId); err != nil {
 			break
 		}
 
@@ -169,7 +159,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 				return
 			}
 
-			d.logger.Infof("Sending %d bytes from local tcp connection to daemon", n)
+			d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
 
 			// Now send this to daemon
 			content := base64.StdEncoding.EncodeToString(buff[:n])
@@ -192,13 +182,4 @@ func (d *Dial) sendStreamMessage(streamType smsg.StreamType, sequenceNumber int,
 		LogId:          "", // No log id for db messages
 	}
 	d.streamOutputChan <- message
-}
-
-func (d *Dial) validateRequestId(requestId string) error {
-	if requestId != d.requestId {
-		rerr := fmt.Errorf("invalid request ID passed")
-		d.logger.Error(rerr)
-		return rerr
-	}
-	return nil
 }
