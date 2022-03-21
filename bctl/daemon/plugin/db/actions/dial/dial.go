@@ -72,8 +72,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				streamMessages[data.SequenceNumber] = data
 
 				// process the incoming stream messages *in order*
-				streamMessage, ok := streamMessages[expectedSequenceNumber]
-				for ok {
+				for streamMessage, ok := streamMessages[expectedSequenceNumber]; ok; streamMessage, ok = streamMessages[expectedSequenceNumber] {
 					switch smsg.StreamType(streamMessage.Type) {
 					case smsg.DbStream:
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
@@ -97,9 +96,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 					// increment our sequence number
 					expectedSequenceNumber += 1
-
-					// grab our next message, if there is one
-					streamMessage, ok = streamMessages[expectedSequenceNumber]
 				}
 			}
 		}

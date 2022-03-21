@@ -142,8 +142,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				w.streamMessages[data.SequenceNumber] = data
 
 				// process the incoming stream messages *in order*
-				nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]
-				for ok {
+				for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
 					var response webdial.WebOutputActionPayload
 					if contentBytes, err := base64.StdEncoding.DecodeString(nextMessage.Content); err != nil {
 						return err
@@ -182,8 +181,6 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 						// increment our sequence number
 						w.expectedSequenceNumber += 1
-
-						nextMessage, ok = w.streamMessages[w.expectedSequenceNumber]
 					}
 				}
 			default:
