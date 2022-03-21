@@ -78,14 +78,13 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
-							lconn.Write(contentBytes) // did you know this blocks forever if you write too fast to it? yeah.
+							lconn.Write(contentBytes)
 						}
 					case smsg.DbStreamEnd:
 
-						// The agent has closed the connection, close the local connection as well
+						// since there's no more stream coming, close the local connection
 						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
 						d.closed = true
-
 						return
 					default:
 						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
