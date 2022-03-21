@@ -61,7 +61,7 @@ func (c *AgentController) GetChallenge(targetId string, targetName string, priva
 	// Make our POST request
 	response, err := bzhttp.PostContent(c.logger, challengeEndpointFormatted, "application/json", challengeJson)
 	if err != nil {
-		return "", fmt.Errorf("error making post request to challenge agent. Error: %s. Response: %+v", err, response)
+		return "", fmt.Errorf("error making post request to challenge agent. Request: %+v Error: %s. Response: %+v", challengeRequest, err, response)
 	}
 	defer response.Body.Close()
 
