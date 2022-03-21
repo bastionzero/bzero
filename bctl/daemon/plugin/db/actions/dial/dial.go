@@ -29,6 +29,10 @@ type DialAction struct {
 	streamInputChan chan smsg.StreamMessage
 
 	closed bool
+
+	// variables for ensuring we receive stream messages in order
+	expectedSequenceNumber int
+	streamMessages         map[int]smsg.StreamMessage
 }
 
 func New(logger *logger.Logger,
@@ -40,6 +44,9 @@ func New(logger *logger.Logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 30),
+
+		expectedSequenceNumber: 0,
+		streamMessages:         make(map[int]smsg.StreamMessage),
 	}
 
 	return stream, stream.outputChan
@@ -66,25 +73,40 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 					return
 				}
 
-				switch smsg.StreamType(data.Type) {
-				case smsg.DbStream:
-					if contentBytes, err := base64.StdEncoding.DecodeString(data.Content); err != nil {
-						d.logger.Errorf("could not decode db stream content: %s", err)
-					} else {
-						go func() {
-							time.Sleep(time.Millisecond)
-							lconn.Write(contentBytes) // did you know this blocks forever if you write too fast to it? yeah.
-						}()
+				d.streamMessages[data.SequenceNumber] = data
+
+				// process the incoming stream messages *in order*
+				streamMessage, ok := d.streamMessages[d.expectedSequenceNumber]
+				for ok {
+					switch smsg.StreamType(streamMessage.Type) {
+					case smsg.DbStream:
+						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
+							d.logger.Errorf("could not decode db stream content: %s", err)
+						} else {
+							go func() {
+								time.Sleep(time.Millisecond)
+								lconn.Write(contentBytes) // did you know this blocks forever if you write too fast to it? yeah.
+							}()
+						}
+					case smsg.DbStreamEnd:
+
+						// The agent has closed the connection, close the local connection as well
+						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
+						d.closed = true
+
+						return
+					default:
+						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 					}
-				case smsg.DbStreamEnd:
 
-					// The agent has closed the connection, close the local connection as well
-					d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-					d.closed = true
+					// remove the message we've already processed
+					delete(d.streamMessages, d.expectedSequenceNumber)
 
-					return
-				default:
-					d.logger.Errorf("unhandled stream type: %s", data.Type)
+					// increment our sequence number
+					d.expectedSequenceNumber += 1
+
+					// grab our next message, if there is one
+					streamMessage, ok = d.streamMessages[d.expectedSequenceNumber]
 				}
 			}
 		}
