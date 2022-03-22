@@ -189,7 +189,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 		// Grab user's action
 		if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
 			rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
-			d.sendError(rrr.KeysplittingExecutionError, rerr)
+			d.sendError(rrr.ComponentProcessingError, rerr)
 			return
 		} else {
 
@@ -218,11 +218,11 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 			d.sendKeysplitting(keysplittingMessage, dataPayload.Action, returnPayload)
 		} else {
 			rerr := fmt.Errorf("plugin error processing keysplitting message: %s", err)
-			d.sendError(rrr.KeysplittingExecutionError, rerr)
+			d.sendError(rrr.ComponentProcessingError, rerr)
 		}
 	default:
 		rerr := fmt.Errorf("invalid Keysplitting Payload")
-		d.sendError(rrr.KeysplittingExecutionError, rerr)
+		d.sendError(rrr.ComponentProcessingError, rerr)
 	}
 }
 
