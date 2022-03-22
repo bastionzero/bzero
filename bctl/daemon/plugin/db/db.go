@@ -69,7 +69,6 @@ func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 }
 
 func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
-	// find action by requestid in map and push stream message to it
 	if d.action != nil {
 		d.action.ReceiveStream(smessage)
 		return nil
@@ -125,7 +124,6 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 
 	// Create action logger
 	actLogger := d.logger.GetActionLogger(string(dbFood.Action))
-	actLogger.AddRequestId(requestId)
 
 	var actOutputChan chan plugin.ActionWrapper
 	switch bzdb.DbAction(dbFood.Action) {
@@ -145,7 +143,7 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 				if more {
 					d.outputQueue <- m
 				} else {
-					d.logger.Infof("Closing db %s action with request id: %s", dbFood.Action, requestId)
+					d.logger.Infof("Closing db %s action", dbFood.Action)
 					d.tmb.Kill(fmt.Errorf("done with the only action this datachannel will ever do"))
 					return
 				}
