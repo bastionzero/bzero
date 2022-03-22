@@ -80,11 +80,6 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 			return "", []byte{}, rerr
 		}
 
-		// First validate the requestId
-		if err := e.validateRequestId(webWebsocketDataIn.RequestId); err != nil {
-			return "", []byte{}, err
-		}
-
 		return e.dataInWebsocket(webWebsocketDataIn, action)
 	case DaemonStop:
 		// The daemon has closed the websocket, close this one as well
@@ -94,11 +89,6 @@ func (e *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 			rerr := fmt.Errorf("unable to unmarshal daemonStop message: %s", err)
 			e.logger.Error(rerr)
 			return "", []byte{}, rerr
-		}
-
-		// First validate the requestId
-		if err := e.validateRequestId(webWebsocketDaemonStop.RequestId); err != nil {
-			return "", []byte{}, err
 		}
 
 		if e.ws != nil {
@@ -219,13 +209,4 @@ func (e *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStart
 	e.ws = ws
 
 	return action, []byte{}, nil
-}
-
-func (e *WebWebsocket) validateRequestId(requestId string) error {
-	if requestId != e.requestId {
-		rerr := fmt.Errorf("invalid request ID passed")
-		e.logger.Error(rerr)
-		return rerr
-	}
-	return nil
 }
