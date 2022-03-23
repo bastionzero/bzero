@@ -1,0 +1,30 @@
+name: PR Check CI
+
+on:
+  pull_request:
+    branches:
+      # Run CI on PRs to master, develop or feature branches
+      - master
+      - develop
+      - 'feat/**'
+
+jobs:
+  build:
+    name: PR Check CI
+    runs-on: ubuntu-latest
+    steps:
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.CI_AWS_ACCESS_KEY_SECRET }}
+        aws-region: us-east-1
+    - name: Run CodeBuild
+      uses: aws-actions/aws-codebuild-run-build@v1.0.3
+      with:
+        # won't change aws ci name as that is not editable
+        project-name: bzero-ci
+        env-vars-for-codebuild: |
+          version_check_branch
+      env:
+        version_check_branch: ${{ github.base_ref }}
