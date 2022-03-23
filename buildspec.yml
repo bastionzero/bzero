@@ -21,7 +21,6 @@ phases:
   pre_build:
     commands:
       - echo Pre-Build phase...
-      - echo $GITHUB_API_KEY
       - mkdir -p ~/.ssh
       - chmod 700 ~/.ssh
       - aws s3 cp $(dirname $GITHUB_KEY_PATH) ~/.ssh --recursive --include ".pem"
