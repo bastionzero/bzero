@@ -122,9 +122,14 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				}
 
 				// let the agent know we need to stop
-				payload := dial.DialActionPayload{
-					RequestId: d.requestId,
+				dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
+				payload := dial.DialInputActionPayload{
+					RequestId:      d.requestId,
+					SequenceNumber: sequenceNumber,
+					Data:           dataToSend,
 				}
+
+				d.logger.Infof("there are %d bytes in the dial stop payload", n)
 				d.sendOutputMessage(dial.DialStop, payload)
 
 				return
