@@ -198,7 +198,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 
 				// Start plugin based on action
 				actionPrefix := parsedAction[0]
-				if err := d.startPlugin(PluginName(actionPrefix), synPayload.ActionPayload); err != nil {
+				if err := d.startPlugin(PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
 					d.sendError(rrr.ComponentStartupError, err)
 					return
 				}
@@ -226,7 +226,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	}
 }
 
-func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
+func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	// create channel and listener and pass it to the new plugin
@@ -252,9 +252,9 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 	case Kube:
 		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
 	case Db:
-		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, payload)
+		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case Web:
-		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, payload)
+		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)
 	}

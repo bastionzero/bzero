@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/db/actions/dial"
@@ -23,21 +22,18 @@ type DbPlugin struct {
 	logger *logger.Logger
 	tmb    *tomb.Tomb // datachannel's tomb
 
+	action           IDbAction
 	streamOutputChan chan smsg.StreamMessage
 
 	// Either use the host:port
 	remotePort int
 	remoteHost string
-
-	remoteAddress *net.TCPAddr
-
-	// Keep track of all the dials TCP connections
-	action IDbAction
 }
 
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
+	action string,
 	payload []byte) (*DbPlugin, error) {
 
 	// Unmarshal the Syn payload
@@ -46,65 +42,47 @@ func New(parentTmb *tomb.Tomb,
 		return nil, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
-	// Build our address
-	address := fmt.Sprintf("%s:%v", synPayload.RemoteHost, synPayload.RemotePort)
-
-	// Open up a connection to the TCP addr we are trying to connect to
-	raddr, err := net.ResolveTCPAddr("tcp", address)
-	if err != nil {
-		logger.Errorf("Failed to resolve remote address: %s", err)
-		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
-	}
-
+	// Create our plugin
 	plugin := &DbPlugin{
 		remotePort:       synPayload.RemotePort,
 		remoteHost:       synPayload.RemoteHost,
 		logger:           logger,
 		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,
-		remoteAddress:    raddr,
 	}
 
-	return plugin, nil
+	// Start up the action for this plugin
+	subLogger := plugin.logger.GetActionLogger(action)
+	if parsedAction, err := parseAction(action); err != nil {
+		return nil, err
+	} else {
+		switch parsedAction {
+		case db.Dial:
+			if act, err := dial.New(subLogger, plugin.tmb, plugin.streamOutputChan, synPayload.RemoteHost, synPayload.RemotePort); err != nil {
+				return nil, fmt.Errorf("could not start new action: %s", err)
+			} else {
+				plugin.logger.Infof("DB plugin started %v action", action)
+				plugin.action = act
+				return plugin, nil
+			}
+		default:
+			return nil, fmt.Errorf("could not start unhandled db action: %v", action)
+		}
+	}
 }
 
 func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	d.logger.Infof("DB plugin received Data message with %v action", action)
+	d.logger.Debugf("DB plugin received message with %s action", action)
 
 	var rerr error
-	if parsedAction, err := parseAction(action); err != nil {
+	if safePayload, err := cleanPayload(actionPayload); err != nil {
 		rerr = err
-	} else if safePayload, err := cleanPayload(actionPayload); err != nil {
+	} else if action, payload, err := d.action.Receive(action, safePayload); err != nil {
 		rerr = err
 	} else {
-
-		// if we don't have an action for this plugin, start it
-		if d.action == nil {
-			subLogger := d.logger.GetActionLogger(action)
-
-			switch parsedAction {
-			case db.Dial:
-				if act, err := dial.New(subLogger, d.tmb, d.streamOutputChan, d.remoteAddress); err != nil {
-					rerr = fmt.Errorf("could not start new action object: %s", err)
-				} else {
-					d.action = act
-				}
-			default:
-				rerr = fmt.Errorf("unhandled db action: %v", action)
-			}
-		}
-
-		// only continue if we didn't hit an error in the previous section
-		if rerr == nil {
-			if action, payload, err := d.action.Receive(action, safePayload); err != nil {
-				rerr = err
-			} else {
-				return action, payload, err
-			}
-		}
+		return action, payload, err
 	}
 
-	// if we're here, we hit an error
 	d.logger.Error(rerr)
 	return "", []byte{}, rerr
 }

@@ -110,7 +110,7 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 		Writer:  writer,
 	}
 
-	// create our new datachannel in its own go routine so that we can accept other http connections
+	// create our new datachannel
 	if dc, err := w.newDataChannel(string(action), w.websocket); err == nil {
 		dc.Feed(food)
 	} else {

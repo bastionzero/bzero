@@ -23,25 +23,24 @@ type WebPlugin struct {
 	tmb    *tomb.Tomb // datachannel's tomb
 	logger *logger.Logger
 
+	action           IWebAction
 	streamOutputChan chan smsg.StreamMessage
 
 	// remote host:port
 	remotePort int
 	remoteHost string
-
-	// Keep track of all the dials TCP connections
-	action IWebAction
 }
 
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
+	action string,
 	payload []byte) (*WebPlugin, error) {
 
 	// Unmarshal the Syn payload
 	var actionPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &actionPayload); err != nil {
-		return nil, fmt.Errorf("malformed web plugin SYN payload %v", string(payload))
+		return nil, fmt.Errorf("malformed web plugin SYN payload %s", string(payload))
 	}
 
 	plugin := &WebPlugin{
@@ -54,46 +53,44 @@ func New(parentTmb *tomb.Tomb,
 		remoteHost: actionPayload.RemoteHost,
 	}
 
-	return plugin, nil
-}
-
-func (w *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	w.logger.Infof("Web plugin received Data message with %v action", action)
+	// start the action for the plugin
+	subLogger := plugin.logger.GetActionLogger(action)
 
 	var rerr error
 	if parsedAction, err := parseAction(action); err != nil {
 		rerr = err
-	} else if safePayload, err := cleanPayload(actionPayload); err != nil {
-		rerr = err
 	} else {
-
-		// if we don't have an action for this plugin, start it
-		if w.action == nil {
-			subLogger := w.logger.GetActionLogger(action)
-
-			switch parsedAction {
-			case bzweb.Dial:
-				// Create a new web dial action
-				w.action, rerr = webdial.New(subLogger, w.remoteHost, w.remotePort, w.tmb, w.streamOutputChan)
-			case bzweb.Websocket:
-				// Create a new web websocket action
-				w.action, rerr = webwebsocket.New(subLogger, w.remoteHost, w.remotePort, w.tmb, w.streamOutputChan)
-			default:
-				rerr = fmt.Errorf("unhandled db action: %v", action)
-			}
-		}
-
-		// only continue if we didn't hit an error in the previous section
-		if rerr == nil {
-			if action, payload, err := w.action.Receive(action, safePayload); err != nil {
-				rerr = err
-			} else {
-				return action, payload, err
-			}
+		switch parsedAction {
+		case bzweb.Dial:
+			plugin.action, rerr = webdial.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+		case bzweb.Websocket:
+			plugin.action, rerr = webwebsocket.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+		default:
+			rerr = fmt.Errorf("unhandled web action")
 		}
 	}
 
-	// if we're here, we hit an error
+	if rerr != nil {
+		plugin.logger.Errorf("failed to start plugin action %s: %s", action, rerr)
+		return nil, rerr
+	} else {
+		plugin.logger.Infof("Web plugin started %v action", action)
+		return plugin, nil
+	}
+}
+
+func (w *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	w.logger.Debugf("Web plugin received message with %v action", action)
+
+	var rerr error
+	if safePayload, err := cleanPayload(actionPayload); err != nil {
+		rerr = err
+	} else if action, payload, err := w.action.Receive(action, safePayload); err != nil {
+		rerr = err
+	} else {
+		return action, payload, err
+	}
+
 	w.logger.Error(rerr)
 	return "", []byte{}, rerr
 }

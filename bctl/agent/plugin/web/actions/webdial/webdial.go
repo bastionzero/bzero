@@ -79,13 +79,7 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 		}
 	case bzwebdial.WebDialInterrupt:
 		w.interruptChan <- true
-
-		// this return payload tells the daemon to close the action on their side
-		returnPayload := bzwebdial.WebInterruptActionPayload{
-			RequestId: w.requestId,
-		}
-		responsePayloadBytes, _ := json.Marshal(returnPayload)
-		return action, responsePayloadBytes, nil
+		return action, actionPayload, nil
 	default:
 		rerr = fmt.Errorf("unhandled stream action: %v", action)
 	}
