@@ -35,15 +35,25 @@ type Dial struct {
 func New(logger *logger.Logger,
 	pluginTmb *tomb.Tomb,
 	ch chan smsg.StreamMessage,
-	raddr *net.TCPAddr) (*Dial, error) {
+	remoteHost string,
+	remotePort int) (*Dial, error) {
 
-	return &Dial{
-		logger:           logger,
-		tmb:              pluginTmb,
-		closed:           false,
-		streamOutputChan: ch,
-		remoteAddress:    raddr,
-	}, nil
+	// Build our address
+	address := fmt.Sprintf("%s:%v", remoteHost, remotePort)
+
+	// Open up a connection to the TCP addr we are trying to connect to
+	if raddr, err := net.ResolveTCPAddr("tcp", address); err != nil {
+		logger.Errorf("Failed to resolve remote address: %s", err)
+		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
+	} else {
+		return &Dial{
+			logger:           logger,
+			tmb:              pluginTmb,
+			closed:           false,
+			streamOutputChan: ch,
+			remoteAddress:    raddr,
+		}, nil
+	}
 }
 
 func (d *Dial) Closed() bool {
