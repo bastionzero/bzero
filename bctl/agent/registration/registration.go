@@ -98,7 +98,7 @@ func (r *Registration) phoneHome(activationToken string, apiKey string, targetId
 	// Register with Bastion
 	r.logger.Info("Phoning home to BastionZero...")
 
-	if resp, err := r.getRegistrationResponse(activationToken, targetId); err != nil {
+	if resp, err := r.getRegistrationResponse(activationToken, targetId, targetName); err != nil {
 		return err
 	} else {
 		// only replace, if values were undefined by user
@@ -120,7 +120,7 @@ func (r *Registration) phoneHome(activationToken string, apiKey string, targetId
 	}
 }
 
-func (r *Registration) getActivationToken(apiKey string) (string, error) {
+func (r *Registration) getActivationToken(apiKey string, targetName string) (string, error) {
 	r.logger.Infof("Requesting activation token from Bastion")
 	tokenEndpoint, err := bzhttp.BuildEndpoint(r.serviceUrl, activationTokenEndpoint)
 	if err != nil {
@@ -128,7 +128,7 @@ func (r *Registration) getActivationToken(apiKey string) (string, error) {
 	}
 
 	req := ActivationTokenRequest{
-		TargetName: targetName
+		TargetName: targetName,
 	}
 
 	// Marshall the request
@@ -165,7 +165,7 @@ func (r *Registration) getActivationToken(apiKey string) (string, error) {
 	}
 }
 
-func (r *Registration) getRegistrationResponse(activationToken string, targetId string) (RegistrationResponse, error) {
+func (r *Registration) getRegistrationResponse(activationToken string, targetId string, targetName string) (RegistrationResponse, error) {
 	var regResponse RegistrationResponse
 
 	// if the target name was never previously set, then we default to hostname, but only Bastion knows
@@ -193,7 +193,7 @@ func (r *Registration) getRegistrationResponse(activationToken string, targetId 
 		Version:         r.config.Data.Version,
 		EnvironmentId:   r.config.Data.EnvironmentId,
 		EnvironmentName: r.config.Data.EnvironmentName,
-		TargetName:      r.config.Data.TargetName,
+		TargetName:      targetName,
 		TargetHostName:  hostname,
 		TargetId:        targetId,
 		Region:          region,

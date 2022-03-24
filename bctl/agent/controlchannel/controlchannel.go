@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	PollRate = 20
+	HeartRate = 20
 )
 
 type wsMeta struct {
@@ -117,15 +117,13 @@ func Start(logger *logger.Logger,
 
 	// every $PollRate seconds, send healthcheck messages
 	go func() {
-		control.logger.Errorf("Just getting started...")
 		for {
-			control.logger.Errorf("In the for loop...")
 			if msg, err := control.checkHealth(); err != nil {
 				control.logger.Errorf("error creating healthcheck message: %s", err)
 			} else {
 				control.send(am.HealthCheck, msg)
 			}
-			time.Sleep(PollRate * time.Second)
+			time.Sleep(HeartRate * time.Second)
 		}
 	}()
 
