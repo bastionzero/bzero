@@ -210,9 +210,6 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 	c.logger.Debugf("control channel received %v message", am.MessageType(agentMessage.MessageType))
 
 	switch am.MessageType(agentMessage.MessageType) {
-	// DEPRECATED!
-	case am.HealthCheck:
-		c.logger.Debugf("As of version 4.2.0, HealthCheck messages are ignored")
 	case am.OpenWebsocket:
 		var owRequest OpenWebsocketMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &owRequest); err != nil {
@@ -261,7 +258,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 			}
 		}
 	default:
-		return fmt.Errorf("unrecognized message type: %s", agentMessage.MessageType)
+		return fmt.Errorf("unrecognized or ignored message type: %s", agentMessage.MessageType)
 	}
 
 	return nil
