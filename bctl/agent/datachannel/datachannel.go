@@ -256,16 +256,16 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 	case Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
-		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)
+		return fmt.Errorf("unrecognized plugin name")
 	}
 
 	if err != nil {
-		return err
+		rerr := fmt.Errorf("failed to start %s plugin: %s", pluginName, err)
+		d.logger.Error(rerr)
+		return rerr
 	} else {
+		d.logger.Infof("%s plugin started!", pluginName)
 		d.plugin = plugin
+		return nil
 	}
-
-	d.logger.Infof("%s plugin started!", pluginName)
-
-	return nil
 }
