@@ -1,10 +1,6 @@
 package registration
 
 // Register logic
-type ActivationTokenRequest struct {
-	TargetName string `json:"targetName"`
-}
-
 type ActivationTokenResponse struct {
 	ActivationToken string `json:"activationToken"`
 }

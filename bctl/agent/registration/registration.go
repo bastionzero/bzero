@@ -23,13 +23,17 @@ const (
 	getConnectionServiceEndpoint = "/api/v2/connection-service/url"
 )
 
+type ActivationTokenRequest struct {
+	TargetName string `json:"targetName"`
+}
+
 type Registration struct {
 	logger     *logger.Logger
 	config     *vault.Vault
 	serviceUrl string
 }
 
-func Register(logger *logger.Logger, serviceUrl string, activationToken string, apiKey string, targetId string) error {
+func Register(logger *logger.Logger, serviceUrl string, activationToken string, apiKey string, targetId string, targetName string) error {
 	if config, err := vault.LoadVault(); err != nil {
 		return fmt.Errorf("could not load vault: %s", err)
 
@@ -54,7 +58,7 @@ func Register(logger *logger.Logger, serviceUrl string, activationToken string, 
 		}
 
 		// Complete registration with the Bastion
-		if err := reg.phoneHome(activationToken, apiKey, targetId); err != nil {
+		if err := reg.phoneHome(activationToken, apiKey, targetId, targetName); err != nil {
 			return err
 		}
 
@@ -81,10 +85,10 @@ func (r *Registration) generateKeys() error {
 	return nil
 }
 
-func (r *Registration) phoneHome(activationToken string, apiKey string, targetId string) error {
+func (r *Registration) phoneHome(activationToken string, apiKey string, targetId string, targetName string) error {
 	// If we don't have an activation token, use api key to get one
 	if activationToken == "" {
-		if token, err := r.getActivationToken(apiKey); err != nil {
+		if token, err := r.getActivationToken(apiKey, targetName); err != nil {
 			return err
 		} else {
 			activationToken = token
@@ -105,9 +109,6 @@ func (r *Registration) phoneHome(activationToken string, apiKey string, targetId
 			r.config.Data.IdpOrgId = resp.OrgID
 		}
 
-		// set our remaining values
-		r.config.Data.TargetName = resp.TargetName
-
 		// If targetId is empty, that means to use the activationToken as the id of the target
 		if targetId == "" {
 			targetId = activationToken
@@ -127,7 +128,7 @@ func (r *Registration) getActivationToken(apiKey string) (string, error) {
 	}
 
 	req := ActivationTokenRequest{
-		TargetName: r.config.Data.TargetName,
+		TargetName: targetName
 	}
 
 	// Marshall the request

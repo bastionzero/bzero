@@ -4,6 +4,8 @@ type AliveCheckAgentToBastionMessage struct {
 	Alive        bool     `json:"alive"`
 	ClusterUsers []string `json:"clusterUsers"`
 }
+
+// TODO: DEPRECATED
 type HealthCheckMessage struct {
 	TargetName string `json:"targetName"`
 }
