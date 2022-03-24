@@ -1,4 +1,4 @@
-name: PR Check CI
+name: PR Check PR
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    name: PR Check CI
+    name: PR Check PR
     runs-on: ubuntu-latest
     steps:
     - name: Configure AWS Credentials
@@ -22,8 +22,7 @@ jobs:
     - name: Run CodeBuild
       uses: aws-actions/aws-codebuild-run-build@v1.0.3
       with:
-        # won't change aws ci name as that is not editable
-        project-name: bzero-ci
+        project-name: check-pr
         env-vars-for-codebuild: |
           version_check_branch
       env:
