@@ -1,12 +1,7 @@
-# spec:
-# https://docs.aws.amazon.com/codebuild/latest/userguide/build-spec-ref.html
 version: 0.2
 env:
   variables:
     TZ: "America/New_York date"
-    # The remote origin that will be used if building through CodePipeline
-    remote_origin: "git@github.com:bastionzero/zli.git"
-    version_check_branch: master
   parameter-store:
     GITHUB_KEY_PATH: "/github/sshkey/path"
     SSH_KEY_PATH: "/webshell/sshkey/path"
