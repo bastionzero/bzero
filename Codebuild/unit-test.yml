@@ -1,0 +1,45 @@
+# spec:
+# https://docs.aws.amazon.com/codebuild/latest/userguide/build-spec-ref.html
+version: 0.2
+env:
+  variables:
+    TZ: "America/New_York date"
+    # The remote origin that will be used if building through CodePipeline
+    remote_origin: "git@github.com:bastionzero/zli.git"
+    version_check_branch: master
+    BZERO_IN_CI: 1
+  parameter-store:
+    GITHUB_KEY_PATH: "/github/sshkey/path"
+    SSH_KEY_PATH: "/webshell/sshkey/path"
+  secrets-manager:
+    GITHUB_API_KEY: arn:aws:secretsmanager:us-east-1:238681891460:secret:development/infra/roleandfrank-github-api-key-1Cok4j:Token
+phases:
+  install:
+    runtime-versions:
+      nodejs: 14
+    commands:
+      - echo Install started on `date`
+      # We need to 1.16 and this isnt in yum
+      - wget https://dl.google.com/go/go1.16.4.linux-amd64.tar.gz
+      - tar -C /usr/local -xzf go1.16.4.linux-amd64.tar.gz
+      - echo 'export PATH=/usr/local/go/bin:$PATH' >>~/.bash_profile
+      - export PATH=/usr/local/go/bin:$PATH
+  pre_build:
+    commands:
+      - echo Pre-Build phase...
+      - mkdir -p ~/.ssh
+      - chmod 700 ~/.ssh
+      - aws s3 cp $(dirname $GITHUB_KEY_PATH) ~/.ssh --recursive --include ".pem"
+      - aws s3 cp $(dirname $SSH_KEY_PATH) ~/.ssh --recursive --include ".pem"
+      - chmod 600 ~/.ssh/*
+      - ls -als ~/.ssh/*
+      - eval `ssh-agent -s`
+      - ssh-add ~/.ssh/*.pem
+      - git submodule update --init --recursive --depth 50
+      # Install Bzero-QA
+      - git clone git@github.com:bastionzero/cwc-infra.git --branch feat/testing-overhaul /cwc-infra/
+      - pip3 install -e /cwc-infra/Bzero-Common/. && pip3 install -e /cwc-infra/Bzero-QA/.
+  build:
+    commands:
+      - echo Build started on `date`
+      - bzero-qa test -unit-tests
