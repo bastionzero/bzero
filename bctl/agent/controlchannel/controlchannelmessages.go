@@ -5,11 +5,6 @@ type AliveCheckAgentToBastionMessage struct {
 	ClusterUsers []string `json:"clusterUsers"`
 }
 
-// TODO: DEPRECATED
-type HealthCheckMessage struct {
-	TargetName string `json:"targetName"`
-}
-
 // websocket and datachannel management payloads
 type OpenWebsocketMessage struct {
 	ConnectionId         string `json:"connectionId"`

@@ -23,10 +23,6 @@ const (
 	getConnectionServiceEndpoint = "/api/v2/connection-service/url"
 )
 
-type ActivationTokenRequest struct {
-	TargetName string `json:"targetName"`
-}
-
 type Registration struct {
 	logger     *logger.Logger
 	config     *vault.Vault
