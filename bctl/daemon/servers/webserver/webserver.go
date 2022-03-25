@@ -19,6 +19,8 @@ const (
 	// websocket connection parameters for all datachannels created by tcp server
 	autoReconnect = true
 	getChallenge  = false
+
+	maxRequestSize = 100 * 1024 * 1024 // 100MB
 )
 
 type WebServer struct {
@@ -83,7 +85,7 @@ func StartWebServer(logger *logger.Logger,
 	go func() {
 		// Define our http handlers
 		// library will automatically put each call in its own thread
-		http.HandleFunc("/", listener.handleHttp)
+		http.HandleFunc("/", maxBytes(listener.handleHttp))
 
 		if err := http.ListenAndServe(fmt.Sprintf("%s:%s", localHost, localPort), nil); err != nil {
 			logger.Error(err)
@@ -91,6 +93,19 @@ func StartWebServer(logger *logger.Logger,
 	}()
 
 	return nil
+}
+
+// this function operates as middleware between the http handler and the handleHttp call below
+// it checks to see if someone is trying to send a request body that is far too large
+func maxBytes(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		h(w, r)
+	}
 }
 
 func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request) {
