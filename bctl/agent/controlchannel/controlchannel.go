@@ -118,12 +118,17 @@ func Start(logger *logger.Logger,
 	// send healthcheck messages at every "heartbeat"
 	go func() {
 		for {
-			if msg, err := control.checkHealth(); err != nil {
-				control.logger.Errorf("error creating healthcheck message: %s", err)
-			} else {
-				control.send(am.HealthCheck, msg)
+			select {
+			case <-control.tmb.Dying():
+				return
+			default:
+				if msg, err := control.checkHealth(); err != nil {
+					control.logger.Errorf("error creating healthcheck message: %s", err)
+				} else {
+					control.send(am.HealthCheck, msg)
+				}
+				time.Sleep(heartRate)
 			}
-			time.Sleep(heartRate)
 		}
 	}()
 
@@ -208,6 +213,8 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 	c.logger.Debugf("control channel received %v message", am.MessageType(agentMessage.MessageType))
 
 	switch am.MessageType(agentMessage.MessageType) {
+	case am.HealthCheck:
+		return fmt.Errorf("as of version 4.2.0 this agent no longer accepts healthcheck messages; ignoring")
 	case am.OpenWebsocket:
 		var owRequest OpenWebsocketMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &owRequest); err != nil {
@@ -256,7 +263,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 			}
 		}
 	default:
-		return fmt.Errorf("unrecognized or ignored message type: %s", agentMessage.MessageType)
+		return fmt.Errorf("unrecognized message type: %s", agentMessage.MessageType)
 	}
 
 	return nil
