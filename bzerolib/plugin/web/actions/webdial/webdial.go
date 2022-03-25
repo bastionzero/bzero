@@ -19,6 +19,7 @@ type WebInputActionPayload struct {
 	Method         string              `json:"method"`
 	SequenceNumber int                 `json:"sequenceNumber"`
 	RequestId      string              `json:"requestId"`
+	More           bool                `json:"more"`
 }
 
 type WebOutputActionPayload struct {
