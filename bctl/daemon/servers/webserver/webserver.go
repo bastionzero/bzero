@@ -105,7 +105,7 @@ func (w *WebServer) capRequestSize(h http.HandlerFunc) http.HandlerFunc {
 		if err := request.ParseForm(); err != nil {
 			rerr := "BastionZero: Request is too large. Maximum request size is 10MB"
 			w.logger.Errorf(rerr)
-			http.Error(writer, rerr, http.StatusBadRequest)
+			http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
 			return
 		} else if request.ContentLength > maxFileUpload {
 			// for multipart/form-data type requests, the request body won't exceed our maximum single request size
@@ -114,7 +114,7 @@ func (w *WebServer) capRequestSize(h http.HandlerFunc) http.HandlerFunc {
 			// We shouldn't be relying on content length too much since it can be modified to be whatever.
 			rerr := "BastionZero: Request is too large. Maximum upload is 150MB"
 			w.logger.Errorf(rerr)
-			http.Error(writer, rerr, http.StatusBadRequest)
+			http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
 			return
 		}
 		h(writer, request)
