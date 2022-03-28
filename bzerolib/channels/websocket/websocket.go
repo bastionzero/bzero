@@ -572,6 +572,7 @@ func (w *Websocket) getChannel(id string) (IChannel, bool) {
 	return channel, ok
 }
 
+// can be used by other processes to check if our connection is open
 func (w *Websocket) Ready() bool {
 	return w.ready
 }
