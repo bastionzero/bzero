@@ -82,17 +82,14 @@ func New(parentTmb *tomb.Tomb,
 func (w *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	w.logger.Debugf("Web plugin received message with %v action", action)
 
-	var rerr error
 	if safePayload, err := cleanPayload(actionPayload); err != nil {
-		rerr = err
+		w.logger.Error(err)
+		return "", []byte{}, err
 	} else if action, payload, err := w.action.Receive(action, safePayload); err != nil {
-		rerr = err
+		return "", []byte{}, err
 	} else {
 		return action, payload, err
 	}
-
-	w.logger.Error(rerr)
-	return "", []byte{}, rerr
 }
 
 func parseAction(action string) (bzweb.WebAction, error) {
