@@ -116,8 +116,6 @@ func Start(logger *logger.Logger,
 	})
 
 	// send healthcheck messages at every "heartbeat"
-	// TODO: wait for websocket.Ready() to return true,
-	// 		 or else listen on a channel?
 	go func() {
 		for {
 			select {
