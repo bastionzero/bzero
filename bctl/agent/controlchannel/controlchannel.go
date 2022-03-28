@@ -85,6 +85,28 @@ func Start(logger *logger.Logger,
 	// Set up our handler to deal with incoming messages
 	control.tmb.Go(func() error {
 		defer websocket.Unsubscribe(id)
+
+		// send healthcheck messages at every "heartbeat"
+		control.tmb.Go(func() error {
+			for {
+				select {
+				case <-control.tmb.Dying():
+					logger.Info("Ceasing healthchecks") // use this for my own sanity
+					return nil
+				default:
+					// don't bother trying to send heartbeats if we're not connected
+					if websocket.Ready() {
+						if msg, err := control.checkHealth(); err != nil {
+							control.logger.Errorf("error creating healthcheck message: %s", err)
+						} else {
+							control.send(am.HealthCheck, msg)
+						}
+					}
+					time.Sleep(heartRate)
+				}
+			}
+		})
+
 		for {
 			select {
 			case <-control.tmb.Dying():
@@ -114,27 +136,6 @@ func Start(logger *logger.Logger,
 			}
 		}
 	})
-
-	// send healthcheck messages at every "heartbeat"
-	go func() {
-		for {
-			select {
-			case <-control.tmb.Dying():
-				logger.Info("Ceasing healthchecks") // use this for my own sanity
-				return
-			default:
-				// don't bother trying to send heartbeats if we're not connected
-				if websocket.Ready() {
-					if msg, err := control.checkHealth(); err != nil {
-						control.logger.Errorf("error creating healthcheck message: %s", err)
-					} else {
-						control.send(am.HealthCheck, msg)
-					}
-				}
-				time.Sleep(heartRate)
-			}
-		}
-	}()
 
 	return control, nil
 }
