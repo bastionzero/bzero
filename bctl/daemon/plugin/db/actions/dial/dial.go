@@ -73,20 +73,19 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 				// process the incoming stream messages *in order*
 				for streamMessage, ok := streamMessages[expectedSequenceNumber]; ok; streamMessage, ok = streamMessages[expectedSequenceNumber] {
-					switch smsg.StreamType(streamMessage.Type) {
-					case smsg.DbStream:
+					if smsg.StreamType(streamMessage.Type) == smsg.Stream && streamMessage.More {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
 							lconn.Write(contentBytes)
 						}
-					case smsg.DbStreamEnd:
+					} else if smsg.StreamType(streamMessage.Type) == smsg.Stream && !streamMessage.More {
 
 						// since there's no more stream coming, close the local connection
 						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
 						d.closed = true
 						return
-					default:
+					} else {
 						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 					}
 
