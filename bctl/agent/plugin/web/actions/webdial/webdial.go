@@ -99,13 +99,9 @@ func (w *WebDial) handleRequest(requestPayload bzwebdial.WebInputActionPayload) 
 	}
 }
 
-func (w *WebDial) handleNewHttpRequest(dataIn bzwebdial.WebInputActionPayload) error {
-	// Build the endpoint given the remoteHost
-	remoteUrl := fmt.Sprintf("%s:%v", w.remoteHost, w.remotePort)
+func (w *WebDial) handleNewHttpRequest(requestPayload bzwebdial.WebInputActionPayload) error {
 
-	if endpoint, err := bzhttp.BuildEndpoint(remoteUrl, dataIn.Endpoint); err != nil {
-		return err
-	} else if request, err := w.buildHttpRequest(endpoint, w.requestBody, dataIn.Method, dataIn.Headers); err != nil {
+	if request, err := w.buildHttpRequest(requestPayload.Endpoint, w.requestBody, requestPayload.Method, requestPayload.Headers); err != nil {
 		return err
 	} else {
 
@@ -124,7 +120,7 @@ func (w *WebDial) handleNewHttpRequest(dataIn bzwebdial.WebInputActionPayload) e
 
 			responsePayload := &bzwebdial.WebOutputActionPayload{
 				StatusCode: http.StatusBadGateway,
-				RequestId:  dataIn.RequestId,
+				RequestId:  requestPayload.RequestId,
 				Headers:    map[string][]string{},
 				Content:    []byte{},
 			}
@@ -222,24 +218,29 @@ func (w *WebDial) sendStreamMessage(payload *bzwebdial.WebOutputActionPayload, s
 }
 
 func (w *WebDial) buildHttpRequest(endpoint string, body []byte, method string, headers map[string][]string) (*http.Request, error) {
-	bodyBytesReader := bytes.NewReader(body)
-	req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
 
-	// Add any headers
-	for name, values := range headers {
+	// Build the endpoint given the remoteHost
+	remoteUrl := fmt.Sprintf("%s:%v", w.remoteHost, w.remotePort)
 
-		// Loop over all values for the name.
-		for _, value := range values {
-			req.Header.Set(name, value)
-		}
-	}
-
-	if remoteHostUrl, err := url.Parse(w.remoteHost); err != nil {
+	if endpoint, err := bzhttp.BuildEndpoint(remoteUrl, endpoint); err != nil {
+		return nil, err
+	} else if remoteHostUrl, err := url.Parse(w.remoteHost); err != nil {
 		w.logger.Error(fmt.Errorf("error parsing remote host url %s", w.remoteHost))
 		return nil, err
 	} else {
-		req.Header.Set("Host", remoteHostUrl.Host)
-	}
+		bodyBytesReader := bytes.NewReader(body)
+		req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
 
-	return req, nil
+		// Add any headers
+		for name, values := range headers {
+
+			// Loop over all values for the name.
+			for _, value := range values {
+				req.Header.Set(name, value)
+			}
+		}
+
+		req.Header.Set("Host", remoteHostUrl.Host)
+		return req, nil
+	}
 }

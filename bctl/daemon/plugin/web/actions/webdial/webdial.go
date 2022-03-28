@@ -78,7 +78,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	headers := bzhttp.GetHeaders(request.Header)
 
 	// Send our request, in chunks if the body > chunksize
-	w.sendRequestInChunks(request.Body, request.URL.String(), headers, request.Method)
+	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
 
 	// this signals to the parent plugin that the action is done
 	defer close(w.outputChan)
@@ -170,7 +170,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	}
 }
 
-func (w *WebDialAction) sendRequestInChunks(body io.ReadCloser, endpoint string, headers map[string][]string, method string) {
+func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, headers map[string][]string, method string) {
 	buf := make([]byte, chunkSize)
 	more := true
 	sequenceNumber := 0
