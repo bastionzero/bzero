@@ -88,12 +88,13 @@ func Start(logger *logger.Logger,
 
 		// send healthcheck messages at every "heartbeat"
 		control.tmb.Go(func() error {
+			ticker := time.NewTicker(heartRate)
 			for {
 				select {
 				case <-control.tmb.Dying():
-					logger.Info("Ceasing healthchecks") // use this for my own sanity
+					logger.Info("Ceasing heartbeats")
 					return nil
-				default:
+				case <-ticker.C:
 					// don't bother trying to send heartbeats if we're not connected
 					if websocket.Ready() {
 						if msg, err := control.checkHealth(); err != nil {
@@ -102,7 +103,6 @@ func Start(logger *logger.Logger,
 							control.send(am.HealthCheck, msg)
 						}
 					}
-					time.Sleep(heartRate)
 				}
 			}
 		})
