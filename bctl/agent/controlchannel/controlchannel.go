@@ -125,10 +125,13 @@ func Start(logger *logger.Logger,
 				logger.Info("Ceasing healthchecks") // use this for my own sanity
 				return
 			default:
-				if msg, err := control.checkHealth(); err != nil {
-					control.logger.Errorf("error creating healthcheck message: %s", err)
-				} else {
-					control.send(am.HealthCheck, msg)
+				// don't bother trying to send heartbeats if we're not connected
+				if websocket.Ready() {
+					if msg, err := control.checkHealth(); err != nil {
+						control.logger.Errorf("error creating healthcheck message: %s", err)
+					} else {
+						control.send(am.HealthCheck, msg)
+					}
 				}
 				time.Sleep(heartRate)
 			}
