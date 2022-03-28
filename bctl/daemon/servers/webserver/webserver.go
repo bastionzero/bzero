@@ -22,7 +22,7 @@ const (
 
 	// TODO: make these easily configurable values
 	maxRequestSize = 10 * 1024 * 1024  // 10MB
-	maxFileUpload  = 100 * 1024 * 1024 // 150MB
+	maxFileUpload  = 150 * 1024 * 1024 // 150MB
 )
 
 type WebServer struct {
