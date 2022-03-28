@@ -44,6 +44,7 @@ type SecretData struct {
 	PublicKey       string
 	PrivateKey      string
 	ServiceUrl      string
+	TargetName      string
 	Namespace       string
 	IdpProvider     string
 	IdpOrgId        string

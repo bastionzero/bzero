@@ -304,7 +304,7 @@ func handleRegistration(logger *logger.Logger) error {
 		}
 
 		// register the agent with bastion, if not already registered
-		if err := registration.Register(logger, serviceUrl, activationToken, registrationKey, targetId, targetName); err != nil {
+		if err := registration.Register(logger, serviceUrl, activationToken, registrationKey, targetId); err != nil {
 			reportError(logger, err)
 			return err
 		}
@@ -340,6 +340,7 @@ func isRegistered() (bool, error) {
 				EnvironmentId:   environmentId,
 				EnvironmentName: environmentName,
 				AgentType:       agentType,
+				TargetName:      targetName,
 				Version:         getAgentVersion(),
 			}
 			if err := config.Save(); err != nil {
@@ -351,6 +352,7 @@ func isRegistered() (bool, error) {
 
 		// load any variables we might need
 		serviceUrl = config.Data.ServiceUrl
+		targetName = config.Data.TargetName
 	}
 
 	return registered, nil

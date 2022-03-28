@@ -571,3 +571,7 @@ func (w *Websocket) getChannel(id string) (IChannel, bool) {
 	channel, ok := w.channels[id]
 	return channel, ok
 }
+
+func (w *Websocket) Ready() bool {
+	return w.ready
+}
