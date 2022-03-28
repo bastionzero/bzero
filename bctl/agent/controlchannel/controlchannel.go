@@ -89,6 +89,7 @@ func Start(logger *logger.Logger,
 		// send healthcheck messages at every "heartbeat"
 		control.tmb.Go(func() error {
 			ticker := time.NewTicker(heartRate)
+			defer ticker.Stop()
 			for {
 				select {
 				case <-control.tmb.Dying():
