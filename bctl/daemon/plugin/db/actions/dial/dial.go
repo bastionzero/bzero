@@ -80,7 +80,6 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 							lconn.Write(contentBytes)
 						}
 					} else if smsg.StreamType(streamMessage.Type) == smsg.Stream && !streamMessage.More {
-
 						// since there's no more stream coming, close the local connection
 						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
 						d.closed = true
