@@ -38,13 +38,12 @@ func New(logger *logger.Logger,
 		agentType:  agentType,
 	}, nil
 }
-func (c *AgentController) GetChallenge(targetId string, targetName string, privateKey string, version string) (string, error) {
+func (c *AgentController) GetChallenge(targetId string, privateKey string, version string) (string, error) {
 	// Get challenge
 	challengeRequest := GetChallengeMessage{
-		TargetId:   targetId,
-		TargetName: targetName,
-		AgentType:  c.agentType,
-		Version:    version,
+		TargetId:  targetId,
+		AgentType: c.agentType,
+		Version:   version,
 	}
 
 	challengeJson, err := json.Marshal(challengeRequest)

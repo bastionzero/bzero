@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
+	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/datachannel"
 	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
@@ -19,6 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+)
+
+const (
+	heartRate = 20 * time.Second
 )
 
 type wsMeta struct {
@@ -80,6 +85,29 @@ func Start(logger *logger.Logger,
 	// Set up our handler to deal with incoming messages
 	control.tmb.Go(func() error {
 		defer websocket.Unsubscribe(id)
+
+		// send healthcheck messages at every "heartbeat"
+		control.tmb.Go(func() error {
+			ticker := time.NewTicker(heartRate)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-control.tmb.Dying():
+					logger.Info("Ceasing heartbeats")
+					return nil
+				case <-ticker.C:
+					// don't bother trying to send heartbeats if we're not connected
+					if websocket.Ready() {
+						if msg, err := control.checkHealth(); err != nil {
+							control.logger.Errorf("error creating healthcheck message: %s", err)
+						} else {
+							control.send(am.HealthCheck, msg)
+						}
+					}
+				}
+			}
+		})
+
 		for {
 			select {
 			case <-control.tmb.Dying():
@@ -192,17 +220,7 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.HealthCheck:
-		var healthCheckMessage HealthCheckMessage
-		if err := json.Unmarshal(agentMessage.MessagePayload, &healthCheckMessage); err != nil {
-			return fmt.Errorf("malformed check health request: %s", err)
-		} else {
-			// send message to be processed
-			if msg, err := c.checkHealth(healthCheckMessage); err != nil {
-				return fmt.Errorf("error processing health check message: %s", err)
-			} else {
-				c.send(am.HealthCheck, msg)
-			}
-		}
+		return fmt.Errorf("as of version 4.2.0 this agent no longer accepts healthcheck messages; ignoring")
 	case am.OpenWebsocket:
 		var owRequest OpenWebsocketMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &owRequest); err != nil {
@@ -257,18 +275,8 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 	return nil
 }
 
-func (c *ControlChannel) checkHealth(healthCheckMessage HealthCheckMessage) (AliveCheckAgentToBastionMessage, error) {
-	// Load in our saved config
-	secretData, err := vault.LoadVault()
-	if err != nil {
-		return AliveCheckAgentToBastionMessage{}, err
-	}
-
-	// Update the vault value
-	secretData.Data.TargetName = healthCheckMessage.TargetName
-	secretData.Save()
-
-	// Also let bastion know a list of valid cluster roles
+func (c *ControlChannel) checkHealth() (AliveCheckAgentToBastionMessage, error) {
+	// Let bastion know a list of valid cluster roles
 	// Create our api object
 	if vault.InCluster() {
 		return checkInClusterHealth()
