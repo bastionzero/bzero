@@ -48,6 +48,9 @@ type Keysplitting struct {
 	refreshTokenCommand string
 
 	ackPublicKey string
+
+	// hash map to keep track of sent keysplitting messages
+	sentMessages map[string]*ksmsg.KeysplittingMessage
 }
 
 func New(
@@ -63,6 +66,7 @@ func New(
 		refreshTokenCommand: refreshTokenCommand,
 		agentPubKey:         agentPubKey,
 		ackPublicKey:        "",
+		sentMessages:        make(map[string]*ksmsg.KeysplittingMessage),
 	}
 
 	return keysplitter, nil
@@ -95,10 +99,15 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		}
 	}
 
-	// Verify received hash pointer matches expected hash pointer
-	if hpointer != k.expectedHPointer {
-		return fmt.Errorf("%T hash pointer did not match expected hash pointer", ksMessage.KeysplittingPayload)
+	if _, ok := k.sentMessages[hpointer]; ok {
+		delete(k.sentMessages, hpointer)
+	} else {
+		return fmt.Errorf("%T message did not point to a previously sent message", ksMessage.KeysplittingPayload)
 	}
+	// Verify received hash pointer matches expected hash pointer
+	// if hpointer != k.expectedHPointer {
+	// 	return fmt.Errorf("%T hash pointer did not match expected hash pointer", ksMessage.KeysplittingPayload)
+	// }
 
 	return nil
 }
@@ -137,6 +146,8 @@ func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 	if err := responseMessage.Sign(k.privatekey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %v", err.Error())
 	} else {
+		// Before we return the completed message, add it to our hash map
+		k.sentMessages[k.expectedHPointer] = &responseMessage
 		return responseMessage, nil
 	}
 }
