@@ -15,14 +15,15 @@ import (
 const schemaVersionTargetIdNotSet string = "1.0"
 
 type BZCertMetadata struct {
-	Cert bzcrt.BZCert
-	Exp  time.Time
+	Hash       string
+	Cert       bzcrt.BZCert
+	Expiration time.Time
 }
 
 type Keysplitting struct {
 	hPointer         string
 	expectedHPointer string
-	bzCerts          map[string]BZCertMetadata // only for agent
+	bzCert           BZCertMetadata // only for agent
 	publickey        string
 	privatekey       string
 	idpProvider      string
@@ -48,7 +49,6 @@ func New(config IKeysplittingConfig) (*Keysplitting, error) {
 	return &Keysplitting{
 		hPointer:            "",
 		expectedHPointer:    "",
-		bzCerts:             make(map[string]BZCertMetadata),
 		publickey:           config.GetPublicKey(),
 		privatekey:          config.GetPrivateKey(),
 		idpProvider:         config.GetIdpProvider(),
@@ -94,27 +94,27 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			}
 		}
 
-		// All checks have passed. Add cert to dict of known bzCerts
-		k.bzCerts[hash] = BZCertMetadata{
-			Cert: synPayload.BZCert,
-			Exp:  exp,
+		// All checks have passed. Make this BZCert that of the active user
+		k.bzCert = BZCertMetadata{
+			Hash:       hash,
+			Cert:       synPayload.BZCert,
+			Expiration: exp,
 		}
 	case ksmsg.Data:
 		dataPayload := ksMessage.KeysplittingPayload.(ksmsg.DataPayload)
 
 		// Check BZCert matches one we have stored
-		certMetadata, ok := k.bzCerts[dataPayload.BZCertHash]
-		if !ok {
-			return fmt.Errorf("could not match DATA's BZCert hash to one previously received")
+		if k.bzCert.Hash != dataPayload.BZCertHash {
+			return fmt.Errorf("DATA's BZCert does not match the active user's")
 		}
 
 		// Verify the signature
-		if err := ksMessage.VerifySignature(certMetadata.Cert.ClientPublicKey); err != nil {
+		if err := ksMessage.VerifySignature(k.bzCert.Cert.ClientPublicKey); err != nil {
 			return err
 		}
 
 		// Check that BZCert isn't expired
-		if time.Now().After(certMetadata.Exp) {
+		if time.Now().After(k.bzCert.Expiration) {
 			return fmt.Errorf("DATA's referenced BZCert has expired")
 		}
 
