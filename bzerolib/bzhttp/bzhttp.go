@@ -308,7 +308,7 @@ func (b *bzhttp) get() (*http.Response, error) {
 		}
 
 		if err != nil || response.StatusCode != http.StatusOK {
-			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
+			b.logger.Infof("error making get request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
 
 			bodyString := extractBody(response)
 			b.logger.Infof("error: %s", bodyString)
