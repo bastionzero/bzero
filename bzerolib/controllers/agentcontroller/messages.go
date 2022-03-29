@@ -13,10 +13,9 @@ type RegisterAgentMessage struct {
 
 // Message definitions for challenge request/response
 type GetChallengeMessage struct {
-	TargetId   string `json:"targetId"`
-	TargetName string `json:"targetName"`
-	AgentType  string `json:"agentType"`
-	Version    string `json:"version"`
+	TargetId  string `json:"targetId"`
+	AgentType string `json:"agentType"`
+	Version   string `json:"version"`
 }
 
 type GetChallengeResponse struct {

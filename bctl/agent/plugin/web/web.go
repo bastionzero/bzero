@@ -48,6 +48,7 @@ func New(parentTmb *tomb.Tomb,
 		logger: logger,
 
 		streamOutputChan: ch,
+<<<<<<< HEAD
 
 		remotePort: actionPayload.RemotePort,
 		remoteHost: actionPayload.RemoteHost,
@@ -111,6 +112,68 @@ func cleanPayload(payload []byte) ([]byte, error) {
 		payload = payload[1 : len(payload)-1]
 	}
 
+=======
+
+		remotePort: actionPayload.RemotePort,
+		remoteHost: actionPayload.RemoteHost,
+	}
+
+	// start the action for the plugin
+	subLogger := plugin.logger.GetActionLogger(action)
+
+	var rerr error
+	if parsedAction, err := parseAction(action); err != nil {
+		rerr = err
+	} else {
+		switch parsedAction {
+		case bzweb.Dial:
+			plugin.action, rerr = webdial.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+		case bzweb.Websocket:
+			plugin.action, rerr = webwebsocket.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+		default:
+			rerr = fmt.Errorf("unhandled web action")
+		}
+	}
+
+	if rerr != nil {
+		plugin.logger.Errorf("failed to start plugin action %s: %s", action, rerr)
+		return nil, rerr
+	} else {
+		plugin.logger.Infof("Web plugin started %v action", action)
+		return plugin, nil
+	}
+}
+
+func (w *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	w.logger.Debugf("Web plugin received message with %v action", action)
+
+	if safePayload, err := cleanPayload(actionPayload); err != nil {
+		w.logger.Error(err)
+		return "", []byte{}, err
+	} else if action, payload, err := w.action.Receive(action, safePayload); err != nil {
+		return "", []byte{}, err
+	} else {
+		return action, payload, err
+	}
+}
+
+func parseAction(action string) (bzweb.WebAction, error) {
+	parsedAction := strings.Split(action, "/")
+	if len(parsedAction) < 2 {
+		return "", fmt.Errorf("malformed action: %s", action)
+	}
+	return bzweb.WebAction(parsedAction[1]), nil
+}
+
+func cleanPayload(payload []byte) ([]byte, error) {
+	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
+	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
+	// so that we can murder its family
+	if len(payload) > 0 {
+		payload = payload[1 : len(payload)-1]
+	}
+
+>>>>>>> 0c2bc9b9b84ea9526b0b95cb7fffb7a6582272dc
 	// Json unmarshalling encodes bytes in base64
 	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
 		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
