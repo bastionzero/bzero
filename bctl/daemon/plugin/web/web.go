@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
@@ -32,25 +31,28 @@ type WebDaemonPlugin struct {
 	streamInputChan chan smsg.StreamMessage
 	outputQueue     chan plugin.ActionWrapper
 
-	actions       map[string]IWebDaemonAction
-	actionMapLock sync.RWMutex // for keeping the action map thread-safe
+	action IWebDaemonAction
 
 	// Web-specific vars
-	remoteHost     string
-	remotePort     int
+	remoteHost string
+	remotePort int
+
+	// For processing incoming messages in order
 	sequenceNumber int
 }
 
 func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActionParams) (*WebDaemonPlugin, error) {
 	plugin := WebDaemonPlugin{
-		tmb:             parentTmb,
-		logger:          logger,
+		tmb:    parentTmb,
+		logger: logger,
+
 		streamInputChan: make(chan smsg.StreamMessage, 25),
-		sequenceNumber:  0,
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
-		actions:         make(map[string]IWebDaemonAction),
-		remoteHost:      actionParams.RemoteHost,
-		remotePort:      actionParams.RemotePort,
+
+		remoteHost: actionParams.RemoteHost,
+		remotePort: actionParams.RemotePort,
+
+		sequenceNumber: 0,
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
@@ -75,13 +77,12 @@ func (w *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 }
 
 func (w *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
-	// find action by requestid in map and push stream message to it
-	if act, ok := w.getActionsMap(smessage.RequestId); ok {
-		act.ReceiveStream(smessage)
+	if w.action != nil {
+		w.action.ReceiveStream(smessage)
+		return nil
+	} else {
+		return fmt.Errorf("web plugin received stream message before an action was created. Ignoring")
 	}
-
-	w.logger.Tracef("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
-	return nil
 }
 
 func (w *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
@@ -102,7 +103,6 @@ func (w *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byt
 
 		// turn the actionPayload into bytes and return it
 		if actionPayloadBytes, err := json.Marshal(actionMessage.ActionPayload); err != nil {
-			w.logger.Infof("actionPayload: %+v", actionPayload)
 			return "", []byte{}, fmt.Errorf("could not marshal actionPayload json: %s", err)
 		} else {
 			return actionMessage.Action, actionPayloadBytes, nil
@@ -121,31 +121,25 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 	// Make sure food matches what it says on the label
 	webFood, ok := food.(bzweb.WebFood)
 	if !ok {
-		return fmt.Errorf("we asked for an entremet not a sloppy joe") // couldn't think of a neater food that was less pretentious
+		return fmt.Errorf("web plugin's food did not match nutrition label: %+v", webFood) // couldn't think of a neater food that was less pretentious
 	}
 	// Always generate a requestId, each new web command is its own request
 	requestId := uuid.New().String()
 
 	// Create action logger
 	actLogger := w.logger.GetActionLogger(string(webFood.Action))
-	actLogger.AddRequestId(requestId)
 
-	var act IWebDaemonAction
 	var actOutputChan chan plugin.ActionWrapper
-
 	switch webFood.Action {
 	case bzweb.Dial:
-		act, actOutputChan = webdial.New(actLogger, requestId)
+		w.action, actOutputChan = webdial.New(actLogger, requestId)
 	case bzweb.Websocket:
-		act, actOutputChan = webwebsocket.New(actLogger, requestId)
+		w.action, actOutputChan = webwebsocket.New(actLogger, requestId)
 	default:
 		rerr := fmt.Errorf("unrecognized web action: %v", string(webFood.Action))
 		w.logger.Error(rerr)
 		return rerr
 	}
-
-	// add the action to the action map for future interaction
-	w.updateActionsMap(act, requestId)
 
 	// listen to action output channel, remove action from map if channel is closed
 	go func() {
@@ -157,43 +151,20 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 				if more {
 					w.outputQueue <- m
 				} else {
-					w.deleteActionsMap(requestId)
-					w.tmb.Kill(fmt.Errorf("killing web action with request id: %s", requestId))
+					w.logger.Infof("Closing web %s action", webFood.Action)
+					w.tmb.Kill(fmt.Errorf("done with the only action this datachannel will ever do"))
 					return
 				}
 			}
 		}
 	}()
 
-	w.logger.Infof("Web plugin created a %s action with requestId %v", string(webFood.Action), requestId)
+	w.logger.Infof("Web plugin created a %s action", string(webFood.Action))
 
 	// send local tcp connection to action
-	if err := act.Start(w.tmb, webFood.Writer, webFood.Request); err != nil {
+	if err := w.action.Start(w.tmb, webFood.Writer, webFood.Request); err != nil {
 		w.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
 	}
 
 	return nil
-}
-
-func (w *WebDaemonPlugin) updateActionsMap(newAction IWebDaemonAction, id string) {
-	// Helper function so we avoid writing to this map at the same time
-	w.actionMapLock.Lock()
-	defer w.actionMapLock.Unlock()
-
-	w.actions[id] = newAction
-}
-
-func (w *WebDaemonPlugin) deleteActionsMap(rid string) {
-	w.actionMapLock.Lock()
-	defer w.actionMapLock.Unlock()
-
-	delete(w.actions, rid)
-}
-
-func (w *WebDaemonPlugin) getActionsMap(rid string) (IWebDaemonAction, bool) {
-	w.actionMapLock.Lock()
-	defer w.actionMapLock.Unlock()
-
-	act, ok := w.actions[rid]
-	return act, ok
 }
