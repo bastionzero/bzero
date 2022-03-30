@@ -332,18 +332,17 @@ func (w *Websocket) Send(agentMessage am.AgentMessage) {
 // it must handle its own retry logic. For this, we use an exponential backoff. Some failures
 // within the connection process are considered transient, and thus trigger a retry. Others are
 // considered fatal, and return an error
+//
+// NOTE: with the exception of negotiate(), underlying bzhttp requests have their own 8-hour
+// exponential backoff, and so their errors are considered fatal
 func (w *Websocket) connect() error {
 
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
 	backoffParams.MaxInterval = time.Minute * 30 // At most 30 minutes in between requests
-
 	ticker := backoff.NewTicker(backoffParams)
-	attempts := 0
+
 	for range ticker.C {
-		if attempts += 1; attempts > 1 {
-			w.logger.Infof("failed to connect. Will try again in %s", backoffParams.NextBackOff())
-		}
 		if !w.ready {
 			if w.getChallenge {
 				// safe to return this error since GetChallenge has its own retry logic
@@ -361,6 +360,8 @@ func (w *Websocket) connect() error {
 			}
 
 			// Switch based on the targetType
+			// NOTE: the following connectX() functions have their own exponential backoff
+			// which is why we fail on their errors instead of retrying
 			switch w.targetType {
 			case Cluster:
 				if err := w.connectCluster(); err != nil {
@@ -385,6 +386,7 @@ func (w *Websocket) connect() error {
 			default:
 				return fmt.Errorf("unhandled connection type; %d", w.targetType)
 			}
+
 			if err := w.negotiate(); err != nil {
 				w.logger.Error(fmt.Errorf("error on negotiation: %s -- will retry", err))
 			} else if websocketUrl, err := w.buildWebsocketUrl(); err != nil { // Build our url, add our params as well
@@ -401,7 +403,11 @@ func (w *Websocket) connect() error {
 				w.ready = true
 			}
 		}
-		return nil
+		if w.ready {
+			return nil
+		} else {
+			w.logger.Infof("failed to connect. Will try again in about %s", backoffParams.NextBackOff())
+		}
 	}
 	return fmt.Errorf("failed to connect to Bastion after %s", backoffParams.MaxElapsedTime)
 }
@@ -570,7 +576,7 @@ func (w *Websocket) negotiate() error {
 
 	w.logger.Infof("Starting negotiation with endpoint %s", negotiateEndpoint)
 
-	response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.requestParams)
+	response, err := bzhttp.PostNegotiate(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.requestParams)
 	if err != nil {
 		return fmt.Errorf("error on negotiation: %s. Response: %+v", err, response)
 	}
