@@ -20,6 +20,7 @@ type IDbDaemonAction interface {
 	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
+	Done() <-chan struct{}
 }
 
 type DbDaemonPlugin struct {
@@ -29,6 +30,9 @@ type DbDaemonPlugin struct {
 	// Input and output channels
 	streamInputChan chan smsg.StreamMessage
 	outputQueue     chan plugin.ActionWrapper
+
+	// Channel for letting the datachannel know we're done
+	doneChan chan struct{}
 
 	action IDbDaemonAction
 
@@ -42,6 +46,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 		logger:          logger,
 		streamInputChan: make(chan smsg.StreamMessage, 25),
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
+		doneChan:        make(chan struct{}),
 		sequenceNumber:  0,
 	}
 
@@ -61,6 +66,10 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 	}()
 
 	return &plugin, nil
+}
+
+func (d *DbDaemonPlugin) Done() <-chan struct{} {
+	return d.doneChan
 }
 
 func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
@@ -125,29 +134,21 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 	// Create action logger
 	actLogger := d.logger.GetActionLogger(string(dbFood.Action))
 
-	var actOutputChan chan plugin.ActionWrapper
 	switch bzdb.DbAction(dbFood.Action) {
 	case bzdb.Dial:
-		d.action, actOutputChan = dial.New(actLogger, requestId)
+		d.action = dial.New(actLogger, requestId)
 	default:
 		return fmt.Errorf("unrecognized db action: %v", string(dbFood.Action))
 	}
 
-	// listen to action output channel, remove action from map if channel is closed
 	go func() {
-		for {
-			select {
-			case <-d.tmb.Dying():
-				return
-			case m, more := <-actOutputChan:
-				if more {
-					d.outputQueue <- m
-				} else {
-					d.logger.Infof("Closing db %s action", dbFood.Action)
-					d.tmb.Kill(fmt.Errorf("done with the only action this datachannel will ever do"))
-					return
-				}
-			}
+		select {
+		case <-d.tmb.Dying():
+			return
+		case <-d.action.Done():
+			// if the action is done, then so are we
+			close(d.doneChan)
+			return
 		}
 	}()
 

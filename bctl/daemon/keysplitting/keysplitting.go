@@ -17,6 +17,9 @@ type Config struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`
 	TokenSet TokenSetConfig     `json:"tokenSet"`
 }
+type TokenSetConfig struct {
+	CurrentIdToken string `json:"id_token"`
+}
 
 type KeysplittingConfig struct {
 	PrivateKey       string `json:"privateKey"`
@@ -24,15 +27,6 @@ type KeysplittingConfig struct {
 	CerRand          string `json:"cerRand"`
 	CerRandSignature string `json:"cerRandSig"`
 	InitialIdToken   string `json:"initialIdToken"`
-}
-
-type TokenSetConfig struct {
-	CurrentIdToken string `json:"id_token"`
-}
-
-type BZCertMetadata struct {
-	Cert bzcrt.BZCert
-	Exp  time.Time
 }
 
 type Keysplitting struct {
@@ -239,3 +233,11 @@ func (k *Keysplitting) buildBZCert() (bzcrt.BZCert, error) {
 		}, nil
 	}
 }
+
+// func (k *Keysplitting) predictHPointer(data *ksmsg.DataPayload) (string, error) {
+// 	if _, hash, err := data.BuildResponsePayload([]byte{}, k.bzcertHash); err != nil {
+// 		return "", err
+// 	} else {
+// 		return hash, nil
+// 	}
+// }

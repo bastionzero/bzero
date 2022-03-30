@@ -29,28 +29,35 @@ type WebDialAction struct {
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
 
+	// done channel for letting the plugin know we're done
+	doneChan chan struct{}
+
 	// keep track of our expected streams
 	expectedSequenceNumber int
 	streamMessages         map[int]smsg.StreamMessage
 }
 
 func New(logger *logger.Logger,
-	requestId string) (*WebDialAction, chan plugin.ActionWrapper) {
+	requestId string,
+	outputChan chan plugin.ActionWrapper) *WebDialAction {
 
-	stream := &WebDialAction{
-		logger: logger,
-
+	action := &WebDialAction{
+		logger:    logger,
 		requestId: requestId,
 
-		outputChan:      make(chan plugin.ActionWrapper, 50),
+		outputChan:      outputChan,
 		streamInputChan: make(chan smsg.StreamMessage, 50),
+		doneChan:        make(chan struct{}),
 
 		expectedSequenceNumber: 0,
-
-		streamMessages: make(map[int]smsg.StreamMessage),
+		streamMessages:         make(map[int]smsg.StreamMessage),
 	}
 
-	return stream, stream.outputChan
+	return action
+}
+
+func (w *WebDialAction) Done() <-chan struct{} {
+	return w.doneChan
 }
 
 func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
@@ -71,6 +78,9 @@ func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 }
 
 func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
+	// this signals to the parent plugin that the action is done
+	defer close(w.doneChan)
+
 	// First modify the host header to reflect what we are trying to connect to
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
 	request.Header.Set("X-Forwarded-Host", request.Host)
@@ -80,9 +90,6 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 	// Send our request, in chunks if the body > chunksize
 	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
-
-	// this signals to the parent plugin that the action is done
-	defer close(w.outputChan)
 
 	processInput := true
 	headerSet := false

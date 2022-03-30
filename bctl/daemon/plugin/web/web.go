@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -18,9 +17,9 @@ import (
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IWebDaemonAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error
+	Done() <-chan struct{}
 }
 
 type WebDaemonPlugin struct {
@@ -30,6 +29,9 @@ type WebDaemonPlugin struct {
 	// Input and output channels
 	streamInputChan chan smsg.StreamMessage
 	outputQueue     chan plugin.ActionWrapper
+
+	// Channel for letting the datachannel know we're done
+	doneChan chan struct{}
 
 	action IWebDaemonAction
 
@@ -41,13 +43,18 @@ type WebDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActionParams) (*WebDaemonPlugin, error) {
+func New(parentTmb *tomb.Tomb,
+	logger *logger.Logger,
+	actionParams bzweb.WebActionParams,
+	ksOutputChan chan plugin.ActionWrapper) (*WebDaemonPlugin, error) {
 	plugin := WebDaemonPlugin{
 		tmb:    parentTmb,
 		logger: logger,
 
 		streamInputChan: make(chan smsg.StreamMessage, 25),
-		outputQueue:     make(chan plugin.ActionWrapper, 25),
+		outputQueue:     ksOutputChan,
+
+		doneChan: make(chan struct{}),
 
 		remoteHost: actionParams.RemoteHost,
 		remotePort: actionParams.RemotePort,
@@ -71,6 +78,10 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzweb.WebActi
 	return &plugin, nil
 }
 
+func (w *WebDaemonPlugin) Done() <-chan struct{} {
+	return w.doneChan
+}
+
 func (w *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 	w.logger.Debugf("Web dial action received %v stream", smessage.Type)
 	w.streamInputChan <- smessage
@@ -86,42 +97,17 @@ func (w *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 }
 
 func (w *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
-	// First, process the incoming message
-	if err := w.processKeysplitting(action, actionPayload); err != nil {
-		return "", []byte{}, err
-	}
-
-	// Now that we've received, we wait for any new outgoing commands.  Because the existence of any
-	// such command is dependent on the user, there may not be one waiting so we wait for it.
-	w.logger.Info("Waiting for input...")
-
-	select {
-	case <-w.tmb.Dying():
-		return "", []byte{}, nil
-	case actionMessage := <-w.outputQueue: // some action's got something to say
-		w.logger.Infof("Sending input from action: %v", actionMessage.Action)
-
-		// turn the actionPayload into bytes and return it
-		if actionPayloadBytes, err := json.Marshal(actionMessage.ActionPayload); err != nil {
-			return "", []byte{}, fmt.Errorf("could not marshal actionPayload json: %s", err)
-		} else {
-			return actionMessage.Action, actionPayloadBytes, nil
-		}
-	}
-}
-
-func (w *WebDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
 	// the only keysplitting message that we would receive is the ack for our web action interrupt
 	// we don't do anything with it on the daemon side, so we receive it here and it will get logged
 	// but no particular action will be taken
-	return nil
+	return "", []byte{}, nil
 }
 
 func (w *WebDaemonPlugin) Feed(food interface{}) error {
 	// Make sure food matches what it says on the label
 	webFood, ok := food.(bzweb.WebFood)
 	if !ok {
-		return fmt.Errorf("web plugin's food did not match nutrition label: %+v", webFood) // couldn't think of a neater food that was less pretentious
+		return fmt.Errorf("web plugin's food did not match nutrition label: %+v", webFood)
 	}
 	// Always generate a requestId, each new web command is its own request
 	requestId := uuid.New().String()
@@ -129,33 +115,25 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 	// Create action logger
 	actLogger := w.logger.GetActionLogger(string(webFood.Action))
 
-	var actOutputChan chan plugin.ActionWrapper
 	switch webFood.Action {
 	case bzweb.Dial:
-		w.action, actOutputChan = webdial.New(actLogger, requestId)
+		w.action = webdial.New(actLogger, requestId, w.outputQueue)
 	case bzweb.Websocket:
-		w.action, actOutputChan = webwebsocket.New(actLogger, requestId)
+		w.action = webwebsocket.New(actLogger, requestId, w.outputQueue)
 	default:
 		rerr := fmt.Errorf("unrecognized web action: %v", string(webFood.Action))
 		w.logger.Error(rerr)
 		return rerr
 	}
 
-	// listen to action output channel, remove action from map if channel is closed
 	go func() {
-		for {
-			select {
-			case <-w.tmb.Dying():
-				return
-			case m, more := <-actOutputChan:
-				if more {
-					w.outputQueue <- m
-				} else {
-					w.logger.Infof("Closing web %s action", webFood.Action)
-					w.tmb.Kill(fmt.Errorf("done with the only action this datachannel will ever do"))
-					return
-				}
-			}
+		select {
+		case <-w.tmb.Dying():
+			return
+		case <-w.action.Done():
+			// if the action is done, then so are we
+			close(w.doneChan)
+			return
 		}
 	}()
 

@@ -11,10 +11,7 @@ import (
 	tomb "gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
-	plgn "bastionzero.com/bctl/v1/bctl/daemon/plugin"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
-	shellplugin "bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -23,9 +20,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
-	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
-	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
-	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -45,13 +39,20 @@ type IKeysplitting interface {
 	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
 }
 
+type IPlugin interface {
+	ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error)
+	ReceiveStream(smessage smsg.StreamMessage)
+	Feed(food interface{}) error
+	Done() <-chan struct{}
+}
+
 type DataChannel struct {
 	logger       *logger.Logger
 	tmb          tomb.Tomb
 	websocket    *websocket.Websocket
 	id           string // DataChannel's ID
 	ready        bool
-	plugin       plgn.IPlugin
+	plugin       IPlugin
 	keysplitting IKeysplitting
 	handshook    bool // bool to indicate if we have received a valid syn ack (initally set to false)
 	attach       bool // bool to indicate if we are attaching to an existing datachannel
@@ -156,6 +157,8 @@ func New(logger *logger.Logger,
 					time.Sleep(10 * time.Second) // give datachannel time to close correctly
 				}
 				return nil
+			case <-dc.plugin.Done():
+				dc.Close(fmt.Errorf("datachannel's sole action is closed"))
 			case agentMessage := <-dc.inputChan: // receive messages
 
 				// Keysplitting needs to be its own routine because the function will get stuck waiting for user input after a DATA/ACK,
@@ -228,61 +231,71 @@ func (d *DataChannel) openDataChannel(action string, actionParams []byte) error 
 }
 
 func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams []byte) error {
+	// parse our plugin name
+	// parsedAction := strings.Split(action, "/")
+	// if len(parsedAction) == 0 {
+	// 	return fmt.Errorf("malformed action: %s", action)
+	// }
+	// pluginName := parsedAction[0]
+
+	// create channel and listener and pass it to the new plugin
+	ksOutputChan := make(chan bzplugin.ActionWrapper, 30)
+	go func() {
+		for {
+			select {
+			case <-d.tmb.Dying():
+				return
+			case wrapper := <-ksOutputChan:
+				// Build and send response
+				if respKSMessage, err := d.keysplitting.BuildResponse(wrapper.Action, wrapper.ActionPayload); err != nil {
+					d.logger.Errorf("could not build response message: %s", err)
+				} else {
+					d.send(am.Keysplitting, respKSMessage)
+				}
+			}
+		}
+	}()
+
 	// start plugin based on name
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
-	switch pluginName {
+	switch bzplugin.PluginName(pluginName) {
+	// case Kube:
+	// 	// Deserialize the action params
+	// 	var kubeParams bzkube.KubeActionParams
+	// 	if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
+	// 		return fmt.Errorf("error deserializing actions params")
+	// 	} else if d.plugin, err = kube.New(&d.tmb, subLogger, kubeParams); err != nil {
+	// 		return fmt.Errorf("could not start kube daemon plugin: %s", err)
+	// 	}
 	case bzplugin.Db:
 		// Deserialize the action params
 		var dbParams bzdb.DbActionParams
 		if err := json.Unmarshal(actionParams, &dbParams); err != nil {
 			return fmt.Errorf("error deserializing actions params")
-		}
-
-		// start db plugin
-		if plugin, err := db.New(&d.tmb, subLogger, dbParams); err != nil {
+		} else if d.plugin, err = db.New(&d.tmb, subLogger, dbParams); err != nil {
 			return fmt.Errorf("could not start db daemon plugin: %s", err)
-		} else {
-			d.plugin = plugin
 		}
 	case bzplugin.Kube:
 		// Deserialize the action params
 		var kubeParams bzkube.KubeActionParams
 		if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
 			return fmt.Errorf("error deserializing actions params")
-		}
-
-		// start kube plugin
-		if plugin, err := kube.New(&d.tmb, subLogger, kubeParams); err != nil {
-			return fmt.Errorf("could not start kube daemon plugin: %s", err)
-		} else {
-			d.plugin = plugin
-		}
-	case bzplugin.Shell:
-		// Deserialize the action params
-		var shellParams bzshell.ShellActionParams
-		if err := json.Unmarshal(actionParams, &shellParams); err != nil {
-			return fmt.Errorf("error deserializing actions params")
-		}
-
-		// start shell plugin
-		if plugin, err := shellplugin.New(&d.tmb, subLogger, shellParams, d.attach); err != nil {
-			return fmt.Errorf("could not start shell daemon plugin: %s", err)
-		} else {
-			d.plugin = plugin
-		}
-	case bzplugin.Web:
-		// Deserialize the action params
-		var webParams bzweb.WebActionParams
-		if err := json.Unmarshal(actionParams, &webParams); err != nil {
-			return fmt.Errorf("error deserializing actions params")
-		}
-
-		// start web plugin
-		if plugin, err := web.New(&d.tmb, subLogger, webParams); err != nil {
+		} else if d.plugin, err = web.New(&d.tmb, subLogger, webParams, ksOutputChan); err != nil {
 			return fmt.Errorf("could not start web daemon plugin: %s", err)
-		} else {
-			d.plugin = plugin
 		}
+	// case bzplugin.Shell:
+	// 	// Deserialize the action params
+	// 	var shellParams bzshell.ShellActionParams
+	// 	if err := json.Unmarshal(actionParams, &shellParams); err != nil {
+	// 		return fmt.Errorf("error deserializing actions params")
+	// 	}
+
+	// 	// start shell plugin
+	// 	if plugin, err := shell.New(&d.tmb, subLogger, shellParams, d.attach); err != nil {
+	// 		return fmt.Errorf("could not start shell daemon plugin: %s", err)
+	// 	} else {
+	// 		d.plugin = plugin
+	// 	}
 	default:
 		return fmt.Errorf("unrecognized plugin passed to datachannel: %s", pluginName)
 	}
@@ -493,14 +506,15 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 				ActionPayload: returnPayload,
 			})
 
-			return d.sendKeysplitting(&ksMessage, action, returnPayload)
+			// return d.sendKeysplitting(&ksMessage, action, returnPayload)
 
 		} else {
 			return err
 		}
 	} else {
-		return fmt.Errorf("no plugin")
+		return fmt.Errorf("no plugin associated with this datachannel")
 	}
+	return nil
 }
 
 func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
