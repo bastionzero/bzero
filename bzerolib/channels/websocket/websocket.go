@@ -339,21 +339,23 @@ func (w *Websocket) connect() error {
 	backoffParams.MaxInterval = time.Minute * 30 // At most 30 minutes in between requests
 
 	ticker := backoff.NewTicker(backoffParams)
+	attempts := 0
 	for range ticker.C {
+		if attempts += 1; attempts > 1 {
+			w.logger.Infof("failed to connect. Will try again in %s", backoffParams.NextBackOff())
+		}
 		if !w.ready {
 			if w.getChallenge {
 				// safe to return this error since GetChallenge has its own retry logic
 				if err := w.solveChallenge(); err != nil {
-					// FIXME: error tree
-					return err
+					return fmt.Errorf("error solving challenge: %s", err)
 				}
 			}
 
 			// If we have the option to refresh our auth details do it here before reconnecting
 			if w.refreshTokenCommand != "" {
 				if err := util.RunRefreshAuthCommand(w.refreshTokenCommand); err != nil {
-					w.logger.Error(fmt.Errorf("error executing refresh auth command: %s", err))
-					// FIXME: error tree
+					w.logger.Error(fmt.Errorf("error executing refresh auth command: %s -- will retry", err))
 					continue
 				}
 			}
@@ -362,39 +364,33 @@ func (w *Websocket) connect() error {
 			switch w.targetType {
 			case Cluster:
 				if err := w.connectCluster(); err != nil {
-					// FIXME: error tree
-					return err
+					return fmt.Errorf("error connecting cluster target: %s", err)
 				}
 			case Db:
 				if err := w.connectDb(); err != nil {
-					// FIXME: error tree
-					return err
+					return fmt.Errorf("error connecting db target: %s", err)
 				}
 			case Web:
 				if err := w.connectWeb(); err != nil {
-					// FIXME: error tree
-					return err
+					return fmt.Errorf("error connecting web target: %s", err)
 				}
 			case AgentWebsocket:
 				if err := w.connectAgentWebsocket(); err != nil {
-					// FIXME: error tree
-					return err
+					return fmt.Errorf("error connecting agent websocket target: %s", err)
 				}
 			case AgentControl:
 				if err := w.connectAgentControl(); err != nil {
-					// FIXME: error tree
-					return err
+					return fmt.Errorf("error connecting agent control target: %s", err)
 				}
 			default:
 				return fmt.Errorf("unhandled target type; %d", w.targetType)
 			}
 			if err := w.negotiate(); err != nil {
-				// FIXME: error tree
-				w.logger.Error(err)
-			} else if websocketUrl, err := w.buildUrl(); err != nil { // Build our url, add our params as well
+				w.logger.Error(fmt.Errorf("error on negotiation: %s -- will retry", err))
+			} else if websocketUrl, err := w.buildWebsocketUrl(); err != nil { // Build our url, add our params as well
 				return fmt.Errorf("could not build websocket url, not retrying: %s", err)
 			} else if w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{}); err != nil {
-				w.logger.Errorf("error dialing websocket: %s", err)
+				w.logger.Errorf("error dialing websocket: %s -- will retry", err)
 			} else if err := w.client.WriteMessage(websocket.TextMessage, append([]byte(`{"protocol": "json","version": 1}`), signalRMessageTerminatorByte)); err != nil {
 				// Define our protocol and version
 				// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go
@@ -575,7 +571,6 @@ func (w *Websocket) negotiate() error {
 
 	response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.requestParams)
 	if err != nil {
-		w.logger.Errorf("")
 		return fmt.Errorf("error on negotiation: %s. Response: %+v", err, response)
 	}
 	// Extract out the connection token
