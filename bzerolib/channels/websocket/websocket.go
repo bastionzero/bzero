@@ -388,33 +388,22 @@ func (w *Websocket) connect() error {
 			default:
 				return fmt.Errorf("unhandled target type; %d", w.targetType)
 			}
-
 			if err := w.negotiate(); err != nil {
 				// FIXME: error tree
 				w.logger.Error(err)
-				continue
-			}
-
-			// Build our url, add our params as well
-			websocketUrl, err := w.buildWebsocketUrl()
-			if err != nil {
-				return err
-			}
-
-			w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{})
-			if err != nil {
-				w.logger.Error(err)
-				continue
-			}
-			// Define our protocol and version
-			// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go
-			if err := w.client.WriteMessage(websocket.TextMessage, append([]byte(`{"protocol": "json","version": 1}`), signalRMessageTerminatorByte)); err != nil {
-				w.logger.Info("Error when trying to agree on version for SignalR!")
+			} else if websocketUrl, err := w.buildUrl(); err != nil { // Build our url, add our params as well
+				return fmt.Errorf("could not build websocket url, not retrying: %s", err)
+			} else if w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{}); err != nil {
+				w.logger.Errorf("error dialing websocket: %s", err)
+			} else if err := w.client.WriteMessage(websocket.TextMessage, append([]byte(`{"protocol": "json","version": 1}`), signalRMessageTerminatorByte)); err != nil {
+				// Define our protocol and version
+				// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go
 				w.client.Close()
-				return err
+				return fmt.Errorf("error when trying to agree on version for SignalR, not retrying: %s", err)
+			} else {
+				w.logger.Info("Connection successful!")
+				w.ready = true
 			}
-			w.logger.Info("Connection successful!")
-			w.ready = true
 		}
 		return nil
 	}
