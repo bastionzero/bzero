@@ -122,9 +122,8 @@ func PostRegister(logger *logger.Logger, endpoint string, contentType string, bo
 	return req.post()
 }
 
+// minimal backoff for negotiate requests since they are wrapped in their own backoff logic
 func PostNegotiate(logger *logger.Logger, endpoint string, contentType string, body []byte, headers map[string]string, params map[string]string) (*http.Response, error) {
-	// minimal backoff for negotiate requests since they are wrapped in their own backoff logic
-
 	// Define our exponential backoff params
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Second * 10 // Wait in total at most 10 seconds
@@ -132,7 +131,6 @@ func PostNegotiate(logger *logger.Logger, endpoint string, contentType string, b
 	req := createBzhttp(logger, endpoint, contentType, headers, params, body, backoffParams)
 
 	return req.post()
-
 }
 
 func (b *bzhttp) patch() (*http.Response, error) {

@@ -345,7 +345,7 @@ func (w *Websocket) connect() error {
 	for range ticker.C {
 		if !w.ready {
 			if w.getChallenge {
-				// safe to return this error since GetChallenge has its own retry logic
+				// safe to fail on this error since GetChallenge has its own retry logic
 				if err := w.solveChallenge(); err != nil {
 					return fmt.Errorf("error solving challenge: %s", err)
 				}
@@ -387,6 +387,7 @@ func (w *Websocket) connect() error {
 				return fmt.Errorf("unhandled connection type; %d", w.targetType)
 			}
 
+			// negotiate uses a special POST request that does not backoff
 			if err := w.negotiate(); err != nil {
 				w.logger.Error(fmt.Errorf("error on negotiation: %s -- will retry", err))
 			} else if websocketUrl, err := w.buildWebsocketUrl(); err != nil { // Build our url, add our params as well
@@ -406,6 +407,7 @@ func (w *Websocket) connect() error {
 		if w.ready {
 			return nil
 		} else {
+			// this output won't line up with the exact timing you see, but it's in the ballpark
 			w.logger.Infof("failed to connect. Will try again in about %s", backoffParams.NextBackOff())
 		}
 	}
@@ -545,8 +547,8 @@ func (w *Websocket) getCnController() (*connectionnodecontroller.ConnectionNodeC
 func (w *Websocket) buildCnUrl(response connectionnodecontroller.ConnectionDetailsResponse, err error) error {
 	// Always set connectionId incase we error later and need to close the connection
 	w.requestParams["connectionId"] = response.ConnectionId
-	// FIXME: this seems weird but it prserves the order of the original functions
-	// seems like maybe this should happen before this function is called?
+
+	// return if our caller's createXConnection failed
 	if err != nil {
 		return err
 	}
