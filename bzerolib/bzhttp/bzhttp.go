@@ -75,37 +75,17 @@ func PostContent(logger *logger.Logger, endpoint string, contentType string, bod
 }
 
 func Post(logger *logger.Logger, endpoint string, contentType string, body []byte, headers map[string]string, params map[string]string) (*http.Response, error) {
-	// Helper function to perform exponential backoff on http post requests
-
-	// Define our exponential backoff params
-	backoffParams := backoff.NewExponentialBackOff()
-	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
-
-	req := createBzhttp(logger, endpoint, contentType, headers, params, body, backoffParams)
-
+	req := createBzhttp(logger, endpoint, contentType, headers, params, body, defaultBackoffParams())
 	return req.post()
-
 }
 
 func Get(logger *logger.Logger, endpoint string, headers map[string]string, params map[string]string) (*http.Response, error) {
-	// Helper function to perform exponential backoff on http get requests
-
-	// Define our exponential backoff params
-	backoffParams := backoff.NewExponentialBackOff()
-	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
-
-	req := createBzhttp(logger, endpoint, "", headers, params, []byte{}, backoffParams)
-
+	req := createBzhttp(logger, endpoint, "", headers, params, []byte{}, defaultBackoffParams())
 	return req.get()
 }
 
 func Patch(logger *logger.Logger, endpoint string, headers map[string]string, params map[string]string) (*http.Response, error) {
-	// Define our exponential backoff params
-	backoffParams := backoff.NewExponentialBackOff()
-	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
-
-	req := createBzhttp(logger, endpoint, "application/json", headers, params, []byte{}, backoffParams)
-
+	req := createBzhttp(logger, endpoint, "application/json", headers, params, []byte{}, defaultBackoffParams())
 	return req.patch()
 }
 
@@ -386,4 +366,12 @@ func extractBody(response *http.Response) string {
 		log.Fatal(err)
 	}
 	return string(bodyBytes)
+}
+
+func defaultBackoffParams() *backoff.ExponentialBackOff {
+	// Define our exponential backoff params
+	backoffParams := backoff.NewExponentialBackOff()
+	backoffParams.MaxElapsedTime = 0 // never stop never stopping
+	backoffParams.MaxInterval = time.Hour
+	return backoffParams
 }
