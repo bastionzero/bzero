@@ -315,8 +315,7 @@ func (b *bzhttp) get() (*http.Response, error) {
 
 // Helper function to check if we received a status code that we should not attempt to try again
 func checkBadStatusCode(response *http.Response) error {
-	if response.StatusCode == http.StatusNotFound ||
-		response.StatusCode == http.StatusUnauthorized ||
+	if response.StatusCode == http.StatusUnauthorized ||
 		response.StatusCode == http.StatusUnsupportedMediaType ||
 		response.StatusCode == http.StatusGone {
 		return fmt.Errorf("received response code: %d, not retrying", response.StatusCode)
