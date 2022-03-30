@@ -364,26 +364,26 @@ func (w *Websocket) connect() error {
 			switch w.targetType {
 			case Cluster:
 				if err := w.connectCluster(); err != nil {
-					return fmt.Errorf("error connecting cluster target: %s", err)
+					return fmt.Errorf("error making kube cluster connection: %s", err)
 				}
 			case Db:
 				if err := w.connectDb(); err != nil {
-					return fmt.Errorf("error connecting db target: %s", err)
+					return fmt.Errorf("error making database connection: %s", err)
 				}
 			case Web:
 				if err := w.connectWeb(); err != nil {
-					return fmt.Errorf("error connecting web target: %s", err)
+					return fmt.Errorf("error making web connection: %s", err)
 				}
 			case AgentWebsocket:
 				if err := w.connectAgentWebsocket(); err != nil {
-					return fmt.Errorf("error connecting agent websocket target: %s", err)
+					return fmt.Errorf("error making agent websocket connection: %s", err)
 				}
 			case AgentControl:
 				if err := w.connectAgentControl(); err != nil {
-					return fmt.Errorf("error connecting agent control target: %s", err)
+					return fmt.Errorf("error making agent control connection: %s", err)
 				}
 			default:
-				return fmt.Errorf("unhandled target type; %d", w.targetType)
+				return fmt.Errorf("unhandled connection type; %d", w.targetType)
 			}
 			if err := w.negotiate(); err != nil {
 				w.logger.Error(fmt.Errorf("error on negotiation: %s -- will retry", err))
