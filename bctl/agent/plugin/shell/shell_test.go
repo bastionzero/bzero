@@ -29,6 +29,10 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
+const (
+	ShCommandPrompt = "$" // Tests assume shell plugin command is "sh"
+)
+
 func StreamMessageToString(t *testing.T, msg smsg.StreamMessage) string {
 	msgbyte, err := base64.StdEncoding.DecodeString(string(msg.Content))
 	if err != nil {
@@ -156,7 +160,7 @@ func TestInputOutput(t *testing.T) {
 	assert.Nil(t, err)
 
 	t.Logf("Terminal says: %v", outstr)
-	assert.Contains(t, outstr, "sh")
+	assert.Contains(t, outstr, ShCommandPrompt)
 
 	lscmd := "ls -l\n"
 	SendToStdIn(t, plugin, lscmd)
@@ -175,25 +179,24 @@ func TestShelllReplay(t *testing.T) {
 	streamOutputChan := make(chan smsg.StreamMessage, 20)
 
 	plugin := SpawnTerminal(t, streamOutputChan)
+	outstr, err := ReadOutputOrTimeout(t, streamOutputChan)
+	assert.Nil(t, err)
+
 	stdoutreplay := SendReplay(t, plugin)
-
 	assert.NotNil(t, stdoutreplay)
-	assert.Equal(t, 16, len(stdoutreplay))
-	assert.Contains(t, string(stdoutreplay), "sh")
+	assert.Equal(t, outstr, string(stdoutreplay))
 
-	stdoutreplay = SendReplay(t, plugin)
-	assert.NotNil(t, stdoutreplay)
-	assert.Equal(t, 16, len(stdoutreplay))
-	assert.Contains(t, string(stdoutreplay), "sh")
-
+	// Write more input to stdIn and ensure this is included in the replay
 	SendToStdIn(t, plugin, "echo 'abcdeabcdeabcdeabcdeabcdeabcde'")
 	time.Sleep(100 * time.Millisecond)
 
+	newoutStr, err := ReadOutputOrTimeout(t, streamOutputChan)
+	assert.Nil(t, err)
+	outstr += newoutStr
+
 	stdoutreplay = SendReplay(t, plugin)
 	assert.NotNil(t, stdoutreplay)
-	assert.Equal(t, 53, len(stdoutreplay))
-	assert.Contains(t, string(stdoutreplay), "sh")
-	assert.Contains(t, string(stdoutreplay), "abcdeabcdeabcdeabcdeabcdeabcde")
+	assert.Equal(t, outstr, string(stdoutreplay))
 }
 
 func TestResize(t *testing.T) {
@@ -205,7 +208,7 @@ func TestResize(t *testing.T) {
 	outstr, err := ReadOutputOrTimeout(t, streamOutputChan)
 	assert.Nil(t, err)
 
-	assert.Contains(t, outstr, "sh")
+	assert.Contains(t, outstr, ShCommandPrompt)
 
 	rows := uint32(23)
 	cols := uint32(5)
@@ -221,7 +224,7 @@ func TestClose(t *testing.T) {
 	outstr, err := ReadOutputOrTimeout(t, streamOutputChan)
 	assert.Nil(t, err)
 
-	assert.Contains(t, outstr, "sh")
+	assert.Contains(t, outstr, ShCommandPrompt)
 
 	SendClose(t, plugin)
 
