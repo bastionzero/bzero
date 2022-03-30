@@ -540,6 +540,7 @@ func (w *Websocket) buildCnUrl(response connectionnodecontroller.ConnectionDetai
 	// Always set connectionId incase we error later and need to close the connection
 	w.requestParams["connectionId"] = response.ConnectionId
 	// FIXME: this seems weird but it prserves the order of the original functions
+	// seems like maybe this should happen before this function is called?
 	if err != nil {
 		return err
 	}
