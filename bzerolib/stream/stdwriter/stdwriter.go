@@ -7,32 +7,33 @@ import (
 )
 
 type StdWriter struct {
-	StdType        smsg.StreamType
 	outputChannel  chan smsg.StreamMessage
-	RequestId      string
+	SchemaVersion  smsg.SchemaVersion
 	SequenceNumber int
-	logId          string
+	Action         string
+	Type           smsg.StreamType
 }
 
 // Stdout or Stderr
-func NewStdWriter(streamType smsg.StreamType, ch chan smsg.StreamMessage, requestId string, logId string) *StdWriter {
+func NewStdWriter(ch chan smsg.StreamMessage, schemaVersion smsg.SchemaVersion, streamAction string, streamType smsg.StreamType) *StdWriter {
 	return &StdWriter{
-		StdType:        streamType,
 		outputChannel:  ch,
-		RequestId:      requestId,
+		SchemaVersion:  schemaVersion,
 		SequenceNumber: 0,
-		logId:          logId,
+		Action:         streamAction,
+		Type:           streamType,
 	}
 }
 
 func (w *StdWriter) Write(p []byte) (int, error) {
 	str := base64.StdEncoding.EncodeToString(p)
 	message := smsg.StreamMessage{
-		Type:           string(w.StdType),
-		RequestId:      w.RequestId,
+		SchemaVersion:  w.SchemaVersion,
 		SequenceNumber: w.SequenceNumber,
+		Action:         string(w.Action),
+		Type:           w.Type,
 		Content:        str,
-		LogId:          w.logId,
+		More:           true, // FIXME: ?
 	}
 	w.outputChannel <- message
 	w.SequenceNumber = w.SequenceNumber + 1

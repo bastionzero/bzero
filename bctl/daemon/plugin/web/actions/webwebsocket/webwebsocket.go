@@ -85,44 +85,43 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 	// Setup a go routine to stream data from the agent back to daemon
 	go func() {
 		for {
-			select {
-			case incomingMessage := <-s.streamInputChan:
-				switch incomingMessage.Type {
-				case string(webwebsocket.DataOut):
-					// Stream data to the local connection
-					// Undo the base 64 encoding
-					incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
-					if base64Err != nil {
-						s.logger.Errorf("error decoding stream message: %v", base64Err)
-						return
-					}
-
-					// Unmarshell the stream message
-					var streamDataOut webwebsocket.WebWebsocketStreamDataOut
-					if err := json.Unmarshal(incomingContent, &streamDataOut); err != nil {
-						s.logger.Errorf("error unmarshalling stream message: %s", err)
-						return
-					}
-
-					// Unmarshel the websocket message
-					websocketMessage, base64Err := base64.StdEncoding.DecodeString(streamDataOut.Message)
-					if base64Err != nil {
-						s.logger.Errorf("error decoding stream message: %s", base64Err)
-						return
-					}
-
-					// Send the message to the user!
-					err = conn.WriteMessage(streamDataOut.MessageType, websocketMessage)
-					if err != nil {
-						s.logger.Errorf("error writing to websocket: %s", err)
-					}
-				case string(webwebsocket.AgentStop):
-					// End the local connection
-					s.logger.Infof("Received close message from agent, closing websocket")
-					conn.Close()
+			incomingMessage := <-s.streamInputChan
+			switch smsg.StreamType(incomingMessage.Type) {
+			case smsg.DataOut:
+				// Stream data to the local connection
+				// Undo the base 64 encoding
+				incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
+				if base64Err != nil {
+					s.logger.Errorf("error decoding stream message: %v", base64Err)
 					return
 				}
+
+				// Unmarshell the stream message
+				var streamDataOut webwebsocket.WebWebsocketStreamDataOut
+				if err := json.Unmarshal(incomingContent, &streamDataOut); err != nil {
+					s.logger.Errorf("error unmarshalling stream message: %s", err)
+					return
+				}
+
+				// Unmarshel the websocket message
+				websocketMessage, base64Err := base64.StdEncoding.DecodeString(streamDataOut.Message)
+				if base64Err != nil {
+					s.logger.Errorf("error decoding stream message: %s", base64Err)
+					return
+				}
+
+				// Send the message to the user!
+				err = conn.WriteMessage(streamDataOut.MessageType, websocketMessage)
+				if err != nil {
+					s.logger.Errorf("error writing to websocket: %s", err)
+				}
+			case smsg.AgentStop:
+				// End the local connection
+				s.logger.Infof("Received close message from agent, closing websocket")
+				conn.Close()
+				return
 			}
+
 		}
 	}()
 

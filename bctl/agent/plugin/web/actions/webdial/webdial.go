@@ -9,10 +9,11 @@ import (
 	"net/http"
 	"net/url"
 
-	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
-	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
+	webaction "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
@@ -124,7 +125,7 @@ func (w *WebDial) handleNewHttpRequest(action string, dataIn WebInputActionPaylo
 				Content:    []byte{},
 			}
 
-			w.sendStreamMessage(0, smsg.Web, smsg.Error, false, responsePayload)
+			w.sendStreamMessage(0, smsg.Error, false, responsePayload)
 			return "", []byte{}, rerr
 		} else {
 			go w.listenAndProcessStreamMessages(response)
@@ -172,7 +173,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 					Content:    buf[:numBytes],
 				}
 
-				w.sendStreamMessage(sequenceNumber, smsg.Web, smsg.Error, false, responsePayload)
+				w.sendStreamMessage(sequenceNumber, smsg.Error, false, responsePayload)
 			}
 
 			w.logger.Tracef("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
@@ -188,10 +189,10 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 			// we get io.EOFs on whichever read call processes the final byte
 			if err == io.EOF {
 				// this is the final message so let the daemon know
-				w.sendStreamMessage(sequenceNumber, smsg.Web, smsg.Stream, false, responsePayload)
+				w.sendStreamMessage(sequenceNumber, smsg.Stream, false, responsePayload)
 				return
 			} else {
-				w.sendStreamMessage(sequenceNumber, smsg.Web, smsg.Stream, true, responsePayload)
+				w.sendStreamMessage(sequenceNumber, smsg.Stream, true, responsePayload)
 			}
 
 			sequenceNumber += 1
@@ -199,20 +200,14 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 	}
 }
 
-func (w *WebDial) sendStreamMessage(
-	sequenceNumber int,
-	streamAction smsg.StreamAction,
-	streamType smsg.StreamType,
-	more bool,
-	payload *WebOutputActionPayload,
-) {
+func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, payload *WebOutputActionPayload) {
 	responsePayloadBytes, _ := json.Marshal(payload)
 	payloadStr := base64.StdEncoding.EncodeToString(responsePayloadBytes)
 	message := smsg.StreamMessage{
 		SchemaVersion:  smsg.CurrentSchema,
 		SequenceNumber: sequenceNumber,
-		Action:         string(streamAction),
-		Type:           string(streamType),
+		Action:         string(webaction.Dial),
+		Type:           streamType,
 		More:           more,
 		Content:        payloadStr,
 	}

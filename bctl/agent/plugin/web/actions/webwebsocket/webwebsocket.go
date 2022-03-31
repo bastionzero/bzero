@@ -9,15 +9,16 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"gopkg.in/tomb.v2"
 
+	webaction "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"github.com/gorilla/websocket"
 )
 
+type WebWebsocketSubAction string
+
 const (
 	Start      WebWebsocketSubAction = "web/websocket/start"
 	DataIn     WebWebsocketSubAction = "web/websocket/datain"
-	DataOut    WebWebsocketSubAction = "web/websocket/dataout"
-	AgentStop  WebWebsocketSubAction = "web/websocket/agentstop"
 	DaemonStop WebWebsocketSubAction = "web/websocket/daemonstop"
 )
 
@@ -146,10 +147,11 @@ func (e *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStart
 		e.logger.Errorf("dial error: %s", err)
 		// Do not return an error incase the user wants to try again in making this connection, rather send a close message
 		streamMessage := smsg.StreamMessage{
-			Type:           string(AgentStop),
-			RequestId:      e.requestId,
-			LogId:          "", // No log id for web websocket
+			SchemaVersion:  smsg.CurrentSchema,
 			SequenceNumber: 0,
+			Action:         string(webaction.Websocket),
+			Type:           smsg.AgentStop,
+			More:           false,
 			Content:        "",
 		}
 		e.streamOutputChan <- streamMessage
@@ -166,10 +168,11 @@ func (e *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStart
 
 				// We have to let the daemon know the websocket has ended
 				streamMessage := smsg.StreamMessage{
-					Type:           string(AgentStop),
-					RequestId:      e.requestId,
-					LogId:          "", // No log id for web websocket
+					SchemaVersion:  smsg.CurrentSchema,
 					SequenceNumber: sequenceNumber,
+					Action:         string(webaction.Websocket),
+					Type:           smsg.AgentStop,
+					More:           false,
 					Content:        "",
 				}
 				sequenceNumber += 1
@@ -191,10 +194,11 @@ func (e *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStart
 
 			// Stream the response back
 			streamMessage := smsg.StreamMessage{
-				Type:           string(DataOut),
-				RequestId:      e.requestId,
-				LogId:          "", // No log id for web websocket
+				SchemaVersion:  smsg.CurrentSchema,
 				SequenceNumber: sequenceNumber,
+				Action:         string(webaction.Websocket),
+				Type:           smsg.DataOut,
+				More:           true,
 				Content:        content,
 			}
 			sequenceNumber += 1

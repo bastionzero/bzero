@@ -19,6 +19,7 @@ import (
 	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	kubeutilsdaemon "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	kubeaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -28,9 +29,6 @@ const (
 	StartPortForward       PortForwardSubAction = "kube/portforward/start"
 	DataInPortForward      PortForwardSubAction = "kube/portforward/datain"
 	ErrorInPortForward     PortForwardSubAction = "kube/portforward/errorin"
-	ReadyPortForward       PortForwardSubAction = "kube/portforward/ready"
-	DataPortForward        PortForwardSubAction = "kube/portforward/data"
-	ErrorPortForward       PortForwardSubAction = "kube/portforward/error"
 	StopPortForward        PortForwardSubAction = "kube/portforward/stop"
 	StopPortForwardRequest PortForwardSubAction = "kube/portforward/request/stop"
 )
@@ -321,10 +319,11 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 				}
 
 				message := smsg.StreamMessage{
-					Type:           string(DataPortForward),
-					RequestId:      requestId,
-					LogId:          logId,
+					SchemaVersion:  smsg.CurrentSchema,
 					SequenceNumber: dataSeqNumber,
+					Action:         string(kubeaction.PortForward),
+					Type:           smsg.Data,
+					More:           true,
 					Content:        content,
 				}
 				p.streamOutputChan <- message
@@ -368,11 +367,12 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 				}
 
 				message := smsg.StreamMessage{
-					Type:           string(ErrorPortForward),
-					RequestId:      requestId,
-					LogId:          logId,
+					SchemaVersion:  smsg.CurrentSchema,
 					SequenceNumber: errorSeqNumber,
+					Action:         string(kubeaction.PortForward),
+					Type:           smsg.Error,
 					Content:        content,
+					// FIXME: more?
 				}
 				p.streamOutputChan <- message
 				errorSeqNumber += 1
@@ -477,10 +477,10 @@ func (p *PortForwardAction) StartPortForward(startPortForwardRequest KubePortFor
 
 func (p *PortForwardAction) sendReadyMessage(errorMessage string) {
 	message := smsg.StreamMessage{
-		Type:           string(ReadyPortForward),
-		RequestId:      p.requestId,
-		LogId:          p.logId,
+		SchemaVersion:  smsg.CurrentSchema,
 		SequenceNumber: 0,
+		Action:         string(kubeaction.PortForward),
+		Type:           smsg.Ready,
 		Content:        errorMessage,
 	}
 	p.streamOutputChan <- message

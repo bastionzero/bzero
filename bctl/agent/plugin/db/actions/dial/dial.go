@@ -10,6 +10,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	dbaction "bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/db/actions/dial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
@@ -164,7 +165,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 
 				// Let our daemon know that we have got the error and we need to close the connection
 				content := base64.StdEncoding.EncodeToString(buff[:n])
-				d.sendStreamMessage(sequenceNumber, smsg.Db, smsg.Stream, false, content)
+				d.sendStreamMessage(sequenceNumber, smsg.Stream, false, content)
 
 				return
 			}
@@ -173,7 +174,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 
 			// Now send this to daemon
 			content := base64.StdEncoding.EncodeToString(buff[:n])
-			d.sendStreamMessage(sequenceNumber, smsg.Db, smsg.Stream, true, content)
+			d.sendStreamMessage(sequenceNumber, smsg.Stream, true, content)
 
 			sequenceNumber += 1
 		}
@@ -183,18 +184,12 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 	return action, []byte{}, nil
 }
 
-func (d *Dial) sendStreamMessage(
-	sequenceNumber int,
-	streamAction smsg.StreamAction,
-	streamType smsg.StreamType,
-	more bool,
-	content string,
-) {
+func (d *Dial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, content string) {
 	message := smsg.StreamMessage{
 		SchemaVersion:  smsg.CurrentSchema,
 		SequenceNumber: sequenceNumber,
-		Action:         string(streamAction),
-		Type:           string(streamType),
+		Action:         string(dbaction.Dial),
+		Type:           streamType,
 		More:           more,
 		Content:        content,
 	}

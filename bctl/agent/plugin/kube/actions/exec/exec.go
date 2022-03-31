@@ -11,6 +11,7 @@ import (
 
 	kubedaemonutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	kubeaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	stdin "bastionzero.com/bctl/v1/bzerolib/stream/stdreader"
 	stdout "bastionzero.com/bctl/v1/bzerolib/stream/stdwriter"
@@ -195,8 +196,8 @@ func (e *ExecAction) StartExec(startExecRequest KubeExecStartActionPayload) (str
 		return string(ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}
 
-	stderrWriter := stdout.NewStdWriter(smsg.StdErr, e.streamOutputChan, startExecRequest.RequestId, e.logId)
-	stdoutWriter := stdout.NewStdWriter(smsg.StdOut, e.streamOutputChan, startExecRequest.RequestId, e.logId)
+	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, smsg.CurrentSchema, string(kubeaction.Exec), smsg.StdErr)
+	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, smsg.CurrentSchema, string(kubeaction.Exec), smsg.StdOut)
 	stdinReader := stdin.NewStdReader(smsg.StdIn, startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
 

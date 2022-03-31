@@ -14,8 +14,16 @@ import (
 
 	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	kubeaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
+)
+
+type StreamSubAction string
+
+const (
+	StreamStart StreamSubAction = "kube/stream/start"
+	StreamStop  StreamSubAction = "kube/stream/datain"
 )
 
 type StreamAction struct {
@@ -58,10 +66,10 @@ func (s *StreamAction) Closed() bool {
 }
 
 func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch smsg.StreamType(action) {
+	switch StreamSubAction(action) {
 
 	// Start exec message required before anything else
-	case smsg.StreamStart:
+	case StreamStart:
 		var streamActionRequest KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
@@ -72,7 +80,7 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 		s.requestId = streamActionRequest.RequestId
 
 		return s.StartStream(streamActionRequest, action)
-	case smsg.StreamStop:
+	case StreamStop:
 		var streamActionRequest KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
@@ -131,11 +139,12 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 
 	// Stream the response back
 	message := smsg.StreamMessage{
-		Type:           string(smsg.StreamData),
-		RequestId:      streamActionRequest.RequestId,
-		LogId:          streamActionRequest.LogId,
+		SchemaVersion:  smsg.CurrentSchema,
 		SequenceNumber: 0,
+		Action:         string(kubeaction.Stream),
+		Type:           smsg.Data,
 		Content:        content,
+		More:           true,
 	}
 	s.streamOutputChan <- message
 
@@ -182,10 +191,11 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 
 					// Let the daemon know the stream has ended
 					message := smsg.StreamMessage{
-						Type:           string(smsg.StreamEnd),
-						RequestId:      streamActionRequest.RequestId,
-						LogId:          streamActionRequest.LogId,
+						SchemaVersion:  smsg.CurrentSchema,
 						SequenceNumber: sequenceNumber,
+						Action:         string(kubeaction.Stream),
+						Type:           smsg.Stream,
+						More:           false,
 						Content:        "",
 					}
 					s.streamOutputChan <- message
@@ -195,11 +205,12 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 				// Stream the response back
 				content := base64.StdEncoding.EncodeToString(buf[:numBytes])
 				message := smsg.StreamMessage{
-					Type:           string(smsg.StreamData),
-					RequestId:      streamActionRequest.RequestId,
-					LogId:          streamActionRequest.LogId,
+					SchemaVersion:  smsg.CurrentSchema,
 					SequenceNumber: sequenceNumber,
+					Action:         string(kubeaction.Stream),
+					Type:           smsg.Data,
 					Content:        content,
+					More:           true,
 				}
 
 				s.streamOutputChan <- message
@@ -249,11 +260,12 @@ func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest Kub
 				// Stream the context back to the user
 				content := base64.StdEncoding.EncodeToString(bodyBytes)
 				message := smsg.StreamMessage{
-					Type:           string(smsg.StreamData),
-					RequestId:      streamActionRequest.RequestId,
-					LogId:          streamActionRequest.LogId,
+					SchemaVersion:  smsg.CurrentSchema,
 					SequenceNumber: sequenceNumber,
+					Action:         string(kubeaction.Stream),
+					Type:           smsg.Data,
 					Content:        content,
+					More:           true,
 				}
 				s.streamOutputChan <- message
 			} else {

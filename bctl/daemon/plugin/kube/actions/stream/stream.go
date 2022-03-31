@@ -97,7 +97,7 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        string(smsg.StreamStart),
+		Action:        string(smsg.Start), // FIXME: ?
 		ActionPayload: payloadBytes,
 	}
 
@@ -154,7 +154,7 @@ outOfOrderMessageHandler:
 
 			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
-				Action:        string(smsg.StreamStop),
+				Action:        string(smsg.Stop), // FIXME: ?
 				ActionPayload: payloadBytes,
 			}
 
@@ -162,8 +162,13 @@ outOfOrderMessageHandler:
 
 		case watchData := <-s.streamInputChan:
 			// Determin if this is an end or data messages
-			switch watchData.Type {
-			case string(smsg.StreamData):
+			switch smsg.StreamType(watchData.Type) {
+			case smsg.Data:
+				if !watchData.More {
+					// End the stream
+					s.logger.Infof("Stream has been ended from the agent, closing request")
+					return nil
+				}
 				// Then stream the response to kubectl
 				if watchData.SequenceNumber == s.expectedSequenceNumber {
 					// If the incoming data is equal to the current expected seqNumber, show the user
@@ -181,10 +186,6 @@ outOfOrderMessageHandler:
 				} else {
 					s.outOfOrderMessages[watchData.SequenceNumber] = watchData
 				}
-			case string(smsg.StreamEnd):
-				// End the stream
-				s.logger.Infof("Stream has been ended from the agent, closing request")
-				return nil
 			default:
 				s.logger.Errorf("unhandled stream message: %s", watchData.Type)
 			}

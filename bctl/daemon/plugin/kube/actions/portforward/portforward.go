@@ -86,7 +86,7 @@ func (p *PortForwardAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapp
 
 func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 	// If this is our ready message, send to our ready channel
-	if stream.Type == string(portforward.ReadyPortForward) {
+	if stream.Type == smsg.Ready {
 		p.streamInputChan <- stream
 		return
 	}
@@ -144,7 +144,7 @@ readyMessageLoop:
 	for {
 		select {
 		case streamMessage := <-p.streamInputChan:
-			if streamMessage.Type == string(portforward.ReadyPortForward) {
+			if streamMessage.Type == smsg.Ready {
 				// See if we have an error to bubble up to the user
 				if len(streamMessage.Content) != 0 {
 					// Bubble up the error to the user
@@ -323,7 +323,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				}
 				payloadBytes, _ := json.Marshal(payload)
 				p.outputChan <- plugin.ActionWrapper{
-					Action:        string(portforward.ErrorPortForward),
+					Action:        string(smsg.Error), // FIXME: ??
 					ActionPayload: payloadBytes,
 				}
 			}
@@ -413,8 +413,8 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		case requestMapStruct := <-requestMapChannel:
 			// contentBytes, _ := base64.StdEncoding.DecodeString(streamMessage.Content)
 
-			switch requestMapStruct.streamMessage.Type {
-			case string(smsg.PortForwardData):
+			switch smsg.StreamType(requestMapStruct.streamMessage.Type) {
+			case smsg.Data:
 				// Check our seqNumber
 				if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
 					processDataMessage(requestMapStruct.streamMessageContent.Content)
@@ -431,7 +431,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 					outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
 				}
 
-			case string(smsg.PortForwardError):
+			case smsg.Error:
 				if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
 					processErrorMessage(requestMapStruct.streamMessageContent.Content)
 				} else {
