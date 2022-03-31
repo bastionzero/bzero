@@ -4,9 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -14,6 +14,10 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 
 	"gopkg.in/tomb.v2"
+)
+
+const (
+	chunkSize = 124 * 1024 // 124KB
 )
 
 type WebDialAction struct {
@@ -51,7 +55,7 @@ func New(logger *logger.Logger,
 
 func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
 	// Build the action payload to start the web action dial
-	payload := webdial.WebDialActionPayload{
+	payload := bzwebdial.WebDialActionPayload{
 		RequestId: w.requestId,
 	}
 
@@ -73,29 +77,8 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	// First extract the headers out of the request
 	headers := bzhttp.GetHeaders(request.Header)
 
-	// Now extract the body
-	bodyInBytes, err := bzhttp.GetBodyBytes(request.Body)
-	if err != nil {
-		w.logger.Error(err)
-		return err
-	}
-
-	// Build the action payload
-	dataInPayload := webdial.WebInputActionPayload{
-		RequestId:      w.requestId,
-		SequenceNumber: 0, // currently do not implement sequence number
-		Endpoint:       request.URL.String(),
-		Headers:        headers,
-		Method:         request.Method,
-		Body:           bodyInBytes,
-	}
-
-	// Send payload to plugin output queue
-	dataInPayloadBytes, _ := json.Marshal(dataInPayload)
-	w.outputChan <- plugin.ActionWrapper{
-		Action:        string(bzwebdial.WebDialInput),
-		ActionPayload: dataInPayloadBytes,
-	}
+	// Send our request, in chunks if the body > chunksize
+	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
 
 	// this signals to the parent plugin that the action is done
 	defer close(w.outputChan)
@@ -143,7 +126,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 				// process the incoming stream messages *in order*
 				for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
-					var response webdial.WebOutputActionPayload
+					var response bzwebdial.WebOutputActionPayload
 					if contentBytes, err := base64.StdEncoding.DecodeString(nextMessage.Content); err != nil {
 						return err
 					} else if err := json.Unmarshal(contentBytes, &response); err != nil {
@@ -176,10 +159,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 							return nil
 						}
 
-						// remove the message we've already processed
 						delete(w.streamMessages, w.expectedSequenceNumber)
-
-						// increment our sequence number
 						w.expectedSequenceNumber += 1
 					}
 				}
@@ -187,6 +167,52 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}
+	}
+}
+
+func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, headers map[string][]string, method string) {
+	buf := make([]byte, chunkSize)
+	more := true
+	sequenceNumber := 0
+
+	for numBytes, err := body.Read(buf); more; numBytes, err = body.Read(buf) {
+		if err == io.EOF {
+			more = false
+		} else if err != nil {
+			w.logger.Errorf("error chunking http request: %s", err)
+
+			returnPayload := bzwebdial.WebInterruptActionPayload{
+				RequestId: w.requestId,
+			}
+			payloadBytes, _ := json.Marshal(returnPayload)
+
+			// send the agent our interrupt message
+			w.outputChan <- plugin.ActionWrapper{
+				Action:        string(bzwebdial.WebDialInterrupt),
+				ActionPayload: payloadBytes,
+			}
+			return
+		}
+
+		// Build the action payload
+		dataInPayload := bzwebdial.WebInputActionPayload{
+			RequestId:      w.requestId,
+			Endpoint:       endpoint,
+			Headers:        headers,
+			Method:         method,
+			SequenceNumber: sequenceNumber,
+			Body:           buf[:numBytes],
+			More:           more,
+		}
+
+		// Send payload to plugin output queue
+		dataInPayloadBytes, _ := json.Marshal(dataInPayload)
+		w.outputChan <- plugin.ActionWrapper{
+			Action:        string(bzwebdial.WebDialInput),
+			ActionPayload: dataInPayloadBytes,
+		}
+
+		sequenceNumber++
 	}
 }
 
