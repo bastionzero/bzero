@@ -23,19 +23,20 @@ const (
 )
 
 type WebDial struct {
-	logger *logger.Logger
-	tmb    *tomb.Tomb
-	closed bool
+	logger    *logger.Logger
+	tmb       *tomb.Tomb
+	closed    bool
+	requestId string
 
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan chan smsg.StreamMessage
 
+	interruptChan chan bool
+
 	remoteHost string
 	remotePort int
 
-	requestId string
-
-	interruptChan chan bool
+	requestBody []byte
 }
 
 func New(logger *logger.Logger,
@@ -52,6 +53,7 @@ func New(logger *logger.Logger,
 		remoteHost:       remoteHost,
 		remotePort:       remotePort,
 		interruptChan:    make(chan bool),
+		requestBody:      []byte{},
 	}, nil
 }
 
@@ -63,20 +65,19 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 	var rerr error
 	switch bzwebdial.WebDialSubAction(action) {
 	case bzwebdial.WebDialStart:
-		var start WebDialActionPayload
+		var start bzwebdial.WebDialActionPayload
 		if err := json.Unmarshal(actionPayload, &start); err != nil {
 			rerr = fmt.Errorf("malformed web dial action payload: %s", actionPayload)
 		} else {
-			// Set our requestId
 			w.requestId = start.RequestId
 			return action, []byte{}, nil
 		}
 	case bzwebdial.WebDialInput:
-		var input WebInputActionPayload
+		var input bzwebdial.WebInputActionPayload
 		if err := json.Unmarshal(actionPayload, &input); err != nil {
 			rerr = fmt.Errorf("unable to unmarshal web dial input message: %s", err)
 		} else {
-			return w.handleNewHttpRequest(action, input)
+			return "", []byte{}, w.handleRequest(input)
 		}
 	case bzwebdial.WebDialInterrupt:
 		w.interruptChan <- true
@@ -85,24 +86,25 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 		rerr = fmt.Errorf("unhandled stream action: %v", action)
 	}
 
-	// if we've gotten here, we've hit an error
 	w.logger.Error(rerr)
 	return "", []byte{}, rerr
 }
 
-func (w *WebDial) handleNewHttpRequest(action string, dataIn WebInputActionPayload) (string, []byte, error) {
-	// Build the endpoint given the remoteHost
-	remoteUrl := fmt.Sprintf("%s:%v", w.remoteHost, w.remotePort)
-
-	if endpoint, err := bzhttp.BuildEndpoint(remoteUrl, dataIn.Endpoint); err != nil {
-		return "", []byte{}, err
-	} else if request, err := buildHttpRequest(endpoint, dataIn.Body, dataIn.Method, dataIn.Headers); err != nil {
-		return "", []byte{}, err
-	} else if remoteHostUrl, err := url.Parse(w.remoteHost); err != nil {
-		w.logger.Error(fmt.Errorf("error parsing remote host url %s", w.remoteHost))
-		return "", []byte{}, err
+func (w *WebDial) handleRequest(requestPayload bzwebdial.WebInputActionPayload) error {
+	w.requestBody = append(w.requestBody, requestPayload.Body...)
+	if requestPayload.More {
+		return nil
 	} else {
-		request.Header.Set("Host", remoteHostUrl.Host)
+		w.logger.Debugf("Received request in %d part(s)", requestPayload.SequenceNumber+1)
+		return w.handleNewHttpRequest(requestPayload)
+	}
+}
+
+func (w *WebDial) handleNewHttpRequest(requestPayload bzwebdial.WebInputActionPayload) error {
+
+	if request, err := w.buildHttpRequest(requestPayload.Endpoint, w.requestBody, requestPayload.Method, requestPayload.Headers); err != nil {
+		return err
+	} else {
 
 		// We don't want to attempt to follow any redirect, we want to allow the browser/client to decided to
 		// redirect if they choose too
@@ -114,25 +116,24 @@ func (w *WebDial) handleNewHttpRequest(action string, dataIn WebInputActionPaylo
 		}
 
 		if response, err := httpClient.Do(request); err != nil {
-			rerr := fmt.Errorf("bad response to API request: %s", err)
+			rerr := fmt.Errorf("bad response to http request: %s", err)
 			w.logger.Error(rerr)
 
-			// Do not quit, just return the user the info regarding the api request
-			responsePayload := &WebOutputActionPayload{
+			responsePayload := &bzwebdial.WebOutputActionPayload{
 				StatusCode: http.StatusBadGateway,
-				RequestId:  dataIn.RequestId,
+				RequestId:  requestPayload.RequestId,
 				Headers:    map[string][]string{},
 				Content:    []byte{},
 			}
 
 			w.sendStreamMessage(0, smsg.Error, false, responsePayload)
-			return "", []byte{}, rerr
+			return rerr
 		} else {
 			go w.listenAndProcessStreamMessages(response)
 		}
 	}
 
-	return "", []byte{}, nil
+	return nil
 }
 
 func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
@@ -146,7 +147,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 
 	sequenceNumber := 0
 	buf := make([]byte, chunkSize)
-	var responsePayload *WebOutputActionPayload
+	var responsePayload *bzwebdial.WebOutputActionPayload
 
 	for {
 		select {
@@ -166,7 +167,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 				w.logger.Errorf("error reading response body: %s", err)
 
 				// Do not quit, just return the user the api request info
-				responsePayload = &WebOutputActionPayload{
+				responsePayload = &bzwebdial.WebOutputActionPayload{
 					StatusCode: http.StatusBadGateway,
 					RequestId:  w.requestId,
 					Headers:    map[string][]string{},
@@ -179,7 +180,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 			w.logger.Tracef("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
 
 			// Now we need to send that data back to the client
-			responsePayload = &WebOutputActionPayload{
+			responsePayload = &bzwebdial.WebOutputActionPayload{
 				StatusCode: response.StatusCode,
 				RequestId:  w.requestId,
 				Headers:    header,
@@ -200,7 +201,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 	}
 }
 
-func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, payload *WebOutputActionPayload) {
+func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, payload *bzwebdial.WebOutputActionPayload) {
 	responsePayloadBytes, _ := json.Marshal(payload)
 	payloadStr := base64.StdEncoding.EncodeToString(responsePayloadBytes)
 	message := smsg.StreamMessage{
@@ -214,19 +215,30 @@ func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamTy
 	w.streamOutputChan <- message
 }
 
-func buildHttpRequest(endpoint string, body []byte, method string, headers map[string][]string) (*http.Request, error) {
-	bodyBytesReader := bytes.NewReader(body)
-	req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
+func (w *WebDial) buildHttpRequest(endpoint string, body []byte, method string, headers map[string][]string) (*http.Request, error) {
 
-	// Add any headers
-	for name, values := range headers {
+	// Build the endpoint given the remoteHost
+	remoteUrl := fmt.Sprintf("%s:%v", w.remoteHost, w.remotePort)
 
-		// Loop over all values for the name.
-		for _, value := range values {
-			req.Header.Set(name, value)
+	if endpoint, err := bzhttp.BuildEndpoint(remoteUrl, endpoint); err != nil {
+		return nil, err
+	} else if remoteHostUrl, err := url.Parse(w.remoteHost); err != nil {
+		w.logger.Error(fmt.Errorf("error parsing remote host url %s", w.remoteHost))
+		return nil, err
+	} else {
+		bodyBytesReader := bytes.NewReader(body)
+		req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
+
+		// Add any headers
+		for name, values := range headers {
+
+			// Loop over all values for the name.
+			for _, value := range values {
+				req.Header.Set(name, value)
+			}
 		}
 
+		req.Header.Set("Host", remoteHostUrl.Host)
+		return req, nil
 	}
-
-	return req, nil
 }
