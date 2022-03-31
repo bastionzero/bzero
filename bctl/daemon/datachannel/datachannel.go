@@ -110,8 +110,9 @@ func New(logger *logger.Logger,
 		inputChan:   make(chan am.AgentMessage, 25),
 		ksInputChan: make(chan am.AgentMessage, 25),
 
-		onDeck: bzplugin.ActionWrapper{},
-		retry:  0,
+		onDeck:      bzplugin.ActionWrapper{},
+		lastMessage: bzplugin.ActionWrapper{},
+		retry:       0,
 	}
 
 	// register with websocket so datachannel can send a receive messages
@@ -371,6 +372,7 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 				return err
 			}
 		} else {
+			d.logger.Errorf("Please login again, %s", rerr)
 			d.Close(rerr)
 		}
 

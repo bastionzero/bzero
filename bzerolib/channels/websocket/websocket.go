@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
+	backoff "github.com/cenkalti/backoff/v4"
 	"github.com/gorilla/websocket"
 	"gopkg.in/tomb.v2"
 
@@ -57,7 +59,6 @@ const (
 )
 
 type IWebsocket interface {
-	Connect() error
 	Send(agentMessage am.AgentMessage)
 }
 
@@ -132,7 +133,7 @@ func New(logger *logger.Logger,
 
 	// Connect to the websocket in a go routine in case it takes a long time
 	go func() {
-		if err := ws.Connect(); err != nil {
+		if err := ws.connect(); err != nil {
 			logger.Error(err)
 			go ws.Close(fmt.Errorf("process was unable to connect to BastionZero"))
 
@@ -228,7 +229,7 @@ func (w *Websocket) receive() error {
 		} else { // else, reconnect
 			msg := fmt.Errorf("error in websocket, will attempt to reconnect: %s", err)
 			w.logger.Error(msg)
-			if err := w.Connect(); err != nil {
+			if err := w.connect(); err != nil {
 				return err
 			}
 		}
@@ -325,219 +326,92 @@ func (w *Websocket) Send(agentMessage am.AgentMessage) {
 	w.sendQueue <- agentMessage
 }
 
-func (w *Websocket) Connect() error {
-	if w.getChallenge {
-		// First get the config from the vault
-		config, _ := vault.LoadVault()
+// Opens a websocket connection to Bastion
+//
+// in order for Connect to serve as a robust abstraction for other processes that rely on it,
+// it must handle its own retry logic. For this, we use an exponential backoff. Some failures
+// within the connection process are considered transient, and thus trigger a retry. Others are
+// considered fatal, and return an error
+//
+// NOTE: with the exception of negotiate(), underlying bzhttp requests have their own 8-hour
+// exponential backoff, and so their errors are considered fatal
+func (w *Websocket) connect() error {
 
-		// Build our agentController
-		agentController, err := agentcontroller.New(w.logger, w.serviceUrl, map[string]string{}, map[string]string{}, w.params["agent_type"])
-		if err != nil {
-			return err
+	backoffParams := backoff.NewExponentialBackOff()
+	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
+	backoffParams.MaxInterval = time.Minute * 30 // At most 30 minutes in between requests
+	ticker := backoff.NewTicker(backoffParams)
+
+	for range ticker.C {
+		if !w.ready {
+			if w.getChallenge {
+				// safe to fail on this error since GetChallenge has its own retry logic
+				if err := w.solveChallenge(); err != nil {
+					return fmt.Errorf("error solving challenge: %s", err)
+				}
+			}
+
+			// If we have the option to refresh our auth details do it here before reconnecting
+			if w.refreshTokenCommand != "" {
+				if err := util.RunRefreshAuthCommand(w.refreshTokenCommand); err != nil {
+					w.logger.Error(fmt.Errorf("error executing refresh auth command: %s -- will retry", err))
+					continue
+				}
+			}
+
+			// Switch based on the targetType
+			// NOTE: the following connectX() functions have their own exponential backoff
+			// which is why we fail on their errors instead of retrying
+			switch w.targetType {
+			case Cluster:
+				if err := w.connectCluster(); err != nil {
+					return fmt.Errorf("error making kube cluster connection: %s", err)
+				}
+			case Db:
+				if err := w.connectDb(); err != nil {
+					return fmt.Errorf("error making database connection: %s", err)
+				}
+			case Web:
+				if err := w.connectWeb(); err != nil {
+					return fmt.Errorf("error making web connection: %s", err)
+				}
+			case AgentWebsocket:
+				if err := w.connectAgentWebsocket(); err != nil {
+					return fmt.Errorf("error making agent websocket connection: %s", err)
+				}
+			case AgentControl:
+				if err := w.connectAgentControl(); err != nil {
+					return fmt.Errorf("error making agent control connection: %s", err)
+				}
+			default:
+				return fmt.Errorf("unhandled connection type; %d", w.targetType)
+			}
+
+			// negotiate uses a special POST request that does not backoff
+			if err := w.negotiate(); err != nil {
+				w.logger.Error(fmt.Errorf("error on negotiation: %s -- will retry", err))
+			} else if websocketUrl, err := w.buildWebsocketUrl(); err != nil { // Build our url, add our params as well
+				return fmt.Errorf("could not build websocket url, not retrying: %s", err)
+			} else if w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{}); err != nil {
+				w.logger.Errorf("error dialing websocket: %s -- will retry", err)
+			} else if err := w.client.WriteMessage(websocket.TextMessage, append([]byte(`{"protocol": "json","version": 1}`), signalRMessageTerminatorByte)); err != nil {
+				// Define our protocol and version
+				// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go
+				w.client.Close()
+				return fmt.Errorf("error when trying to agree on version for SignalR, not retrying: %s", err)
+			} else {
+				w.logger.Info("Connection successful!")
+				w.ready = true
+			}
 		}
-
-		// If we have a private key, we must solve the challenge
-		if solvedChallenge, err := agentController.GetChallenge(w.params["target_id"], config.Data.PrivateKey, w.params["version"]); err != nil {
-			return fmt.Errorf("error getting challenge for agent with public key %s: %s", config.Data.PublicKey, err)
+		if w.ready {
+			return nil
 		} else {
-			w.params["solved_challenge"] = solvedChallenge
-		}
-
-		// And sign our agent version
-		if signedAgentVersion, err := agentcontroller.SignString(config.Data.PrivateKey, w.params["version"]); err != nil {
-			return fmt.Errorf("error signing agent version: %s", err)
-		} else {
-			w.params["signed_agent_version"] = signedAgentVersion
+			// this output won't line up with the exact timing you see, but it's in the ballpark
+			w.logger.Infof("failed to connect. Will try again in about %s", backoffParams.NextBackOff())
 		}
 	}
-
-	// If we have the option to refresh our auth details do it here before reconnecting
-	if w.refreshTokenCommand != "" {
-		if err := util.RunRefreshAuthCommand(w.refreshTokenCommand); err != nil {
-			return fmt.Errorf("error executing refresh auth command: %s", err)
-		}
-	}
-
-	// Switch based on the targetType
-	switch w.targetType {
-	case Cluster:
-		// First hit Bastion in order to get the connectionNode information, build our controller
-		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
-		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, w.serviceUrl, "", w.headers, w.params)
-		if cnControllerErr != nil {
-			return fmt.Errorf("error creating cnController")
-		}
-
-		targetGroups := []string{}
-		if w.params["target_groups"] != "" {
-			targetGroups = strings.Split(w.params["target_groups"], ",")
-		}
-
-		createConnectionResponse, err := cnController.CreateKubeConnection(w.params["target_user"], targetGroups, w.params["target_id"])
-		// Always set connectionId incase we error later and need to close the connection
-		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
-		if err != nil {
-			return err
-		}
-
-		// Now we can build our connectionnode url
-		newBaseUrl, err := bzhttp.BuildEndpoint(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
-		if err != nil {
-			return err
-		}
-		w.baseUrl = newBaseUrl
-
-		// Define our request params
-		w.requestParams["authToken"] = createConnectionResponse.AuthToken
-
-		// Get the connection type based on the websocket type
-		connectionType := ConnectionType(w.params["websocketType"])
-		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
-	case Db:
-		// First hit Bastion in order to get the connectionNode information, build our controller
-		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
-		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, w.serviceUrl, "", w.headers, w.params)
-		if cnControllerErr != nil {
-			return fmt.Errorf("error creating Connection Node Controller")
-		}
-
-		createConnectionResponse, err := cnController.CreateDbConnection(w.params["target_id"])
-		// Always set connectionId incase we error later and need to close the connection
-		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
-		if err != nil {
-			return err
-		}
-
-		// Now we can build our connectionnode url
-		newBaseUrl, err := bzhttp.BuildEndpoint(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
-		if err != nil {
-			return err
-		}
-		w.baseUrl = newBaseUrl
-
-		// Define our request params
-		w.requestParams["authToken"] = createConnectionResponse.AuthToken
-
-		// Get the connection type based on the websocket type
-		connectionType := ConnectionType(w.params["websocketType"])
-		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
-
-	case Web:
-		// First hit Bastion in order to get the connectionNode information, build our controller
-		cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
-		cnController, cnControllerErr := connectionnodecontroller.New(cnControllerLogger, w.serviceUrl, "", w.headers, w.params)
-		if cnControllerErr != nil {
-			return fmt.Errorf("error creating cnController")
-		}
-
-		createConnectionResponse, err := cnController.CreateWebConnection(w.params["target_id"])
-		// Always set connectionId incase we error later and need to close the connection
-		w.requestParams["connectionId"] = createConnectionResponse.ConnectionId
-		if err != nil {
-			return err
-		}
-
-		// Now we can build our connectionnode url
-		newBaseUrl, err := bzhttp.BuildEndpoint(createConnectionResponse.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
-		if err != nil {
-			return err
-		}
-		w.baseUrl = newBaseUrl
-
-		// Define our request params
-		w.requestParams["authToken"] = createConnectionResponse.AuthToken
-
-		// Get the connection type based on the websocket type
-		connectionType := ConnectionType(w.params["websocketType"])
-		w.requestParams["connectionType"] = fmt.Sprint(connectionType)
-
-	case AgentWebsocket:
-		// Build our connection node Url
-		if newBaseUrl, err := bzhttp.BuildEndpoint(w.params["connection_service_url"], agentConnectionNodeHubEndpoint); err != nil {
-			return err
-		} else {
-			w.baseUrl = newBaseUrl
-		}
-
-		// Define our reqest params
-		w.requestParams["connection_id"] = w.params["connection_id"]
-		w.requestParams["token"] = w.params["token"]
-		w.requestParams["connectionType"] = w.params["connectionType"]
-	case AgentControl:
-		// Default base url is just the service url and the hub endpoint
-		// This is because we hit bastion to initiate our control hub
-		// Now we can build our connectionnode url
-		if newBaseUrl, err := bzhttp.BuildEndpoint(w.serviceUrl, controlHubEndpoint); err != nil {
-			return err
-		} else {
-			w.baseUrl = newBaseUrl
-		}
-
-		// Default request params are just the params based
-		w.requestParams = w.params
-	default:
-		return fmt.Errorf("unhandled target type; %d", w.targetType)
-	}
-
-	// Make our POST request
-	negotiateEndpoint, err := bzhttp.BuildEndpoint(w.baseUrl, "negotiate")
-	if err != nil {
-		return err
-	}
-
-	w.logger.Infof("Starting negotiation with endpoint %s", negotiateEndpoint)
-
-	if response, err := bzhttp.Post(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.requestParams); err != nil {
-		return fmt.Errorf("error on negotiation: %s. Response: %+v", err, response)
-	} else {
-
-		// Extract out the connection token
-		bodyBytes, _ := ioutil.ReadAll(response.Body)
-		var m map[string]interface{}
-
-		if err := json.Unmarshal(bodyBytes, &m); err != nil {
-			// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
-			w.logger.Error(fmt.Errorf("error un-marshalling negotiate response: %+v", m))
-		}
-
-		// Add the connection id to the list of params
-		w.params["id"] = m["connectionId"].(string)
-		w.params["clientProtocol"] = "1.5"
-		w.params["transport"] = "WebSockets"
-
-		w.logger.Info("Negotiation successful")
-		response.Body.Close()
-	}
-
-	// Build our url u , add our params as well
-	websocketUrl, urlParseError := url.Parse(w.baseUrl)
-	if urlParseError != nil {
-		return fmt.Errorf("error parsing url %s", w.baseUrl)
-	}
-	// Update the scheme to be wss://
-	websocketUrl.Scheme = "wss"
-	w.logger.Infof("Connecting to %s", websocketUrl.String())
-
-	q := websocketUrl.Query()
-	for key, value := range w.requestParams {
-		q.Set(key, value)
-	}
-	websocketUrl.RawQuery = q.Encode()
-
-	if w.client, _, err = websocket.DefaultDialer.Dial(websocketUrl.String(), http.Header{}); err != nil {
-		return err
-	} else {
-		// Define our protocol and version
-		// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go
-		if err := w.client.WriteMessage(websocket.TextMessage, append([]byte(`{"protocol": "json","version": 1}`), signalRMessageTerminatorByte)); err != nil {
-			w.logger.Info("Error when trying to agree on version for SignalR!")
-			w.client.Close()
-		} else {
-			w.logger.Info("Connection successful!")
-			w.ready = true
-		}
-	}
-	return nil
+	return fmt.Errorf("failed to connect to Bastion after %s", backoffParams.MaxElapsedTime)
 }
 
 func (w *Websocket) lenChannels() int {
@@ -568,6 +442,182 @@ func (w *Websocket) getChannel(id string) (IChannel, bool) {
 
 	channel, ok := w.channels[id]
 	return channel, ok
+}
+
+func (w *Websocket) solveChallenge() error {
+	// First get the config from the vault
+	config, _ := vault.LoadVault()
+
+	// Build our agentController
+	agentController, err := agentcontroller.New(w.logger, w.serviceUrl, map[string]string{}, map[string]string{}, w.params["agent_type"])
+	if err != nil {
+		return err
+	}
+
+	// If we have a private key, we must solve the challenge
+	if solvedChallenge, err := agentController.GetChallenge(w.params["target_id"], config.Data.PrivateKey, w.params["version"]); err != nil {
+		return fmt.Errorf("error getting challenge for agent with public key %s: %s", config.Data.PublicKey, err)
+	} else {
+		w.params["solved_challenge"] = solvedChallenge
+	}
+
+	// And sign our agent version
+	if signedAgentVersion, err := agentcontroller.SignString(config.Data.PrivateKey, w.params["version"]); err != nil {
+		return fmt.Errorf("error signing agent version: %s", err)
+	} else {
+		w.params["signed_agent_version"] = signedAgentVersion
+	}
+
+	return nil
+}
+
+func (w *Websocket) connectCluster() error {
+	cnController, cnControllerErr := w.getCnController()
+	if cnControllerErr != nil {
+		return fmt.Errorf("error creating cnController")
+	}
+	targetGroups := []string{}
+	if w.params["target_groups"] != "" {
+		targetGroups = strings.Split(w.params["target_groups"], ",")
+	}
+
+	createConnectionResponse, err := cnController.CreateKubeConnection(w.params["target_user"], targetGroups, w.params["target_id"])
+
+	return w.buildCnUrl(createConnectionResponse, err)
+}
+
+func (w *Websocket) connectDb() error {
+	cnController, cnControllerErr := w.getCnController()
+	if cnControllerErr != nil {
+		return fmt.Errorf("error creating cnController")
+	}
+
+	createConnectionResponse, err := cnController.CreateDbConnection(w.params["target_id"])
+
+	return w.buildCnUrl(createConnectionResponse, err)
+}
+
+func (w *Websocket) connectWeb() error {
+	cnController, cnControllerErr := w.getCnController()
+	if cnControllerErr != nil {
+		return fmt.Errorf("error creating cnController")
+	}
+
+	createConnectionResponse, err := cnController.CreateWebConnection(w.params["target_id"])
+
+	return w.buildCnUrl(createConnectionResponse, err)
+}
+
+func (w *Websocket) connectAgentWebsocket() error {
+	// Build our connection node Url
+	if newBaseUrl, err := bzhttp.BuildEndpoint(w.params["connection_service_url"], agentConnectionNodeHubEndpoint); err != nil {
+		return err
+	} else {
+		w.baseUrl = newBaseUrl
+	}
+
+	// Define our reqest params
+	w.requestParams["connection_id"] = w.params["connection_id"]
+	w.requestParams["token"] = w.params["token"]
+	w.requestParams["connectionType"] = w.params["connectionType"]
+	return nil
+}
+
+func (w *Websocket) connectAgentControl() error {
+	// Default base url is just the service url and the hub endpoint
+	// This is because we hit bastion to initiate our control hub
+	// Now we can build our connectionnode url
+	if newBaseUrl, err := bzhttp.BuildEndpoint(w.serviceUrl, controlHubEndpoint); err != nil {
+		return err
+	} else {
+		w.baseUrl = newBaseUrl
+	}
+
+	// Default request params are just the params based
+	w.requestParams = w.params
+	return nil
+}
+
+func (w *Websocket) getCnController() (*connectionnodecontroller.ConnectionNodeController, error) {
+	// First hit Bastion in order to get the connectionNode information, build our controller
+	cnControllerLogger := w.logger.GetComponentLogger("cncontroller")
+	return connectionnodecontroller.New(cnControllerLogger, w.serviceUrl, "", w.headers, w.params)
+}
+
+func (w *Websocket) buildCnUrl(response connectionnodecontroller.ConnectionDetailsResponse, err error) error {
+	// Always set connectionId incase we error later and need to close the connection
+	w.requestParams["connectionId"] = response.ConnectionId
+
+	// return if our caller's createXConnection failed
+	if err != nil {
+		return err
+	}
+
+	// Now we can build our connectionnode url
+	newBaseUrl, err := bzhttp.BuildEndpoint(response.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
+	if err != nil {
+		return err
+	}
+	w.baseUrl = newBaseUrl
+
+	// Define our request params
+	w.requestParams["authToken"] = response.AuthToken
+
+	// Get the connection type based on the websocket type
+	connectionType := ConnectionType(w.params["websocketType"])
+	w.requestParams["connectionType"] = fmt.Sprint(connectionType)
+	return nil
+}
+
+func (w *Websocket) negotiate() error {
+	// Make our POST request
+	negotiateEndpoint, err := bzhttp.BuildEndpoint(w.baseUrl, "negotiate")
+	if err != nil {
+		return err
+	}
+
+	w.logger.Infof("Starting negotiation with endpoint %s", negotiateEndpoint)
+
+	response, err := bzhttp.PostNegotiate(w.logger, negotiateEndpoint, "application/json", []byte{}, w.headers, w.requestParams)
+	if err != nil {
+		return fmt.Errorf("error on negotiation: %s. Response: %+v", err, response)
+	}
+	// Extract out the connection token
+	bodyBytes, _ := ioutil.ReadAll(response.Body)
+	var m map[string]interface{}
+
+	if err := json.Unmarshal(bodyBytes, &m); err != nil {
+		// TODO: Add error handling around this, we should at least retry and then bubble up the error to the user
+		w.logger.Error(fmt.Errorf("error un-marshalling negotiate response: %+v", m))
+		return err
+	}
+
+	// Add the connection id to the list of params
+	w.params["id"] = m["connectionId"].(string)
+	w.params["clientProtocol"] = "1.5"
+	w.params["transport"] = "WebSockets"
+
+	w.logger.Info("Negotiation successful")
+	response.Body.Close()
+
+	return nil
+}
+
+func (w *Websocket) buildWebsocketUrl() (*url.URL, error) {
+	websocketUrl, urlParseError := url.Parse(w.baseUrl)
+	if urlParseError != nil {
+		return nil, fmt.Errorf("error parsing url %s", w.baseUrl)
+	}
+	// Update the scheme to be wss://
+	websocketUrl.Scheme = "wss"
+	w.logger.Infof("Connecting to %s", websocketUrl.String())
+
+	q := websocketUrl.Query()
+	for key, value := range w.requestParams {
+		q.Set(key, value)
+	}
+	websocketUrl.RawQuery = q.Encode()
+	return websocketUrl, nil
 }
 
 // can be used by other processes to check if our connection is open
