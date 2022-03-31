@@ -13,8 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type WebWebsocketSubAction string
-
 const (
 	Start      WebWebsocketSubAction = "web/websocket/start"
 	DataIn     WebWebsocketSubAction = "web/websocket/datain"

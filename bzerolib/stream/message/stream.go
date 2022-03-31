@@ -17,6 +17,18 @@ type StreamMessage struct {
 	Content        string `json:"content"`
 }
 
+type StreamAction string
+
+const (
+	Db              StreamAction = "db"
+	KubeExec        StreamAction = "kube/exec"
+	KubeLog         StreamAction = "kube/log"
+	KubePortForward StreamAction = "kube/portforward"
+	KubeStream      StreamAction = "kube/stream"
+	Web             StreamAction = "web"
+	Websocket       StreamAction = "web/websocket"
+)
+
 // Type restriction on our different kinds of agent
 // output streams.  StdIn will come in the form of a
 // Keysplitting DataMessage
@@ -34,17 +46,10 @@ const (
 	Start      StreamType = "start"
 	Stop       StreamType = "stop"
 	Stream     StreamType = "stream"
-)
-
-type StreamAction string
-
-const (
-	Db              StreamAction = "db"
-	KubeExec        StreamAction = "kube/exec"
-	KubeLog         StreamAction = "kube/log"
-	KubePortForward StreamAction = "kube/portforward"
-	KubeStream      StreamAction = "kube/stream"
-	Web             StreamAction = "web"
+	DataIn     StreamType = "datain"
+	DataOut    StreamType = "dataout"
+	AgentStop  StreamType = "agentstop"
+	DaemonStop StreamType = "daemonstop"
 )
 
 // TODO: remove, but keep them for now so that code will compile
