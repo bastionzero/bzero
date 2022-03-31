@@ -321,6 +321,7 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 				message := smsg.StreamMessage{
 					SchemaVersion:  smsg.CurrentSchema,
 					SequenceNumber: dataSeqNumber,
+					RequestId:      requestId,
 					Action:         string(kubeaction.PortForward),
 					Type:           smsg.Data,
 					More:           true,
@@ -369,6 +370,7 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 				message := smsg.StreamMessage{
 					SchemaVersion:  smsg.CurrentSchema,
 					SequenceNumber: errorSeqNumber,
+					RequestId:      requestId,
 					Action:         string(kubeaction.PortForward),
 					Type:           smsg.Error,
 					Content:        content,
@@ -479,6 +481,7 @@ func (p *PortForwardAction) sendReadyMessage(errorMessage string) {
 	message := smsg.StreamMessage{
 		SchemaVersion:  smsg.CurrentSchema,
 		SequenceNumber: 0,
+		RequestId:      p.requestId,
 		Action:         string(kubeaction.PortForward),
 		Type:           smsg.Ready,
 		Content:        errorMessage,

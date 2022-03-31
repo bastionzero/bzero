@@ -9,11 +9,12 @@ const (
 // Agent Output Streaming Messages
 
 type StreamMessage struct {
-	SchemaVersion  SchemaVersion `json:"schemaVersion"` // new as of bzero 4.2.0 / schemaVersion 1
+	RequestId      string        `json:"requestId"`     // TODO: deprecated as of schemaVersion 202203
+	SchemaVersion  SchemaVersion `json:"schemaVersion"` // new as of bzero 4.2.0 / schemaVersion 202203
 	SequenceNumber int           `json:"sequenceId"`
-	Action         string        `json:"action"` // new as of bzero 4.2.0 / schemaVersion 1
+	Action         string        `json:"action"` // new as of bzero 4.2.0 / schemaVersion 202203
 	Type           StreamType    `json:"type"`   // either stdout or stderr, see "StreamType"
-	More           bool          `json:"more"`   // new as of bzero 4.2.0 / schemaVersion 1
+	More           bool          `json:"more"`   // new as of bzero 4.2.0 / schemaVersion 202203
 	Content        string        `json:"content"`
 }
 
