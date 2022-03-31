@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -22,7 +23,7 @@ const (
 
 	// TODO: make these easily configurable values
 	maxRequestSize = 10 * 1024 * 1024  // 10MB
-	maxFileUpload  = 150 * 1024 * 1024 // 150MB
+	maxFileUpload  = 151 * 1024 * 1024 // 151MB a little extra for request fluff
 )
 
 type WebServer struct {
@@ -101,22 +102,27 @@ func StartWebServer(logger *logger.Logger,
 // it checks to see if someone is trying to send a request body that is far too large
 func (w *WebServer) capRequestSize(h http.HandlerFunc) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
-		request.Body = http.MaxBytesReader(writer, request.Body, maxRequestSize)
-		if err := request.ParseForm(); err != nil {
-			rerr := "BastionZero: Request is too large. Maximum request size is 10MB"
-			w.logger.Errorf(rerr)
-			http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
-			return
-		} else if request.ContentLength > maxFileUpload {
-			// for multipart/form-data type requests, the request body won't exceed our maximum single request size
-			// but we still want to cap the size of uploads because they are stored in their entirety on the target.
-			// Not optimal, here's the ticket: CWC-1647
-			// We shouldn't be relying on content length too much since it can be modified to be whatever.
-			rerr := "BastionZero: Request is too large. Maximum upload is 150MB"
-			w.logger.Errorf(rerr)
-			http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
-			return
+		if strings.HasPrefix(request.Header.Get("Content-Type"), "multipart") {
+			if request.ContentLength > maxFileUpload {
+				// for multipart/form-data type requests, the request body won't exceed our maximum single request size
+				// but we still want to cap the size of uploads because they are stored in their entirety on the target.
+				// Not optimal, here's the ticket: CWC-1647
+				// We shouldn't be relying on content length too much since it can be modified to be whatever.
+				rerr := "BastionZero: Request is too large. Maximum upload is 150MB"
+				w.logger.Errorf(rerr)
+				http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
+				return
+			}
+		} else {
+			request.Body = http.MaxBytesReader(writer, request.Body, maxRequestSize)
+			if err := request.ParseForm(); err != nil {
+				rerr := "BastionZero: Request is too large. Maximum request size is 10MB"
+				w.logger.Errorf(rerr)
+				http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
+				return
+			}
 		}
+
 		h(writer, request)
 	}
 }

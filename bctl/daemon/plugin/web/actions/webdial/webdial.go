@@ -174,9 +174,13 @@ func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, h
 	buf := make([]byte, chunkSize)
 	more := true
 	sequenceNumber := 0
+
 	for numBytes, err := body.Read(buf); more; numBytes, err = body.Read(buf) {
-		if err != nil && err != io.EOF {
+		if err == io.EOF {
+			more = false
+		} else if err != nil {
 			w.logger.Errorf("error chunking http request: %s", err)
+
 			returnPayload := bzwebdial.WebInterruptActionPayload{
 				RequestId: w.requestId,
 			}
@@ -187,11 +191,7 @@ func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, h
 				Action:        string(bzwebdial.WebDialInterrupt),
 				ActionPayload: payloadBytes,
 			}
-		}
-
-		if err == io.EOF {
-			more = false
-			body.Close()
+			return
 		}
 
 		// Build the action payload
