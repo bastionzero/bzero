@@ -120,7 +120,8 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				continue
 			}
 
-			if smsg.StreamType(data.Type) == smsg.Stream {
+			switch smsg.StreamType(data.Type) {
+			case smsg.Stream:
 				w.streamMessages[data.SequenceNumber] = data
 
 				// process the incoming stream messages *in order*
@@ -162,7 +163,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						w.expectedSequenceNumber += 1
 					}
 				}
-			} else {
+			default:
 				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}
