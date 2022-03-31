@@ -137,8 +137,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				continue
 			}
 
-			switch smsg.StreamType(data.Type) {
-			case smsg.WebStream, smsg.WebStreamEnd:
+			if smsg.StreamType(data.Type) == smsg.Stream {
 				w.streamMessages[data.SequenceNumber] = data
 
 				// process the incoming stream messages *in order*
@@ -172,7 +171,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						writer.Write(response.Content)
 
 						// if this is our last stream message, then we can return
-						if smsg.StreamType(nextMessage.Type) == smsg.WebStreamEnd {
+						if !data.More {
 							return nil
 						}
 
@@ -183,7 +182,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						w.expectedSequenceNumber += 1
 					}
 				}
-			default:
+			} else {
 				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}

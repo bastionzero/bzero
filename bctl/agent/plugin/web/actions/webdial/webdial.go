@@ -124,7 +124,7 @@ func (w *WebDial) handleNewHttpRequest(action string, dataIn WebInputActionPaylo
 				Content:    []byte{},
 			}
 
-			w.sendStreamMessage(responsePayload, 0, smsg.WebError)
+			w.sendStreamMessage(0, smsg.Web, smsg.Error, false, responsePayload)
 			return "", []byte{}, rerr
 		} else {
 			go w.listenAndProcessStreamMessages(response)
@@ -145,7 +145,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 
 	sequenceNumber := 0
 	buf := make([]byte, chunkSize)
-	var responsePayload WebOutputActionPayload
+	var responsePayload *WebOutputActionPayload
 
 	for {
 		select {
@@ -165,37 +165,33 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 				w.logger.Errorf("error reading response body: %s", err)
 
 				// Do not quit, just return the user the api request info
-				responsePayload = WebOutputActionPayload{
+				responsePayload = &WebOutputActionPayload{
 					StatusCode: http.StatusBadGateway,
 					RequestId:  w.requestId,
 					Headers:    map[string][]string{},
 					Content:    buf[:numBytes],
 				}
 
-				w.sendStreamMessage(&responsePayload, sequenceNumber, smsg.WebError)
+				w.sendStreamMessage(sequenceNumber, smsg.Web, smsg.Error, false, responsePayload)
 			}
 
 			w.logger.Tracef("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
 
 			// Now we need to send that data back to the client
-			responsePayload = WebOutputActionPayload{
+			responsePayload = &WebOutputActionPayload{
 				StatusCode: response.StatusCode,
 				RequestId:  w.requestId,
 				Headers:    header,
 				Content:    buf[:numBytes],
 			}
 
-			// if we got an io.EOF, this is the final message so let the daemon know
-			streamMessage := smsg.WebStream
-			if err == io.EOF {
-				streamMessage = smsg.WebStreamEnd
-			}
-
-			w.sendStreamMessage(&responsePayload, sequenceNumber, streamMessage)
-
 			// we get io.EOFs on whichever read call processes the final byte
 			if err == io.EOF {
+				// this is the final message so let the daemon know
+				w.sendStreamMessage(sequenceNumber, smsg.Web, smsg.Stream, false, responsePayload)
 				return
+			} else {
+				w.sendStreamMessage(sequenceNumber, smsg.Web, smsg.Stream, true, responsePayload)
 			}
 
 			sequenceNumber += 1
@@ -203,15 +199,22 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 	}
 }
 
-func (w *WebDial) sendStreamMessage(payload *WebOutputActionPayload, sequenceNumber int, streamType smsg.StreamType) {
+func (w *WebDial) sendStreamMessage(
+	sequenceNumber int,
+	streamAction smsg.StreamAction,
+	streamType smsg.StreamType,
+	more bool,
+	payload *WebOutputActionPayload,
+) {
 	responsePayloadBytes, _ := json.Marshal(payload)
-	str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
+	payloadStr := base64.StdEncoding.EncodeToString(responsePayloadBytes)
 	message := smsg.StreamMessage{
-		Type:           string(streamType),
-		RequestId:      w.requestId,
+		SchemaVersion:  smsg.CurrentSchema,
 		SequenceNumber: sequenceNumber,
-		Content:        str,
-		LogId:          "", // No log id for web messages
+		Action:         string(streamAction),
+		Type:           string(streamType),
+		More:           more,
+		Content:        payloadStr,
 	}
 	w.streamOutputChan <- message
 }
