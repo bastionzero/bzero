@@ -24,6 +24,7 @@ const (
 	ExecInput  ExecSubAction = "kube/exec/input"
 	ExecResize ExecSubAction = "kube/exec/resize"
 	ExecStop   ExecSubAction = "kube/exec/stop"
+	StdIn      ExecSubAction = "kube/exec/stdin"
 )
 
 const (
@@ -198,7 +199,7 @@ func (e *ExecAction) StartExec(startExecRequest KubeExecStartActionPayload) (str
 
 	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, smsg.CurrentSchema, e.requestId, string(kubeaction.Exec), smsg.StdErr)
 	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, smsg.CurrentSchema, e.requestId, string(kubeaction.Exec), smsg.StdOut)
-	stdinReader := stdin.NewStdReader(smsg.StdIn, startExecRequest.RequestId, e.execStdinChannel)
+	stdinReader := stdin.NewStdReader(string(StdIn), startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
 
 	// This function listens for a closed datachannel.  If the datachannel is closed, it doesn't necessarily mean

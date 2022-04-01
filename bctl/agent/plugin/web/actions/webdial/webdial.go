@@ -126,7 +126,7 @@ func (w *WebDial) handleNewHttpRequest(requestPayload bzwebdial.WebInputActionPa
 				Content:    []byte{},
 			}
 
-			w.sendStreamMessage(0, smsg.Error, false, responsePayload)
+			w.sendStreamMessage(0, smsg.WebError, smsg.Error, false, responsePayload)
 			return rerr
 		} else {
 			go w.listenAndProcessStreamMessages(response)
@@ -174,7 +174,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 					Content:    buf[:numBytes],
 				}
 
-				w.sendStreamMessage(sequenceNumber, smsg.Error, false, responsePayload)
+				w.sendStreamMessage(sequenceNumber, smsg.WebError, smsg.Error, false, responsePayload)
 			}
 
 			w.logger.Tracef("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
@@ -190,10 +190,10 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 			// we get io.EOFs on whichever read call processes the final byte
 			if err == io.EOF {
 				// this is the final message so let the daemon know
-				w.sendStreamMessage(sequenceNumber, smsg.Stream, false, responsePayload)
+				w.sendStreamMessage(sequenceNumber, smsg.WebStreamEnd, smsg.Stream, false, responsePayload)
 				return
 			} else {
-				w.sendStreamMessage(sequenceNumber, smsg.Stream, true, responsePayload)
+				w.sendStreamMessage(sequenceNumber, smsg.WebStream, smsg.Stream, true, responsePayload)
 			}
 
 			sequenceNumber += 1
@@ -201,16 +201,15 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 	}
 }
 
-func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, payload *bzwebdial.WebOutputActionPayload) {
+func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, streamTypeV2 smsg.StreamType, more bool, payload *bzwebdial.WebOutputActionPayload) {
 	responsePayloadBytes, _ := json.Marshal(payload)
-	payloadStr := base64.StdEncoding.EncodeToString(responsePayloadBytes)
 	message := smsg.StreamMessage{
 		SchemaVersion:  smsg.CurrentSchema,
 		SequenceNumber: sequenceNumber,
 		Action:         string(webaction.Dial),
 		Type:           streamType,
 		More:           more,
-		Content:        payloadStr,
+		Content:        base64.StdEncoding.EncodeToString(responsePayloadBytes),
 	}
 	w.streamOutputChan <- message
 }
