@@ -135,19 +135,8 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 		Headers: headers,
 	}
 	kubeWatchHeadersPayloadBytes, _ := json.Marshal(kubeWatchHeadersPayload)
-	content := base64.StdEncoding.EncodeToString(kubeWatchHeadersPayloadBytes[:])
-
 	// Stream the response back
-	message := smsg.StreamMessage{
-		SchemaVersion:  smsg.CurrentSchema,
-		SequenceNumber: 0,
-		RequestId:      s.requestId,
-		Action:         string(kubeaction.Stream),
-		Type:           smsg.Data,
-		Content:        content,
-		More:           true,
-	}
-	s.streamOutputChan <- message
+	s.sendStreamMessage(0, smsg.StreamData, smsg.Data, true, kubeWatchHeadersPayloadBytes[:])
 
 	// Create our bufio object
 	buf := make([]byte, 1024)
@@ -191,32 +180,12 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 					}
 
 					// Let the daemon know the stream has ended
-					message := smsg.StreamMessage{
-						SchemaVersion:  smsg.CurrentSchema,
-						SequenceNumber: sequenceNumber,
-						RequestId:      s.requestId,
-						Action:         string(kubeaction.Stream),
-						Type:           smsg.Stream,
-						More:           false,
-						Content:        "",
-					}
-					s.streamOutputChan <- message
+					s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, smsg.Stream, false, []byte{})
 					return
 				}
 
 				// Stream the response back
-				content := base64.StdEncoding.EncodeToString(buf[:numBytes])
-				message := smsg.StreamMessage{
-					SchemaVersion:  smsg.CurrentSchema,
-					SequenceNumber: sequenceNumber,
-					RequestId:      s.requestId,
-					Action:         string(kubeaction.Stream),
-					Type:           smsg.Data,
-					Content:        content,
-					More:           true,
-				}
-
-				s.streamOutputChan <- message
+				s.sendStreamMessage(sequenceNumber, smsg.StreamData, smsg.Data, true, buf[:numBytes])
 				sequenceNumber += 1
 			}
 		}
@@ -261,17 +230,7 @@ func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest Kub
 			// Parse out the body
 			if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
 				// Stream the context back to the user
-				content := base64.StdEncoding.EncodeToString(bodyBytes)
-				message := smsg.StreamMessage{
-					SchemaVersion:  smsg.CurrentSchema,
-					SequenceNumber: sequenceNumber,
-					RequestId:      s.requestId,
-					Action:         string(kubeaction.Stream),
-					Type:           smsg.Data,
-					Content:        content,
-					More:           true,
-				}
-				s.streamOutputChan <- message
+				s.sendStreamMessage(sequenceNumber, smsg.StreamData, smsg.Data, true, bodyBytes)
 			} else {
 				s.logger.Errorf("error reading body of http request: %s", err)
 			}
@@ -290,4 +249,26 @@ func convertToUrlObject(inURL string) (*url.URL, error) {
 		return nil, err
 	}
 	return u, nil
+}
+
+// FIXME:
+func (s *StreamAction) sendStreamMessage(
+	sequenceNumber int,
+	streamType smsg.StreamType,
+	streamTypeV2 smsg.StreamType,
+	more bool,
+	toSendBytes []byte,
+) {
+	// Stream the response back
+	streamMessage := smsg.StreamMessage{
+		SchemaVersion:  smsg.CurrentSchema,
+		SequenceNumber: sequenceNumber,
+		RequestId:      s.requestId,
+		Action:         string(kubeaction.Stream),
+		Type:           streamType,
+		TypeV2:         streamTypeV2,
+		More:           more,
+		Content:        base64.StdEncoding.EncodeToString(toSendBytes),
+	}
+	s.streamOutputChan <- streamMessage
 }
