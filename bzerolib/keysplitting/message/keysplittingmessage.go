@@ -23,16 +23,31 @@ const (
 	SchemaVersion = "1.1"
 )
 
-type IKeysplittingMessage interface {
-	BuildResponse(actionPayload interface{}, publickey string) (KeysplittingMessage, error)
-	VerifySignature(publicKey string) error
-	Sign(privateKey string) error
-}
+// type IKeysplittingMessage interface {
+// 	BuildResponse(actionPayload interface{}, publickey string) (KeysplittingMessage, error)
+// 	VerifySignature(publicKey string) error
+// 	Sign(privateKey string) error
+// }
 
 type KeysplittingMessage struct {
 	Type                KeysplittingPayloadType `json:"type"`
 	KeysplittingPayload interface{}             `json:"keysplittingPayload"`
 	Signature           string                  `json:"signature"`
+}
+
+func (k *KeysplittingMessage) GetHpointer() (string, error) {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynPayload:
+		return "", fmt.Errorf("syn payloads don't have hpointers")
+	case SynAckPayload:
+		return msg.HPointer, nil
+	case DataPayload:
+		return msg.HPointer, nil
+	case DataAckPayload:
+		return msg.HPointer, nil
+	default:
+		return "", fmt.Errorf("could not get hpointer for invalid keysplitting message type: %T", k.KeysplittingPayload)
+	}
 }
 
 func (k *KeysplittingMessage) VerifySignature(publicKey string) error {

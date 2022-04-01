@@ -4,16 +4,18 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"os"
 	"time"
+
+	orderedmap "github.com/wk8/go-ordered-map"
 
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
 
-type Config struct {
+type ZLIConfig struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`
 	TokenSet TokenSetConfig     `json:"tokenSet"`
 }
@@ -30,21 +32,24 @@ type KeysplittingConfig struct {
 }
 
 type Keysplitting struct {
-	hPointer         string
-	expectedHPointer string
-	publickey        string
-	privatekey       string
+	// hPointer         string
+	// expectedHPointer string
+	clientPubKey    string
+	clientSecretKey string
+	bzcertHash      string
 
-	// daemon variables
-	configPath          string
-	agentPubKey         string
-	bzcertHash          string
-	refreshTokenCommand string
+	zliConfigPath          string
+	zliRefreshTokenCommand string
 
+	agentPubKey  string
 	ackPublicKey string
 
-	// hash map to keep track of sent keysplitting messages
-	sentMessages map[string]*ksmsg.KeysplittingMessage
+	// ordered hash map to keep track of sent keysplitting messages
+	outbox         *orderedmap.OrderedMap
+	outOfOrderAcks map[string]*ksmsg.KeysplittingMessage
+
+	// not the last ack we've received but the last ack we've received *in order*
+	lastAck *ksmsg.KeysplittingMessage
 }
 
 func New(
@@ -52,15 +57,15 @@ func New(
 	configPath string,
 	refreshTokenCommand string,
 ) (*Keysplitting, error) {
+
 	// TODO: load keys from storage
 	keysplitter := &Keysplitting{
-		hPointer:            "",
-		expectedHPointer:    "",
-		configPath:          configPath,
-		refreshTokenCommand: refreshTokenCommand,
-		agentPubKey:         agentPubKey,
-		ackPublicKey:        "",
-		sentMessages:        make(map[string]*ksmsg.KeysplittingMessage),
+		zliConfigPath:          configPath,
+		zliRefreshTokenCommand: refreshTokenCommand,
+		agentPubKey:            agentPubKey,
+		ackPublicKey:           "",
+		outbox:                 orderedmap.New(),
+		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
 	}
 
 	return keysplitter, nil
@@ -86,47 +91,102 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 	// Verify the agent's signature
 	if err := ksMessage.VerifySignature(k.agentPubKey); err != nil {
-		// TODO: CWC-1553: Remove this inner conditional once all agents have
-		// updated
+		// TODO: CWC-1553: Remove this inner conditional once all agents have updated
 		if innerErr := ksMessage.VerifySignature(k.ackPublicKey); innerErr != nil {
 			return fmt.Errorf("failed to verify %v signature: inner error: %v. original error: %v", ksMessage.Type, innerErr, err)
 		}
 	}
 
-	if _, ok := k.sentMessages[hpointer]; ok {
-		delete(k.sentMessages, hpointer)
+	// Check this messages is in response to one we've sent
+	if _, ok := k.outbox.Get(hpointer); ok {
+		if pair := k.outbox.Oldest(); pair != nil {
+			return fmt.Errorf("where did this ack come from?! we're not waiting for a response to any messages")
+		} else if pair.Key != hpointer {
+			k.outOfOrderAcks[hpointer] = ksMessage
+		} else {
+			k.outbox.Delete(hpointer)
+			k.lastAck = ksMessage
+		}
 	} else {
-		return fmt.Errorf("%T message did not point to a previously sent message", ksMessage.KeysplittingPayload)
+		return fmt.Errorf("%T message did not correspond to a previously sent message", ksMessage.KeysplittingPayload)
 	}
-	// Verify received hash pointer matches expected hash pointer
-	// if hpointer != k.expectedHPointer {
-	// 	return fmt.Errorf("%T hash pointer did not match expected hash pointer", ksMessage.KeysplittingPayload)
-	// }
 
 	return nil
 }
 
-func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
-	var responseMessage ksmsg.KeysplittingMessage
+func (k *Keysplitting) Pipeline(action string, actionPayload []byte) error {
+	var ack *ksmsg.KeysplittingMessage
 
-	switch ksMessage.Type {
-	case ksmsg.SynAck:
-		synAckPayload := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
-		if dataPayload, hash, err := synAckPayload.BuildResponsePayload(action, actionPayload, k.bzcertHash); err != nil {
+	// get the last message we sent
+	if pair := k.outbox.Newest(); pair != nil {
+		// if there is none, then we're building off our last ack
+		if k.lastAck != nil {
+			ack = k.lastAck
+		} else {
+			return fmt.Errorf("can't build message because there's nothing to build it off of")
+		}
+	} else {
+		// predict the ack of our most recently sent message
+		ksMessage := pair.Value.(*ksmsg.KeysplittingMessage)
+		if newAck, err := k.predictAck(ksMessage); err != nil {
+			return fmt.Errorf("failed to predict ack: %s", err)
+		} else {
+			ack = &newAck
+		}
+	}
+
+	if newMessage, err := k.buildResponse(ack, action, actionPayload); err != nil {
+		return fmt.Errorf("failed to build new message: %s", err)
+	} else if hash, err := k.hashMessage(&newMessage); err != nil {
+		return fmt.Errorf("could not pipeline message because we couldn't hash our predicted response")
+	} else {
+		k.outbox.Set(hash, newMessage)
+		return nil
+	}
+}
+
+func (k *Keysplitting) predictAck(ksMessage *ksmsg.KeysplittingMessage) (ksmsg.KeysplittingMessage, error) {
+	switch msg := ksMessage.KeysplittingPayload.(type) {
+	case ksmsg.SynPayload:
+		if synAckPayload, _, err := msg.BuildResponsePayload([]byte{}, k.agentPubKey); err != nil {
 			return ksmsg.KeysplittingMessage{}, err
 		} else {
-			k.hPointer = hash
+			return ksmsg.KeysplittingMessage{
+				Type:                ksmsg.SynAck,
+				KeysplittingPayload: synAckPayload,
+			}, nil
+		}
+	case ksmsg.DataPayload:
+		if dataAckPayload, _, err := msg.BuildResponsePayload([]byte{}, k.agentPubKey); err != nil {
+			return ksmsg.KeysplittingMessage{}, err
+		} else {
+			return ksmsg.KeysplittingMessage{
+				Type:                ksmsg.DataAck,
+				KeysplittingPayload: dataAckPayload,
+			}, nil
+		}
+	default:
+		return ksmsg.KeysplittingMessage{}, fmt.Errorf("can't predict acks for message type: %T", ksMessage.KeysplittingPayload)
+	}
+}
+
+func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
+	var responseMessage ksmsg.KeysplittingMessage
+
+	switch msg := ksMessage.KeysplittingPayload.(type) {
+	case ksmsg.SynAckPayload:
+		if dataPayload, _, err := msg.BuildResponsePayload(action, actionPayload, k.bzcertHash); err != nil {
+			return ksmsg.KeysplittingMessage{}, err
+		} else {
 			responseMessage = ksmsg.KeysplittingMessage{
 				Type:                ksmsg.Data,
 				KeysplittingPayload: dataPayload,
 			}
 		}
-	case ksmsg.DataAck:
-		dataAckPayload := ksMessage.KeysplittingPayload.(ksmsg.DataAckPayload)
-		if dataPayload, hash, err := dataAckPayload.BuildResponsePayload(action, actionPayload, k.bzcertHash); err != nil {
+	case ksmsg.DataAckPayload:
+		if dataPayload, _, err := msg.BuildResponsePayload(action, actionPayload, k.bzcertHash); err != nil {
 			return ksmsg.KeysplittingMessage{}, err
 		} else {
-			k.hPointer = hash
 			responseMessage = ksmsg.KeysplittingMessage{
 				Type:                ksmsg.Data,
 				KeysplittingPayload: dataPayload,
@@ -134,26 +194,31 @@ func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 		}
 	}
 
-	hashBytes, _ := util.HashPayload(responseMessage.KeysplittingPayload)
-	k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
-
-	if err := responseMessage.Sign(k.privatekey); err != nil {
+	if err := responseMessage.Sign(k.clientSecretKey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %v", err.Error())
 	} else {
-		// Before we return the completed message, add it to our hash map
-		k.sentMessages[k.expectedHPointer] = &responseMessage
 		return responseMessage, nil
+	}
+}
+
+func (k *Keysplitting) hashMessage(ksMessage *ksmsg.KeysplittingMessage) (string, error) {
+	if hashBytes, ok := util.HashPayload(ksMessage.KeysplittingPayload); !ok {
+		return "", fmt.Errorf("failed to hash message")
+	} else {
+		return base64.StdEncoding.EncodeToString(hashBytes), nil
 	}
 }
 
 func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error) {
 	// If this is the beginning of the hash chain, then we create a nonce with a random value,
 	// otherwise we use the hash of the previous value to maintain the hash chain and immutability
-	var nonce string
-	if k.expectedHPointer == "" {
-		nonce = util.Nonce()
-	} else {
-		nonce = k.expectedHPointer
+	nonce := util.Nonce()
+	if k.lastAck != nil {
+		if hpointer, err := k.lastAck.GetHpointer(); err != nil {
+			return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to get hpointer of last ack: %s", err)
+		} else {
+			nonce = hpointer
+		}
 	}
 
 	// Build the BZero Certificate then store hash for future messages
@@ -185,59 +250,60 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 		KeysplittingPayload: synPayload,
 	}
 
-	// Sign it and send it
-	if err := ksMessage.Sign(k.privatekey); err != nil {
+	// Sign it and add it to our hash map
+	if err := ksMessage.Sign(k.clientSecretKey); err != nil {
 		return ksMessage, fmt.Errorf("could not sign payload: %v", err.Error())
+	} else if hash, err := k.hashMessage(&ksMessage); err != nil {
+		return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to hash syn")
 	} else {
-		hashBytes, _ := util.HashPayload(synPayload)
-		k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
+		k.outbox.Set(hash, ksMessage)
 		return ksMessage, nil
 	}
+
+	// hashBytes, _ := util.HashPayload(synPayload)
+	// k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
+	// return ksMessage, nil
 }
 
 func (k *Keysplitting) buildBZCert() (bzcrt.BZCert, error) {
 	// update the id token by calling the passed in zli command
-	if err := util.RunRefreshAuthCommand(k.refreshTokenCommand); err != nil {
+	if err := util.RunRefreshAuthCommand(k.zliRefreshTokenCommand); err != nil {
 		return bzcrt.BZCert{}, err
-	}
-
-	if configFile, err := os.Open(k.configPath); err != nil {
-		return bzcrt.BZCert{}, fmt.Errorf("could not open config file: %v", err.Error())
+	} else if zliConfig, err := k.loadZLIConfig(); err != nil {
+		return bzcrt.BZCert{}, err
 	} else {
-		configFileBytes, _ := io.ReadAll(configFile)
-
-		var config Config
-		err := json.Unmarshal(configFileBytes, &config)
-		if err != nil {
-			return bzcrt.BZCert{}, fmt.Errorf("could not unmarshal config file")
-		}
-
 		// Set public and private keys because someone maybe have logged out and logged back in again
-		k.publickey = config.KSConfig.PublicKey
+		k.clientPubKey = zliConfig.KSConfig.PublicKey
 
 		// The golang ed25519 library uses a length 64 private key because the private key is the concatenated form
 		// privatekey = privatekey + publickey.  So if it was generated as length 32, we can correct for that here
-		if privatekeyBytes, _ := base64.StdEncoding.DecodeString(config.KSConfig.PrivateKey); len(privatekeyBytes) == 32 {
-			publickeyBytes, _ := base64.StdEncoding.DecodeString(k.publickey)
-			k.privatekey = base64.StdEncoding.EncodeToString(append(privatekeyBytes, publickeyBytes...))
+		if privatekeyBytes, _ := base64.StdEncoding.DecodeString(zliConfig.KSConfig.PrivateKey); len(privatekeyBytes) == 32 {
+			publickeyBytes, _ := base64.StdEncoding.DecodeString(k.clientPubKey)
+			k.clientSecretKey = base64.StdEncoding.EncodeToString(append(privatekeyBytes, publickeyBytes...))
 		} else {
-			k.privatekey = config.KSConfig.PrivateKey
+			k.clientSecretKey = zliConfig.KSConfig.PrivateKey
 		}
 
 		return bzcrt.BZCert{
-			InitialIdToken:  config.KSConfig.InitialIdToken,
-			CurrentIdToken:  config.TokenSet.CurrentIdToken,
-			ClientPublicKey: config.KSConfig.PublicKey,
-			Rand:            config.KSConfig.CerRand,
-			SignatureOnRand: config.KSConfig.CerRandSignature,
+			InitialIdToken:  zliConfig.KSConfig.InitialIdToken,
+			CurrentIdToken:  zliConfig.TokenSet.CurrentIdToken,
+			ClientPublicKey: zliConfig.KSConfig.PublicKey,
+			Rand:            zliConfig.KSConfig.CerRand,
+			SignatureOnRand: zliConfig.KSConfig.CerRandSignature,
 		}, nil
 	}
 }
 
-// func (k *Keysplitting) predictHPointer(data *ksmsg.DataPayload) (string, error) {
-// 	if _, hash, err := data.BuildResponsePayload([]byte{}, k.bzcertHash); err != nil {
-// 		return "", err
-// 	} else {
-// 		return hash, nil
-// 	}
-// }
+func (k *Keysplitting) loadZLIConfig() (*ZLIConfig, error) {
+	var config ZLIConfig
+
+	if configFile, err := os.Open(k.zliConfigPath); err != nil {
+		return nil, fmt.Errorf("could not open config file: %v", err.Error())
+	} else if configFileBytes, err := ioutil.ReadAll(configFile); err != nil {
+		return nil, fmt.Errorf("failed to read config: %s", err)
+	} else if err := json.Unmarshal(configFileBytes, &config); err != nil {
+		return nil, fmt.Errorf("could not unmarshal config file")
+	} else {
+		return &config, nil
+	}
+}

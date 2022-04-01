@@ -36,7 +36,9 @@ type OpenDataChannelPayload struct {
 type IKeysplitting interface {
 	BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error)
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
-	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+	// BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+	Pipeline(action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+	OutputQueue() <-chan *ksmsg.KeysplittingMessage
 }
 
 type IPlugin interface {
@@ -184,6 +186,21 @@ func New(logger *logger.Logger,
 		}
 	}()
 
+	// send our keysplitting messages as we recieve them
+	go func() {
+		for {
+			select {
+			case <-dc.tmb.Dying():
+				return
+			case <-dc.plugin.Done():
+				// if the plugin closes, stop sending messages
+				return
+			case ksMessage := <-dc.keysplitting.OutputQueue():
+				dc.send(am.Keysplitting, ksMessage)
+			}
+		}
+	}()
+
 	return dc, &dc.tmb, nil
 }
 
@@ -247,7 +264,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 				return
 			case wrapper := <-ksOutputChan:
 				// Build and send response
-				if respKSMessage, err := d.keysplitting.BuildResponse(wrapper.Action, wrapper.ActionPayload); err != nil {
+				if respKSMessage, err := d.keysplitting.Pipeline(wrapper.Action, wrapper.ActionPayload); err != nil {
 					d.logger.Errorf("could not build response message: %s", err)
 				} else {
 					d.send(am.Keysplitting, respKSMessage)
@@ -517,18 +534,18 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 	return nil
 }
 
-func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
+// func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
 
-	// Build and send response
-	if respKSMessage, err := d.keysplitting.BuildResponse(keysplittingMessage, action, payload); err != nil {
-		rerr := fmt.Errorf("could not build response message: %s", err)
-		d.logger.Error(rerr)
-		return rerr
-	} else {
-		d.send(am.Keysplitting, respKSMessage)
-		return nil
-	}
-}
+// 	// Build and send response
+// 	if respKSMessage, err := d.keysplitting.BuildResponse(keysplittingMessage, action, payload); err != nil {
+// 		rerr := fmt.Errorf("could not build response message: %s", err)
+// 		d.logger.Error(rerr)
+// 		return rerr
+// 	} else {
+// 		d.send(am.Keysplitting, respKSMessage)
+// 		return nil
+// 	}
+// }
 
 func (d *DataChannel) getOnDeck() bzplugin.ActionWrapper {
 	d.onDeckLock.Lock()
