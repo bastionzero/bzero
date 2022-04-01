@@ -15,6 +15,12 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
 
+const (
+	// the number of messages we're allowed to precalculate and send without having
+	// received an ack
+	pipelineLimit = 8
+)
+
 type ZLIConfig struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`
 	TokenSet TokenSetConfig     `json:"tokenSet"`
@@ -45,7 +51,8 @@ type Keysplitting struct {
 	ackPublicKey string
 
 	// ordered hash map to keep track of sent keysplitting messages
-	outbox         *orderedmap.OrderedMap
+	outboxMap      *orderedmap.OrderedMap
+	outboxQueue    chan *ksmsg.KeysplittingMessage
 	outOfOrderAcks map[string]*ksmsg.KeysplittingMessage
 
 	// not the last ack we've received but the last ack we've received *in order*
@@ -64,27 +71,30 @@ func New(
 		zliRefreshTokenCommand: refreshTokenCommand,
 		agentPubKey:            agentPubKey,
 		ackPublicKey:           "",
-		outbox:                 orderedmap.New(),
+		outboxMap:              orderedmap.New(),
+		outboxQueue:            make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
 		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
 	}
 
 	return keysplitter, nil
 }
 
+func (k *Keysplitting) OutputQueue() <-chan *ksmsg.KeysplittingMessage {
+	return k.outboxQueue
+}
+
 func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	var hpointer string
-	switch ksMessage.Type {
-	case ksmsg.SynAck:
-		synAckPayload := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
-		hpointer = synAckPayload.HPointer
+	switch msg := ksMessage.KeysplittingPayload.(type) {
+	case ksmsg.SynAckPayload:
+		hpointer = msg.HPointer
 
 		// TODO: CWC-1553: Remove this code once all agents have updated
 		if k.ackPublicKey == "" {
-			k.ackPublicKey = synAckPayload.TargetPublicKey
+			k.ackPublicKey = msg.TargetPublicKey
 		}
-	case ksmsg.DataAck:
-		dataAckPayload := ksMessage.KeysplittingPayload.(ksmsg.DataAckPayload)
-		hpointer = dataAckPayload.HPointer
+	case ksmsg.DataAckPayload:
+		hpointer = msg.HPointer
 	default:
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}
@@ -98,14 +108,18 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	}
 
 	// Check this messages is in response to one we've sent
-	if _, ok := k.outbox.Get(hpointer); ok {
-		if pair := k.outbox.Oldest(); pair != nil {
+	if _, ok := k.outboxMap.Get(hpointer); ok {
+		if pair := k.outboxMap.Oldest(); pair != nil {
 			return fmt.Errorf("where did this ack come from?! we're not waiting for a response to any messages")
 		} else if pair.Key != hpointer {
+			if len(k.outOfOrderAcks) > pipelineLimit {
+				return fmt.Errorf("hold up, we're missing an ack") // LUCIE: RECOVER FROM THIS
+			}
 			k.outOfOrderAcks[hpointer] = ksMessage
 		} else {
-			k.outbox.Delete(hpointer)
 			k.lastAck = ksMessage
+			k.outboxMap.Delete(hpointer)
+			k.processOutOfOrderAcks()
 		}
 	} else {
 		return fmt.Errorf("%T message did not correspond to a previously sent message", ksMessage.KeysplittingPayload)
@@ -114,11 +128,22 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	return nil
 }
 
+func (k *Keysplitting) processOutOfOrderAcks() {
+	for pair := k.outboxMap.Oldest(); pair != nil; pair.Next() {
+		if ack, ok := k.outOfOrderAcks[pair.Key.(string)]; !ok {
+			return
+		} else {
+			k.lastAck = ack
+			k.outboxMap.Delete(pair.Key)
+		}
+	}
+}
+
 func (k *Keysplitting) Pipeline(action string, actionPayload []byte) error {
 	var ack *ksmsg.KeysplittingMessage
 
 	// get the last message we sent
-	if pair := k.outbox.Newest(); pair != nil {
+	if pair := k.outboxMap.Newest(); pair != nil {
 		// if there is none, then we're building off our last ack
 		if k.lastAck != nil {
 			ack = k.lastAck
@@ -137,10 +162,9 @@ func (k *Keysplitting) Pipeline(action string, actionPayload []byte) error {
 
 	if newMessage, err := k.buildResponse(ack, action, actionPayload); err != nil {
 		return fmt.Errorf("failed to build new message: %s", err)
-	} else if hash, err := k.hashMessage(&newMessage); err != nil {
-		return fmt.Errorf("could not pipeline message because we couldn't hash our predicted response")
+	} else if err := k.addToOutbox(newMessage); err != nil {
+		return err
 	} else {
-		k.outbox.Set(hash, newMessage)
 		return nil
 	}
 }
@@ -195,17 +219,28 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 	}
 
 	if err := responseMessage.Sign(k.clientSecretKey); err != nil {
-		return responseMessage, fmt.Errorf("could not sign payload: %v", err.Error())
+		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
 	} else {
 		return responseMessage, nil
 	}
 }
 
-func (k *Keysplitting) hashMessage(ksMessage *ksmsg.KeysplittingMessage) (string, error) {
+// func (k *Keysplitting) hashMessage(ksMessage *ksmsg.KeysplittingMessage) (string, error) {
+// 	if hashBytes, ok := util.HashPayload(ksMessage.KeysplittingPayload); !ok {
+// 		return "", fmt.Errorf("failed to hash message")
+// 	} else {
+// 		return base64.StdEncoding.EncodeToString(hashBytes), nil
+// 	}
+// }
+
+func (k *Keysplitting) addToOutbox(ksMessage ksmsg.KeysplittingMessage) error {
 	if hashBytes, ok := util.HashPayload(ksMessage.KeysplittingPayload); !ok {
-		return "", fmt.Errorf("failed to hash message")
+		return fmt.Errorf("failed to hash message")
 	} else {
-		return base64.StdEncoding.EncodeToString(hashBytes), nil
+		hash := base64.StdEncoding.EncodeToString(hashBytes)
+		k.outboxMap.Set(hash, ksMessage)
+		k.outboxQueue <- &ksMessage
+		return nil
 	}
 }
 
@@ -252,13 +287,19 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 
 	// Sign it and add it to our hash map
 	if err := ksMessage.Sign(k.clientSecretKey); err != nil {
-		return ksMessage, fmt.Errorf("could not sign payload: %v", err.Error())
-	} else if hash, err := k.hashMessage(&ksMessage); err != nil {
-		return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to hash syn")
+		return ksmsg.KeysplittingMessage{}, fmt.Errorf("could not sign payload: %s", err)
+	} else if err := k.addToOutbox(ksMessage); err != nil {
+		return ksmsg.KeysplittingMessage{}, err
 	} else {
-		k.outbox.Set(hash, ksMessage)
 		return ksMessage, nil
 	}
+
+	// else if hash, err := k.hashMessage(&ksMessage); err != nil {
+	// 	return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to hash syn")
+	// } else {
+	// 	k.outbox.Set(hash, ksMessage)
+	// 	return ksMessage, nil
+	// }
 
 	// hashBytes, _ := util.HashPayload(synPayload)
 	// k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)

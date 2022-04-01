@@ -37,7 +37,7 @@ type IKeysplitting interface {
 	BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error)
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
 	// BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
-	Pipeline(action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+	Pipeline(action string, actionPayload []byte) error
 	OutputQueue() <-chan *ksmsg.KeysplittingMessage
 }
 
@@ -162,9 +162,6 @@ func New(logger *logger.Logger,
 			case <-dc.plugin.Done():
 				dc.Close(fmt.Errorf("datachannel's sole action is closed"))
 			case agentMessage := <-dc.inputChan: // receive messages
-
-				// Keysplitting needs to be its own routine because the function will get stuck waiting for user input after a DATA/ACK,
-				// but still need to receive streams
 				if err := dc.processInput(agentMessage); err != nil {
 					dc.logger.Error(err)
 				}
@@ -191,9 +188,6 @@ func New(logger *logger.Logger,
 		for {
 			select {
 			case <-dc.tmb.Dying():
-				return
-			case <-dc.plugin.Done():
-				// if the plugin closes, stop sending messages
 				return
 			case ksMessage := <-dc.keysplitting.OutputQueue():
 				dc.send(am.Keysplitting, ksMessage)
@@ -264,10 +258,8 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 				return
 			case wrapper := <-ksOutputChan:
 				// Build and send response
-				if respKSMessage, err := d.keysplitting.Pipeline(wrapper.Action, wrapper.ActionPayload); err != nil {
+				if err := d.keysplitting.Pipeline(wrapper.Action, wrapper.ActionPayload); err != nil {
 					d.logger.Errorf("could not build response message: %s", err)
-				} else {
-					d.send(am.Keysplitting, respKSMessage)
 				}
 			}
 		}
