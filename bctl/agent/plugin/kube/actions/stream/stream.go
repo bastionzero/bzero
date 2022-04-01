@@ -251,7 +251,6 @@ func convertToUrlObject(inURL string) (*url.URL, error) {
 	return u, nil
 }
 
-// FIXME:
 func (s *StreamAction) sendStreamMessage(
 	sequenceNumber int,
 	streamType smsg.StreamType,

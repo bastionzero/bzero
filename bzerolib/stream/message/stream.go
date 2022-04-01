@@ -47,8 +47,9 @@ const (
 
 	LogOut StreamType = "kube/log/stdout"
 
-	PortForwardData  StreamType = "kube/portforward/data"
-	PortForwardError StreamType = "kube/portforward/error"
+	ReadyPortForward StreamType = "kube/portforward/ready"
+	DataPortForward  StreamType = "kube/portforward/data"
+	ErrorPortForward StreamType = "kube/portforward/error"
 
 	DbStream    StreamType = "db/stream"
 	DbStreamEnd StreamType = "db/stream/end"

@@ -298,39 +298,9 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 			case <-p.tmb.Dying():
 				return
 			default:
-				buf := make([]byte, DataStreamBufferSize)
-				n, err := dataStream.Read(buf)
-				if err != nil {
-					if err != io.EOF {
-						rerr := fmt.Errorf("error reading data from data stream: %s", err)
-						p.logger.Error(rerr)
-					}
-					p.doneChan <- true
-					return
-				}
-
-				// Send this data back to the bastion
-				content, err := p.wrapStreamMessageContent(buf[:n], portforwardRequestId)
-				if err != nil {
-					p.logger.Error(err)
-
-					// Alert on our done channel
-					p.doneChan <- true
-				}
-
-				message := smsg.StreamMessage{
-					SchemaVersion:  smsg.CurrentSchema,
-					SequenceNumber: dataSeqNumber,
-					RequestId:      requestId,
-					Action:         string(kubeaction.PortForward),
-					Type:           smsg.Data,
-					More:           true,
-					Content:        content,
-				}
-				p.streamOutputChan <- message
+				p.forwardStream(dataStream, dataSeqNumber, portforwardRequestId, requestId)
 				dataSeqNumber += 1
 			}
-
 		}
 	}()
 
@@ -346,40 +316,9 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 			case <-p.tmb.Dying():
 				return
 			default:
-				buf := make([]byte, ErrorStreamBufferSize)
-				n, err := errorStream.Read(buf)
-				if err != nil {
-					if err != io.EOF {
-						rerr := fmt.Errorf("error reading data from error stream: %s", err)
-						p.logger.Error(rerr)
-					}
-
-					// Alert on our done channel
-					p.doneChan <- true
-					return
-				}
-
-				content, err := p.wrapStreamMessageContent(buf[:n], portforwardRequestId)
-				if err != nil {
-					p.logger.Error(err)
-
-					// Alert on our done channel
-					p.doneChan <- true
-				}
-
-				message := smsg.StreamMessage{
-					SchemaVersion:  smsg.CurrentSchema,
-					SequenceNumber: errorSeqNumber,
-					RequestId:      requestId,
-					Action:         string(kubeaction.PortForward),
-					Type:           smsg.Error,
-					Content:        content,
-					// FIXME: more?
-				}
-				p.streamOutputChan <- message
+				p.forwardStream(errorStream, errorSeqNumber, portforwardRequestId, requestId)
 				errorSeqNumber += 1
 			}
-
 		}
 	}()
 
@@ -398,6 +337,40 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 	}()
 
 	return nil
+}
+
+func (p *PortForwardRequest) forwardStream(stream httpstream.Stream, sequenceNumber int, portforwardRequestId string, requestId string) {
+	buf := make([]byte, DataStreamBufferSize)
+	n, err := stream.Read(buf)
+	if err != nil {
+		if err != io.EOF {
+			rerr := fmt.Errorf("error reading data from data stream: %s", err)
+			p.logger.Error(rerr)
+		}
+		p.doneChan <- true
+		return
+	}
+
+	// Send this data back to the bastion
+	content, err := p.wrapStreamMessageContent(buf[:n], portforwardRequestId)
+	if err != nil {
+		p.logger.Error(err)
+
+		// Alert on our done channel
+		p.doneChan <- true
+	}
+
+	message := smsg.StreamMessage{
+		SchemaVersion:  smsg.CurrentSchema,
+		SequenceNumber: sequenceNumber,
+		RequestId:      requestId,
+		Action:         string(kubeaction.PortForward),
+		Type:           smsg.DataPortForward,
+		TypeV2:         smsg.Data,
+		More:           true,
+		Content:        content,
+	}
+	p.streamOutputChan <- message
 }
 
 func (p *PortForwardRequest) wrapStreamMessageContent(content []byte, portforwardRequestId string) (string, error) {
@@ -483,7 +456,8 @@ func (p *PortForwardAction) sendReadyMessage(errorMessage string) {
 		SequenceNumber: 0,
 		RequestId:      p.requestId,
 		Action:         string(kubeaction.PortForward),
-		Type:           smsg.Ready,
+		Type:           smsg.ReadyPortForward,
+		TypeV2:         smsg.Ready,
 		Content:        errorMessage,
 	}
 	p.streamOutputChan <- message
