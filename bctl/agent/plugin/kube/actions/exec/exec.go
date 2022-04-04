@@ -198,7 +198,7 @@ func (e *ExecAction) StartExec(startExecRequest KubeExecStartActionPayload) (str
 	}
 
 	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdErr, smsg.StdErrV2)
-	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdOut, smsg.StdErrV2)
+	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdOut, smsg.StdOutV2)
 	stdinReader := stdin.NewStdReader(string(StdIn), startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
 
