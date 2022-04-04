@@ -191,7 +191,7 @@ readyMessageLoop:
 			}
 		// prior to 202204
 		case "":
-			// FIXME: this is the most egregious case of repetition we have -- consider functionizing
+			// FIXME: good candidate for functionizing
 			if streamMessage.Type == smsg.ReadyPortForward {
 				// See if we have an error to bubble up to the user
 				if len(streamMessage.Content) != 0 {

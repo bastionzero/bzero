@@ -131,7 +131,6 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 			case "":
 				switch incomingMessage.Type {
 				case smsg.DataOut:
-					// FIXME: good candidate for functionizing
 					// Stream data to the local connection
 					// Undo the base 64 encoding
 					incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
