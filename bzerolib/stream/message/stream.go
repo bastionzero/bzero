@@ -25,8 +25,8 @@ type StreamMessage struct {
 type StreamType string
 
 const (
-	StdErrV2 StreamType = "stderr"
-	StdOutV2 StreamType = "stdout"
+	StdErr StreamType = "stderr"
+	StdOut StreamType = "stdout"
 
 	Data  StreamType = "data"
 	Error StreamType = "error"
@@ -39,11 +39,6 @@ const (
 )
 
 const (
-	StdErr StreamType = "kube/exec/stderr"
-	StdOut StreamType = "kube/exec/stdout"
-
-	LogOut StreamType = "kube/log/stdout"
-
 	ReadyPortForward StreamType = "kube/portforward/ready"
 	DataPortForward  StreamType = "kube/portforward/data"
 	ErrorPortForward StreamType = "kube/portforward/error"
