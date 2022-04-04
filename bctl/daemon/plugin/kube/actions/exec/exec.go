@@ -115,6 +115,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 
 	// Set up a go function for stdin
 	go func() {
+
 		for {
 			// Reset buffer every loop
 			buffer := make([]byte, 0)
@@ -149,6 +150,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 				e.outputChan <- wrapStdinPayload(e.requestId, e.logId, buffer)
 			}
 		}
+
 	}()
 
 	if isTty {

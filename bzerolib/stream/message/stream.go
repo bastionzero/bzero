@@ -8,15 +8,14 @@ const (
 )
 
 // Agent Output Streaming Messages
-
 type StreamMessage struct {
-	RequestId      string        `json:"requestId"`     // TODO: deprecated as of schemaVersion 202203
-	SchemaVersion  SchemaVersion `json:"schemaVersion"` // new as of schemaVersion 202203
+	RequestId      string        `json:"requestId"`     // deprecated / scheduled for removal as of schemaVersion 202204
+	SchemaVersion  SchemaVersion `json:"schemaVersion"` // new as of schemaVersion 202204
 	SequenceNumber int           `json:"sequenceId"`
-	Action         string        `json:"action"` // new as of schemaVersion 202203
+	Action         string        `json:"action"` // new as of schemaVersion 202204
 	Type           StreamType    `json:"type"`   // either stdout or stderr, see "StreamType"
 	TypeV2         StreamType    `json:"typeV2"` // temporarily used while we transitioned to a versioned schema
-	More           bool          `json:"more"`   // new as of schemaVersion 202203
+	More           bool          `json:"more"`   // new as of schemaVersion 202204
 	Content        string        `json:"content"`
 }
 
