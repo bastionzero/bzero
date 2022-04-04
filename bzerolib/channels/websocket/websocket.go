@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -26,7 +27,8 @@ import (
 const (
 	// SignalR Constants
 	signalRMessageTerminatorByte = 0x1E
-	signalRTypeNumber            = 1 // Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#invocation-message-encoding
+	signalRInvocationMessageType = 1 // Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#invocation-message-encoding
+	signalRCompletionMessageType = 3 // Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#completion-message-encoding
 
 	// Enum target types
 	Cluster = 2
@@ -65,6 +67,12 @@ type IWebsocket interface {
 	Ready() bool
 }
 
+// https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#invocations
+type signalRInvocationMessage struct {
+	invocationId *string
+	agentMessage am.AgentMessage
+}
+
 // This will be the client that we use to store our websocket connection
 type Websocket struct {
 	client     *websocket.Conn
@@ -78,8 +86,13 @@ type Websocket struct {
 	socketLock sync.Mutex
 	mapLock    sync.RWMutex
 
+	// InvocationId
+	currentInvocationId int64
+	invocationIdLock    sync.Mutex
+
 	// Buffered channel to keep track of outgoing messages
-	sendQueue chan am.AgentMessage
+	sendQueue               chan signalRInvocationMessage
+	messagesWaitingResponse map[string]am.AgentMessage
 
 	// Function for figuring out correct Target SignalR Hub
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
@@ -118,20 +131,21 @@ func New(logger *logger.Logger,
 	targetType int) (*Websocket, error) {
 
 	ws := Websocket{
-		logger:              logger,
-		sendQueue:           make(chan am.AgentMessage, 100),
-		channels:            make(map[string]IChannel),
-		targetSelectHandler: targetSelectHandler,
-		getChallenge:        getChallenge,
-		autoReconnect:       autoReconnect,
-		serviceUrl:          serviceUrl,
-		params:              params,
-		requestParams:       make(map[string]string),
-		headers:             headers,
-		subscribed:          false,
-		refreshTokenCommand: refreshTokenCommand,
-		targetType:          targetType,
-		baseUrl:             "",
+		logger:                  logger,
+		sendQueue:               make(chan signalRInvocationMessage, 100),
+		messagesWaitingResponse: make(map[string]am.AgentMessage),
+		channels:                make(map[string]IChannel),
+		targetSelectHandler:     targetSelectHandler,
+		getChallenge:            getChallenge,
+		autoReconnect:           autoReconnect,
+		serviceUrl:              serviceUrl,
+		params:                  params,
+		requestParams:           make(map[string]string),
+		headers:                 headers,
+		subscribed:              false,
+		refreshTokenCommand:     refreshTokenCommand,
+		targetType:              targetType,
+		baseUrl:                 "",
 	}
 
 	// Connect to the websocket in a go routine in case it takes a long time
@@ -265,7 +279,7 @@ func (w *Websocket) receive() error {
 	return nil
 }
 
-func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRWrapper, error) {
+func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage, error) {
 	// Always trim off the termination char if its there
 	if rawMessage[len(rawMessage)-1] == signalRMessageTerminatorByte {
 		rawMessage = rawMessage[0 : len(rawMessage)-1]
@@ -274,44 +288,80 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRWrapper, error) {
 	// Also check to see if we have multiple messages
 	splitmessages := bytes.Split(rawMessage, []byte{signalRMessageTerminatorByte})
 
-	messages := []SignalRWrapper{}
+	messages := []SignalRInvocationMessage{}
 	for _, msg := range splitmessages {
+
 		// unwrap signalR
-		var wrappedMessage SignalRWrapper
-		if err := json.Unmarshal(msg, &wrappedMessage); err != nil {
+		var signalRMessageType SignalRMessageTypeOnly
+		if err := json.Unmarshal(msg, &signalRMessageType); err != nil {
 			return messages, fmt.Errorf("error unmarshalling SignalR message from Bastion: %v", string(msg))
 		}
 
-		// if the messages isn't the signalr type we're expecting, ignore it because it's not going to be an AgentMessage
-		if wrappedMessage.Type != signalRTypeNumber {
-			msg := fmt.Sprintf("Ignoring SignalR message with type %v", wrappedMessage.Type)
-			w.logger.Trace(msg)
-		} else if len(wrappedMessage.Arguments) != 0 { // make sure there is an AgentMessage
-			messages = append(messages, wrappedMessage)
+		if signalRMessageType.Type == signalRCompletionMessageType {
+			var completionMessage SignalRCompletionMessage
+			if err := json.Unmarshal(msg, &completionMessage); err != nil {
+				return messages, fmt.Errorf("error unmarshalling SignalR completion message from Bastion: %v", string(msg))
+			}
+
+			if completionMessage.InvocationId != nil {
+				invocationId := *completionMessage.InvocationId
+				message := w.messagesWaitingResponse[invocationId]
+
+				if completionMessage.Error != nil {
+					w.logger.Errorf("Error invoking Agent message type %s on data channel %s. Unhandled Server Error: %s", message.MessageType, message.ChannelId, *completionMessage.Error)
+				}
+				if completionMessage.Result != nil {
+					if completionMessage.Result.Error {
+						w.logger.Errorf("Error invoking Agent message type %s on data channel %s. Error: %s", message.MessageType, message.ChannelId, *completionMessage.Result.ErrorMessage)
+					} else {
+						w.logger.Infof("Successfully completed invocation for Agent message type %s on data channel %s", message.MessageType, message.ChannelId)
+					}
+				}
+
+				w.deleteInvocationId(invocationId)
+			} else {
+				return messages, fmt.Errorf("error received completion message from Bastion without a invocationId: %v", string(msg))
+			}
+		} else if signalRMessageType.Type == signalRInvocationMessageType {
+			var invocationMessage SignalRInvocationMessage
+			if err := json.Unmarshal(msg, &invocationMessage); err != nil {
+				return messages, fmt.Errorf("error unmarshalling SignalR invocation message from Bastion: %v", string(msg))
+			}
+
+			// make sure there is an AgentMessage
+			if len(invocationMessage.Arguments) != 0 {
+				messages = append(messages, invocationMessage)
+			} else {
+				w.logger.Errorf("Ignoring SignalR invocation message because it doesn't have an AgentMessage argument")
+			}
+		} else {
+			msg := fmt.Sprintf("Ignoring SignalR message with type %v", signalRMessageType.Type)
+			w.logger.Tracef(msg)
 		}
 	}
 	return messages, nil
 }
 
 // Function to write signalr message to websocket
-func (w *Websocket) processOutput(agentMessage am.AgentMessage) {
+func (w *Websocket) processOutput(message signalRInvocationMessage) {
 	// Lock our send function so we don't hit any concurrency issues
 	// Ref: https://github.com/gorilla/websocket/issues/698
 	w.socketLock.Lock()
 	defer w.socketLock.Unlock()
 
 	// Select SignalR Endpoint
-	target, err := w.targetSelectHandler(agentMessage) // Agent and Daemon specify their own function to choose target
+	target, err := w.targetSelectHandler(message.agentMessage) // Agent and Daemon specify their own function to choose target
 	if err != nil {
 		rerr := fmt.Errorf("error in selecting SignalR Endpoint target name: %s", err)
 		w.logger.Error(rerr)
 		return
 	}
 
-	signalRMessage := SignalRWrapper{
-		Target:    target,
-		Type:      signalRTypeNumber,
-		Arguments: []am.AgentMessage{agentMessage},
+	signalRMessage := SignalRInvocationMessage{
+		Target:       target,
+		Type:         signalRInvocationMessageType,
+		Arguments:    []am.AgentMessage{message.agentMessage},
+		InvocationId: message.invocationId,
 	}
 
 	// Write our message to websocket
@@ -326,7 +376,19 @@ func (w *Websocket) processOutput(agentMessage am.AgentMessage) {
 
 // Function to write signalr message to websocket
 func (w *Websocket) Send(agentMessage am.AgentMessage) {
-	w.sendQueue <- agentMessage
+
+	// TODO: we can make invocationId optional by making it nil which will
+	// indicate to the server this is a non-blocking invocation. This function
+	// should take a boolean to indicate if it should wait for a response. TBD
+	// how should we return the result of the invocation to the caller context.
+	// Maybe by creating and pushing to a new channel specific to this
+	// invocationId?
+	invocationId := w.createInvocationId(agentMessage)
+
+	w.sendQueue <- signalRInvocationMessage{
+		agentMessage: agentMessage,
+		invocationId: &invocationId,
+	}
 }
 
 func (w *Websocket) Connect() error {
@@ -572,6 +634,25 @@ func (w *Websocket) getChannel(id string) (IChannel, bool) {
 
 	channel, ok := w.channels[id]
 	return channel, ok
+}
+
+func (w *Websocket) createInvocationId(agentMessage am.AgentMessage) string {
+	w.invocationIdLock.Lock()
+	defer w.invocationIdLock.Unlock()
+
+	w.currentInvocationId++
+	currentInvocationIdStr := strconv.FormatInt(w.currentInvocationId, 10)
+
+	w.messagesWaitingResponse[currentInvocationIdStr] = agentMessage
+
+	return currentInvocationIdStr
+}
+
+func (w *Websocket) deleteInvocationId(invocationId string) {
+	w.invocationIdLock.Lock()
+	defer w.invocationIdLock.Unlock()
+
+	delete(w.messagesWaitingResponse, invocationId)
 }
 
 // can be used by other processes to check if our connection is open
