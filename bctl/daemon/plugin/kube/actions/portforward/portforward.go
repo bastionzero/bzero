@@ -163,57 +163,20 @@ readyMessageLoop:
 			if streamMessage.Type == smsg.Ready || streamMessage.TypeV2 == smsg.Ready {
 				// See if we have an error to bubble up to the user
 				if len(streamMessage.Content) != 0 {
-					// Bubble up the error to the user
-					// Ref: https://pkg.go.dev/golang.org/x/build/kubernetes/api#Status
-					toReturn := api.Status{
-						Message: streamMessage.Content,
-						Status:  api.StatusFailure,
-						Code:    http.StatusForbidden,
-						Reason:  "Forbidden",
-					}
-					toReturnMarshal, err := json.Marshal(toReturn)
-					if err != nil {
-						// Best effort bubble up
-						writer.WriteHeader(http.StatusInternalServerError)
-						writer.Write([]byte(err.Error()))
-					} else {
-						writer.WriteHeader(http.StatusForbidden)
-						writer.Header().Set("Content-Type", "application/json")
-						writer.Write(toReturnMarshal)
-					}
+					bubbleUpError(writer, streamMessage.Content)
 
-					// Send close message
 					p.sendCloseMessage()
-
 					return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
 				}
 				break readyMessageLoop
 			}
 		// prior to 202204
 		case "":
-			// FIXME: good candidate for functionizing
 			if streamMessage.Type == smsg.ReadyPortForward {
 				// See if we have an error to bubble up to the user
 				if len(streamMessage.Content) != 0 {
-					// Bubble up the error to the user
-					// Ref: https://pkg.go.dev/golang.org/x/build/kubernetes/api#Status
-					toReturn := api.Status{
-						Message: streamMessage.Content,
-						Status:  api.StatusFailure,
-						Code:    http.StatusForbidden,
-						Reason:  "Forbidden",
-					}
-					toReturnMarshal, err := json.Marshal(toReturn)
-					if err != nil {
-						// Best effort bubble up
-						writer.WriteHeader(http.StatusInternalServerError)
-						writer.Write([]byte(err.Error()))
-					} else {
-						writer.WriteHeader(http.StatusForbidden)
-						writer.Header().Set("Content-Type", "application/json")
-						writer.Write(toReturnMarshal)
-					}
-					// Send close message
+					bubbleUpError(writer, streamMessage.Content)
+
 					p.sendCloseMessage()
 					return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
 				}
@@ -463,8 +426,9 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 
 			switch requestMapStruct.streamMessage.SchemaVersion {
 			// as of 202204
+			// note there is some blatant repetition here but this code isn't a good candidate for being
+			// split out into a separate function because it uses the local processXMessage functions
 			case smsg.CurrentSchema:
-				// FIXME: good candidate for functionizing
 				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
 				if requestMapStruct.streamMessage.Type == smsg.Data || requestMapStruct.streamMessage.TypeV2 == smsg.Data {
 					// Check our seqNumber
@@ -518,7 +482,6 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 						processDataMessage(outOfOrderDataContent)
 						outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
 					}
-
 				case smsg.ErrorPortForward:
 					if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
 						processErrorMessage(requestMapStruct.streamMessageContent.Content)
@@ -570,4 +533,25 @@ func (p *PortForwardAction) getRequestMap(key string) (chan RequestMapStruct, bo
 	defer p.requestMapLock.Unlock()
 	act, ok := p.requestMap[key]
 	return act, ok
+}
+
+func bubbleUpError(writer http.ResponseWriter, content string) {
+	// Bubble up the error to the user
+	// Ref: https://pkg.go.dev/golang.org/x/build/kubernetes/api#Status
+	toReturn := api.Status{
+		Message: content,
+		Status:  api.StatusFailure,
+		Code:    http.StatusForbidden,
+		Reason:  "Forbidden",
+	}
+	toReturnMarshal, err := json.Marshal(toReturn)
+	if err != nil {
+		// Best effort bubble up
+		writer.WriteHeader(http.StatusInternalServerError)
+		writer.Write([]byte(err.Error()))
+	} else {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Write(toReturnMarshal)
+	}
 }
