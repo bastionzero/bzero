@@ -208,6 +208,7 @@ func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamTy
 		SequenceNumber: sequenceNumber,
 		Action:         string(webaction.Dial),
 		Type:           streamType,
+		TypeV2:         streamTypeV2,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(responsePayloadBytes),
 	}
