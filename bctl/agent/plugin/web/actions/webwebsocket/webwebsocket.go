@@ -146,7 +146,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStart
 	if err != nil {
 		w.logger.Errorf("dial error: %s", err)
 		// Do not return an error incase the user wants to try again in making this connection, rather send a close message
-		w.sendStreamMessage(0, smsg.AgentStop, smsg.AgentStopV2, false, []byte{})
+		w.sendStreamMessage(0, smsg.AgentStop, smsg.Stop, false, []byte{})
 		return action, []byte{}, nil
 	}
 
@@ -158,7 +158,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStart
 			if err != nil {
 				w.logger.Infof("Read websocket error: %s", err)
 				// We have to let the daemon know the websocket has ended
-				w.sendStreamMessage(sequenceNumber, smsg.AgentStop, smsg.AgentStopV2, false, []byte{})
+				w.sendStreamMessage(sequenceNumber, smsg.AgentStop, smsg.Stop, false, []byte{})
 				sequenceNumber += 1
 				return
 			}
@@ -173,7 +173,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStart
 				w.logger.Infof("Json marshell error: %s", err)
 				return
 			}
-			w.sendStreamMessage(sequenceNumber, smsg.DataOut, smsg.DataOutV2, true, toSendBytes)
+			w.sendStreamMessage(sequenceNumber, smsg.DataOut, smsg.Data, true, toSendBytes)
 			sequenceNumber += 1
 
 			w.logger.Infof("Received websocket message: %s", message)

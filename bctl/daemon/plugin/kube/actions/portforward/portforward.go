@@ -371,8 +371,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				}
 				payloadBytes, _ := json.Marshal(payload)
 				p.outputChan <- plugin.ActionWrapper{
-					// FIXME: consider version
-					Action:        string(smsg.Error),
+					Action:        string(portforward.ErrorPortForward),
 					ActionPayload: payloadBytes,
 				}
 			}

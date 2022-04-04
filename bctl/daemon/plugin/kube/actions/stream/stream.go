@@ -97,8 +97,7 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		// FIXME: consider version?
-		Action:        string(smsg.Start),
+		Action:        string(kubestream.StreamStart),
 		ActionPayload: payloadBytes,
 	}
 
@@ -155,8 +154,7 @@ outOfOrderMessageHandler:
 
 			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
-				// FIXME: consider version?
-				Action:        string(smsg.Stop),
+				Action:        string(kubestream.StreamStop),
 				ActionPayload: payloadBytes,
 			}
 
