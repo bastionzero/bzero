@@ -73,21 +73,44 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 				// process the incoming stream messages *in order*
 				for streamMessage, ok := streamMessages[expectedSequenceNumber]; ok; streamMessage, ok = streamMessages[expectedSequenceNumber] {
-					switch smsg.StreamType(streamMessage.Type) {
-					case smsg.Stream:
-						if !streamMessage.More {
+					switch smsg.SchemaVersion(streamMessage.SchemaVersion) {
+					// as of 202204
+					case smsg.CurrentSchema:
+						// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
+						if smsg.StreamType(streamMessage.Type) == smsg.Stream || smsg.StreamType(streamMessage.TypeV2) == smsg.Stream {
+							if !streamMessage.More {
+								// since there's no more stream coming, close the local connection
+								d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
+								d.closed = true
+								return
+							}
+							if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
+								d.logger.Errorf("could not decode db stream content: %s", err)
+							} else {
+								lconn.Write(contentBytes)
+							}
+						} else {
+							d.logger.Errorf("unhandled stream type: %s and typeV2: %s", streamMessage.Type, streamMessage.TypeV2)
+						}
+					// prior to 202204
+					case "":
+						switch smsg.StreamType(streamMessage.Type) {
+						case smsg.DbStream:
+							if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
+								d.logger.Errorf("could not decode db stream content: %s", err)
+							} else {
+								lconn.Write(contentBytes)
+							}
+						case smsg.DbStreamEnd:
 							// since there's no more stream coming, close the local connection
 							d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
 							d.closed = true
 							return
-						}
-						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
-							d.logger.Errorf("could not decode db stream content: %s", err)
-						} else {
-							lconn.Write(contentBytes)
+						default:
+							d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 						}
 					default:
-						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
+						d.logger.Errorf("unhandled schema version: %s", streamMessage.SchemaVersion)
 					}
 
 					// remove the message we've already processed

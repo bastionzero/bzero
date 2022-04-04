@@ -85,11 +85,25 @@ func (p *PortForwardAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapp
 }
 
 func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
-	// If this is our ready message, send to our ready channel
-	if stream.Type == smsg.Ready {
-		p.streamInputChan <- stream
+	switch smsg.SchemaVersion(stream.SchemaVersion) {
+	// as of 202204
+	case smsg.CurrentSchema:
+		// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
+		if smsg.StreamType(stream.Type) == smsg.Ready || smsg.StreamType(stream.TypeV2) == smsg.Ready {
+			p.streamInputChan <- stream
+			return
+		}
+	// prior to 202204
+	case "":
+		if smsg.StreamType(stream.Type) == smsg.ReadyPortForward {
+			p.streamInputChan <- stream
+			return
+		}
+	default:
+		p.logger.Errorf("unhandled schema version: %s", stream.SchemaVersion)
 		return
 	}
+	// If this is our ready message, send to our ready channel
 
 	// Unmarshal our content
 	var kubePortforwardStreamMessageContent portforward.KubePortForwardStreamMessageContent
@@ -142,9 +156,11 @@ func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, re
 	// Now wait for the ready message, incase we need to bubble up an error to the user
 readyMessageLoop:
 	for {
-		select {
-		case streamMessage := <-p.streamInputChan:
-			if streamMessage.Type == smsg.Ready {
+		streamMessage := <-p.streamInputChan
+		switch smsg.SchemaVersion(streamMessage.SchemaVersion) {
+		// as of 202204
+		case smsg.CurrentSchema:
+			if streamMessage.Type == smsg.Ready || streamMessage.TypeV2 == smsg.Ready {
 				// See if we have an error to bubble up to the user
 				if len(streamMessage.Content) != 0 {
 					// Bubble up the error to the user
@@ -173,6 +189,38 @@ readyMessageLoop:
 				}
 				break readyMessageLoop
 			}
+		// prior to 202204
+		case "":
+			// FIXME: this is the most egregious case of repetition we have -- consider functionizing
+			if smsg.StreamType(streamMessage.Type) == smsg.ReadyPortForward {
+				// See if we have an error to bubble up to the user
+				if len(streamMessage.Content) != 0 {
+					// Bubble up the error to the user
+					// Ref: https://pkg.go.dev/golang.org/x/build/kubernetes/api#Status
+					toReturn := api.Status{
+						Message: streamMessage.Content,
+						Status:  api.StatusFailure,
+						Code:    http.StatusForbidden,
+						Reason:  "Forbidden",
+					}
+					toReturnMarshal, err := json.Marshal(toReturn)
+					if err != nil {
+						// Best effort bubble up
+						writer.WriteHeader(http.StatusInternalServerError)
+						writer.Write([]byte(err.Error()))
+					} else {
+						writer.WriteHeader(http.StatusForbidden)
+						writer.Header().Set("Content-Type", "application/json")
+						writer.Write(toReturnMarshal)
+					}
+					// Send close message
+					p.sendCloseMessage()
+					return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
+				}
+				break readyMessageLoop
+			}
+		default:
+			p.logger.Errorf("unhandled schema version: %s", streamMessage.SchemaVersion)
 		}
 	}
 
@@ -323,7 +371,8 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				}
 				payloadBytes, _ := json.Marshal(payload)
 				p.outputChan <- plugin.ActionWrapper{
-					Action:        string(smsg.Error), // FIXME: ??
+					// FIXME: consider version
+					Action:        string(smsg.Error),
 					ActionPayload: payloadBytes,
 				}
 			}
@@ -413,39 +462,82 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		case requestMapStruct := <-requestMapChannel:
 			// contentBytes, _ := base64.StdEncoding.DecodeString(streamMessage.Content)
 
-			switch smsg.StreamType(requestMapStruct.streamMessage.Type) {
-			case smsg.Data:
-				// Check our seqNumber
-				if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
-					processDataMessage(requestMapStruct.streamMessageContent.Content)
+			switch smsg.SchemaVersion(requestMapStruct.streamMessage.SchemaVersion) {
+			// as of 202204
+			case smsg.CurrentSchema:
+				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
+				if smsg.StreamType(requestMapStruct.streamMessage.Type) == smsg.Data || smsg.StreamType(requestMapStruct.streamMessage.TypeV2) == smsg.Data {
+					// Check our seqNumber
+					if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
+						processDataMessage(requestMapStruct.streamMessageContent.Content)
+					} else {
+						// Update our buffer
+						dataBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+					}
+
+					// Always attempt to processes out of order messages
+					outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
+					for ok {
+						// Keep pulling older messages
+						processDataMessage(outOfOrderDataContent)
+						outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
+					}
+				} else if smsg.StreamType(requestMapStruct.streamMessage.Type) == smsg.Error || smsg.StreamType(requestMapStruct.streamMessage.TypeV2) == smsg.Error {
+					if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
+						processErrorMessage(requestMapStruct.streamMessageContent.Content)
+					} else {
+						// Update our buffer
+						errorBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+					}
+
+					// Always attempt to process out of order messages
+					outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
+					for ok {
+						// Keep pulling older messages
+						processErrorMessage(outOfOrderErrorContent)
+						outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
+					}
 				} else {
-					// Update our buffer
-					dataBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+					p.logger.Errorf("unhandled stream type: %s and typeV2: %s", requestMapStruct.streamMessage.Type, requestMapStruct.streamMessage.TypeV2)
 				}
+			// prior to 202204
+			case "":
+				switch requestMapStruct.streamMessage.Type {
+				case smsg.DataPortForward:
+					// Check our seqNumber
+					if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
+						processDataMessage(requestMapStruct.streamMessageContent.Content)
+					} else {
+						// Update our buffer
+						dataBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+					}
+					// Always attempt to processes out of order messages
+					outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
+					for ok {
+						// Keep pulling older messages
+						processDataMessage(outOfOrderDataContent)
+						outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
+					}
 
-				// Always attempt to processes out of order messages
-				outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
-				for ok {
-					// Keep pulling older messages
-					processDataMessage(outOfOrderDataContent)
-					outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
+				case smsg.ErrorPortForward:
+					if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
+						processErrorMessage(requestMapStruct.streamMessageContent.Content)
+					} else {
+						// Update our buffer
+						errorBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+					}
+					// Always attempt to process out of order messages
+					outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
+					for ok {
+						// Keep pulling older messages
+						processErrorMessage(outOfOrderErrorContent)
+						outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
+					}
+				default:
+					p.logger.Errorf("unhandled stream type: %s", requestMapStruct.streamMessage.Type)
 				}
-
-			case smsg.Error:
-				if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
-					processErrorMessage(requestMapStruct.streamMessageContent.Content)
-				} else {
-					// Update our buffer
-					errorBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
-				}
-
-				// Always attempt to process out of order messages
-				outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
-				for ok {
-					// Keep pulling older messages
-					processErrorMessage(outOfOrderErrorContent)
-					outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
-				}
+			default:
+				p.logger.Errorf("unhandled schema version: %s", requestMapStruct.streamMessage.SchemaVersion)
 			}
 		}
 	}

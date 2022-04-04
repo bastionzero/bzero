@@ -1,9 +1,10 @@
 package message
 
+// YYYYMM-formatted string -- the earliest this schema was used
 type SchemaVersion string
 
 const (
-	CurrentSchema SchemaVersion = "202203"
+	CurrentSchema SchemaVersion = "202204" // if the agent and daemon are both up to date, they send/receive messages with this version
 )
 
 // Agent Output Streaming Messages
@@ -34,9 +35,6 @@ const (
 	Start  StreamType = "start"
 	Stop   StreamType = "stop"
 	Stream StreamType = "stream"
-
-	DataOutV2   StreamType = "dataout"
-	AgentStopV2 StreamType = "agentstop"
 
 	Ready StreamType = "ready"
 )

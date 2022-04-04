@@ -97,7 +97,8 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        string(smsg.Start), // FIXME: ?
+		// FIXME: consider version?
+		Action:        string(smsg.Start),
 		ActionPayload: payloadBytes,
 	}
 
@@ -154,40 +155,73 @@ outOfOrderMessageHandler:
 
 			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
-				Action:        string(smsg.Stop), // FIXME: ?
+				// FIXME: consider version?
+				Action:        string(smsg.Stop),
 				ActionPayload: payloadBytes,
 			}
 
 			return nil
 
 		case watchData := <-s.streamInputChan:
-			// Determin if this is an end or data messages
-			switch smsg.StreamType(watchData.Type) {
-			case smsg.Data:
-				if !watchData.More {
+
+			switch smsg.SchemaVersion(watchData.SchemaVersion) {
+			// as of 202204
+			case smsg.CurrentSchema:
+				if smsg.StreamType(watchData.Type) == smsg.Data || smsg.StreamType(watchData.TypeV2) == smsg.Data {
+					if !watchData.More {
+						// End the stream
+						s.logger.Infof("Stream has been ended from the agent, closing request")
+						return nil
+					}
+					// Then stream the response to kubectl
+					if watchData.SequenceNumber == s.expectedSequenceNumber {
+						// If the incoming data is equal to the current expected seqNumber, show the user
+						contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
+						if err := kubeutils.WriteToHttpRequest(contentBytes, writer); err != nil {
+							s.logger.Error(err)
+							return nil
+						}
+
+						// Increment the seqNumber
+						s.expectedSequenceNumber += 1
+
+						// See if we have any early messages for this seqNumber
+						s.handleOutOfOrderMessage()
+					} else {
+						s.outOfOrderMessages[watchData.SequenceNumber] = watchData
+					}
+				} else {
+					s.logger.Errorf("unhandled stream type: %s and typeV2: %s", watchData.Type, watchData.TypeV2)
+				}
+			// prior to 202204
+			case "":
+				// Determine if this is an end or data messages
+				switch smsg.StreamType(watchData.Type) {
+				case smsg.StreamData:
+					// Then stream the response to kubectl
+					if watchData.SequenceNumber == s.expectedSequenceNumber {
+						// If the incoming data is equal to the current expected seqNumber, show the user
+						contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
+						if err := kubeutils.WriteToHttpRequest(contentBytes, writer); err != nil {
+							s.logger.Error(err)
+							return nil
+						}
+						// Increment the seqNumber
+						s.expectedSequenceNumber += 1
+						// See if we have any early messages for this seqNumber
+						s.handleOutOfOrderMessage()
+					} else {
+						s.outOfOrderMessages[watchData.SequenceNumber] = watchData
+					}
+				case smsg.StreamEnd:
 					// End the stream
 					s.logger.Infof("Stream has been ended from the agent, closing request")
 					return nil
-				}
-				// Then stream the response to kubectl
-				if watchData.SequenceNumber == s.expectedSequenceNumber {
-					// If the incoming data is equal to the current expected seqNumber, show the user
-					contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
-					if err := kubeutils.WriteToHttpRequest(contentBytes, writer); err != nil {
-						s.logger.Error(err)
-						return nil
-					}
-
-					// Increment the seqNumber
-					s.expectedSequenceNumber += 1
-
-					// See if we have any early messages for this seqNumber
-					s.handleOutOfOrderMessage()
-				} else {
-					s.outOfOrderMessages[watchData.SequenceNumber] = watchData
+				default:
+					s.logger.Errorf("unhandled stream message: %s", watchData.Type)
 				}
 			default:
-				s.logger.Errorf("unhandled stream message: %s", watchData.Type)
+				s.logger.Errorf("unhandled schema version: %s", watchData.SchemaVersion)
 			}
 		}
 	}
