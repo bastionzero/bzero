@@ -213,7 +213,6 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 			default:
 				w.logger.Errorf("unhandled schema version: %s", data.SchemaVersion)
 			}
-
 		}
 	}
 }
