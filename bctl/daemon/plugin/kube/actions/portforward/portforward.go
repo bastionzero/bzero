@@ -464,6 +464,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 			switch requestMapStruct.streamMessage.SchemaVersion {
 			// as of 202204
 			case smsg.CurrentSchema:
+				// FIXME: good candidate for functionizing
 				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
 				if requestMapStruct.streamMessage.Type == smsg.Data || requestMapStruct.streamMessage.TypeV2 == smsg.Data {
 					// Check our seqNumber

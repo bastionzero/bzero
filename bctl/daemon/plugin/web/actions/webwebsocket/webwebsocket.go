@@ -91,6 +91,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 			case smsg.CurrentSchema:
 				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
 				if incomingMessage.Type == smsg.Data || incomingMessage.TypeV2 == smsg.Data {
+					// FIXME: good candidate for functionizing
 					// Stream data to the local connection
 					// Undo the base 64 encoding
 					incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
@@ -130,6 +131,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 			case "":
 				switch incomingMessage.Type {
 				case smsg.DataOut:
+					// FIXME: good candidate for functionizing
 					// Stream data to the local connection
 					// Undo the base 64 encoding
 					incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
