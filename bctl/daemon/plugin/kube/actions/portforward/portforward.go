@@ -85,17 +85,17 @@ func (p *PortForwardAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapp
 }
 
 func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
-	switch smsg.SchemaVersion(stream.SchemaVersion) {
+	switch stream.SchemaVersion {
 	// as of 202204
 	case smsg.CurrentSchema:
 		// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-		if smsg.StreamType(stream.Type) == smsg.Ready || smsg.StreamType(stream.TypeV2) == smsg.Ready {
+		if stream.Type == smsg.Ready || stream.TypeV2 == smsg.Ready {
 			p.streamInputChan <- stream
 			return
 		}
 	// prior to 202204
 	case "":
-		if smsg.StreamType(stream.Type) == smsg.ReadyPortForward {
+		if stream.Type == smsg.ReadyPortForward {
 			p.streamInputChan <- stream
 			return
 		}
@@ -157,7 +157,7 @@ func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, re
 readyMessageLoop:
 	for {
 		streamMessage := <-p.streamInputChan
-		switch smsg.SchemaVersion(streamMessage.SchemaVersion) {
+		switch streamMessage.SchemaVersion {
 		// as of 202204
 		case smsg.CurrentSchema:
 			if streamMessage.Type == smsg.Ready || streamMessage.TypeV2 == smsg.Ready {
@@ -192,7 +192,7 @@ readyMessageLoop:
 		// prior to 202204
 		case "":
 			// FIXME: this is the most egregious case of repetition we have -- consider functionizing
-			if smsg.StreamType(streamMessage.Type) == smsg.ReadyPortForward {
+			if streamMessage.Type == smsg.ReadyPortForward {
 				// See if we have an error to bubble up to the user
 				if len(streamMessage.Content) != 0 {
 					// Bubble up the error to the user
@@ -461,11 +461,11 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		case requestMapStruct := <-requestMapChannel:
 			// contentBytes, _ := base64.StdEncoding.DecodeString(streamMessage.Content)
 
-			switch smsg.SchemaVersion(requestMapStruct.streamMessage.SchemaVersion) {
+			switch requestMapStruct.streamMessage.SchemaVersion {
 			// as of 202204
 			case smsg.CurrentSchema:
 				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-				if smsg.StreamType(requestMapStruct.streamMessage.Type) == smsg.Data || smsg.StreamType(requestMapStruct.streamMessage.TypeV2) == smsg.Data {
+				if requestMapStruct.streamMessage.Type == smsg.Data || requestMapStruct.streamMessage.TypeV2 == smsg.Data {
 					// Check our seqNumber
 					if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
 						processDataMessage(requestMapStruct.streamMessageContent.Content)
@@ -481,7 +481,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 						processDataMessage(outOfOrderDataContent)
 						outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
 					}
-				} else if smsg.StreamType(requestMapStruct.streamMessage.Type) == smsg.Error || smsg.StreamType(requestMapStruct.streamMessage.TypeV2) == smsg.Error {
+				} else if requestMapStruct.streamMessage.Type == smsg.Error || requestMapStruct.streamMessage.TypeV2 == smsg.Error {
 					if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
 						processErrorMessage(requestMapStruct.streamMessageContent.Content)
 					} else {

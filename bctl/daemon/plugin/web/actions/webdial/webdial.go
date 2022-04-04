@@ -119,11 +119,11 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 			if !processInput {
 				continue
 			}
-			switch smsg.SchemaVersion(data.SchemaVersion) {
+			switch data.SchemaVersion {
 			// as of 202204
 			case smsg.CurrentSchema:
 				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-				if smsg.StreamType(data.Type) == smsg.Stream || smsg.StreamType(data.TypeV2) == smsg.Stream {
+				if data.Type == smsg.Stream || data.TypeV2 == smsg.Stream {
 
 					w.streamMessages[data.SequenceNumber] = data
 
@@ -171,7 +171,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				}
 			// prior to 202204
 			case "":
-				switch smsg.StreamType(data.Type) {
+				switch data.Type {
 				case smsg.WebStream, smsg.WebStreamEnd:
 					w.streamMessages[data.SequenceNumber] = data
 
@@ -202,7 +202,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 							writer.Write(response.Content)
 
 							// if this is our last stream message, then we can return
-							if smsg.StreamType(nextMessage.Type) == smsg.WebStreamEnd {
+							if nextMessage.Type == smsg.WebStreamEnd {
 								return nil
 							}
 						}

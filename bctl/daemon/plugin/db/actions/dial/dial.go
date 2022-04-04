@@ -73,11 +73,11 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 				// process the incoming stream messages *in order*
 				for streamMessage, ok := streamMessages[expectedSequenceNumber]; ok; streamMessage, ok = streamMessages[expectedSequenceNumber] {
-					switch smsg.SchemaVersion(streamMessage.SchemaVersion) {
+					switch streamMessage.SchemaVersion {
 					// as of 202204
 					case smsg.CurrentSchema:
 						// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-						if smsg.StreamType(streamMessage.Type) == smsg.Stream || smsg.StreamType(streamMessage.TypeV2) == smsg.Stream {
+						if streamMessage.Type == smsg.Stream || streamMessage.TypeV2 == smsg.Stream {
 							if !streamMessage.More {
 								// since there's no more stream coming, close the local connection
 								d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
@@ -94,7 +94,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 						}
 					// prior to 202204
 					case "":
-						switch smsg.StreamType(streamMessage.Type) {
+						switch streamMessage.Type {
 						case smsg.DbStream:
 							if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 								d.logger.Errorf("could not decode db stream content: %s", err)

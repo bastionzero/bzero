@@ -162,10 +162,10 @@ outOfOrderMessageHandler:
 
 		case watchData := <-s.streamInputChan:
 
-			switch smsg.SchemaVersion(watchData.SchemaVersion) {
+			switch watchData.SchemaVersion {
 			// as of 202204
 			case smsg.CurrentSchema:
-				if smsg.StreamType(watchData.Type) == smsg.Data || smsg.StreamType(watchData.TypeV2) == smsg.Data {
+				if watchData.Type == smsg.Data || watchData.TypeV2 == smsg.Data {
 					if !watchData.More {
 						// End the stream
 						s.logger.Infof("Stream has been ended from the agent, closing request")
@@ -194,7 +194,7 @@ outOfOrderMessageHandler:
 			// prior to 202204
 			case "":
 				// Determine if this is an end or data messages
-				switch smsg.StreamType(watchData.Type) {
+				switch watchData.Type {
 				case smsg.StreamData:
 					// Then stream the response to kubectl
 					if watchData.SequenceNumber == s.expectedSequenceNumber {

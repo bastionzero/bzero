@@ -86,11 +86,11 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 	go func() {
 		for {
 			incomingMessage := <-s.streamInputChan
-			switch smsg.SchemaVersion(incomingMessage.SchemaVersion) {
+			switch incomingMessage.SchemaVersion {
 			// as of 202204
 			case smsg.CurrentSchema:
 				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-				if smsg.StreamType(incomingMessage.Type) == smsg.Data || smsg.StreamType(incomingMessage.TypeV2) == smsg.Data {
+				if incomingMessage.Type == smsg.Data || incomingMessage.TypeV2 == smsg.Data {
 					// Stream data to the local connection
 					// Undo the base 64 encoding
 					incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
@@ -118,7 +118,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 					if err != nil {
 						s.logger.Errorf("error writing to websocket: %s", err)
 					}
-				} else if smsg.StreamType(incomingMessage.Type) == smsg.Stop || smsg.StreamType(incomingMessage.TypeV2) == smsg.Stop {
+				} else if incomingMessage.Type == smsg.Stop || incomingMessage.TypeV2 == smsg.Stop {
 					// End the local connection
 					s.logger.Infof("Received close message from agent, closing websocket")
 					conn.Close()
@@ -128,7 +128,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 				}
 			// prior to 202204
 			case "":
-				switch smsg.StreamType(incomingMessage.Type) {
+				switch incomingMessage.Type {
 				case smsg.DataOut:
 					// Stream data to the local connection
 					// Undo the base 64 encoding
