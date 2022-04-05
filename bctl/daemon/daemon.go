@@ -19,9 +19,9 @@ import (
 
 // Declaring flags as package-accessible variables
 var (
-	sessionId, authHeader, targetId, serviceUrl, plugin, logLevel string
-	logPath, refreshTokenCommand, localPort, localHost            string
-	agentPubKey                                                   string
+	sessionId, authHeader, targetId, serviceUrl, plugin, logLevel    string
+	sessionToken, logPath, refreshTokenCommand, localPort, localHost string
+	agentPubKey                                                      string
 
 	// Kube server specifc values
 	targetGroupsRaw, targetUser, certPath, keyPath string
@@ -55,8 +55,10 @@ func main() {
 			headers := make(map[string]string)
 			headers["Authorization"] = authHeader
 
+			// Add our sessionId and token into the header
+			headers["Cookie"] = fmt.Sprintf("sessionId=%s; sessionToken=%s", sessionId, sessionToken)
+
 			params := make(map[string]string)
-			params["session_id"] = sessionId
 			params["version"] = daemonVersion
 
 			if err := startServer(logger, headers, params); err != nil {
@@ -187,6 +189,7 @@ func targetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 
 func parseFlags() error {
 	flag.StringVar(&sessionId, "sessionId", "", "Session ID From Zli")
+	flag.StringVar(&sessionToken, "sessionToken", "", "Session Token From Zli")
 	flag.StringVar(&authHeader, "authHeader", "", "Auth Header From Zli")
 	flag.StringVar(&logLevel, "logLevel", logger.Debug.String(), "The log level to use")
 
@@ -225,7 +228,7 @@ func parseFlags() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requiredFlags := []string{"sessionId", "authHeader", "logPath", "configPath", "localPort", "agentPubKey"}
+	requiredFlags := []string{"sessionId", "sessionToken", "authHeader", "logPath", "configPath", "localPort", "agentPubKey"}
 	switch plugin {
 	case "kube":
 		requiredFlags = append(requiredFlags, "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
