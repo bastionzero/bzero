@@ -37,7 +37,8 @@ type PortForwardAction struct {
 	closed              bool
 
 	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan chan smsg.StreamMessage
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
 
 	// Done channel
 	doneChan chan bool
@@ -63,7 +64,8 @@ type PortForwardRequest struct {
 	portforwardErrorInChannel chan []byte
 
 	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan chan smsg.StreamMessage
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
 
 	// Done channel so the go routines can communicate with eachother
 	doneChan chan bool
@@ -352,7 +354,7 @@ func (p *PortForwardRequest) forwardStream(stream httpstream.Stream, sequenceNum
 	}
 
 	message := smsg.StreamMessage{
-		SchemaVersion:  smsg.CurrentSchema,
+		SchemaVersion:  p.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		RequestId:      requestId,
 		Action:         string(kubeaction.PortForward),
@@ -443,7 +445,7 @@ func (p *PortForwardAction) StartPortForward(startPortForwardRequest portforward
 
 func (p *PortForwardAction) sendReadyMessage(errorMessage string) {
 	message := smsg.StreamMessage{
-		SchemaVersion:  smsg.CurrentSchema,
+		SchemaVersion:  p.streamMessageVersion,
 		SequenceNumber: 0,
 		RequestId:      p.requestId,
 		Action:         string(kubeaction.PortForward),

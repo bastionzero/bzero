@@ -21,7 +21,8 @@ type WebWebsocket struct {
 	closed bool
 
 	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan chan smsg.StreamMessage
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
 
 	ws *websocket.Conn
 
@@ -114,8 +115,11 @@ func (w *WebWebsocket) dataInWebsocket(webWebsocketDataIn webwebsocket.WebWebsoc
 }
 
 func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebWebsocketStartActionPayload, action string) (string, []byte, error) {
-	// Set our requestId
+	// keep track of who we're talking to
 	w.requestId = webWebsocketStartRequest.RequestId
+	w.logger.Infof("Setting request id: %s", w.requestId)
+	w.streamMessageVersion = webWebsocketStartRequest.StreamMessageVersion
+	w.logger.Infof("Setting stream message version: %s", w.streamMessageVersion)
 
 	// Remove the scheme from the remoteHost and determine the scheme
 	scheme := "ws"
@@ -187,7 +191,7 @@ func (w *WebWebsocket) sendStreamMessage(
 ) {
 	// Stream the response back
 	streamMessage := smsg.StreamMessage{
-		SchemaVersion:  smsg.CurrentSchema,
+		SchemaVersion:  w.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		Action:         string(webaction.Websocket),
 		Type:           streamType,

@@ -24,7 +24,8 @@ type ExecAction struct {
 	closed bool
 
 	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan chan smsg.StreamMessage
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
 
 	// To send input/resize to our exec sessions
 	execStdinChannel  chan []byte
@@ -184,6 +185,7 @@ func (e *ExecAction) StartExec(startExecRequest execaction.KubeExecStartActionPa
 		return string(execaction.ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}
 
+	// FIXME: add schema version to this...
 	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdErr, e.logId)
 	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdOut, e.logId)
 	stdinReader := stdin.NewStdReader(string(execaction.StdIn), startExecRequest.RequestId, e.execStdinChannel)

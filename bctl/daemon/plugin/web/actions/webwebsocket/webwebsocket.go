@@ -55,10 +55,11 @@ func (s *WebWebsocketAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, r
 
 	// Let the agent know to open up a websocket
 	payload := webwebsocket.WebWebsocketStartActionPayload{
-		RequestId: s.requestId,
-		Headers:   headers,
-		Endpoint:  request.URL.String(),
-		Method:    request.Method,
+		RequestId:            s.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+		Headers:              headers,
+		Endpoint:             request.URL.String(),
+		Method:               request.Method,
 	}
 
 	// Send payload to plugin output queue

@@ -56,7 +56,8 @@ func New(logger *logger.Logger,
 func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
 	// Build the action payload to start the web action dial
 	payload := bzwebdial.WebDialActionPayload{
-		RequestId: w.requestId,
+		RequestId:            w.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
 	}
 
 	// Send payload to plugin output queue

@@ -29,7 +29,8 @@ type WebDial struct {
 	requestId string
 
 	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan chan smsg.StreamMessage
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
 
 	interruptChan chan bool
 
@@ -65,11 +66,11 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 	var rerr error
 	switch bzwebdial.WebDialSubAction(action) {
 	case bzwebdial.WebDialStart:
-		var start bzwebdial.WebDialActionPayload
-		if err := json.Unmarshal(actionPayload, &start); err != nil {
+		var webDialActionRequest bzwebdial.WebDialActionPayload
+		if err := json.Unmarshal(actionPayload, &webDialActionRequest); err != nil {
 			rerr = fmt.Errorf("malformed web dial action payload: %s", actionPayload)
 		} else {
-			w.requestId = start.RequestId
+			w.start(webDialActionRequest)
 			return action, []byte{}, nil
 		}
 	case bzwebdial.WebDialInput:
@@ -88,6 +89,14 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 
 	w.logger.Error(rerr)
 	return "", []byte{}, rerr
+}
+
+func (w *WebDial) start(webDialActionRequest bzwebdial.WebDialActionPayload) {
+	// keep track of who we're talking to
+	w.requestId = webDialActionRequest.RequestId
+	w.logger.Infof("Setting request id: %s", w.requestId)
+	w.streamMessageVersion = webDialActionRequest.StreamMessageVersion
+	w.logger.Infof("Setting stream message version: %s", w.streamMessageVersion)
 }
 
 func (w *WebDial) handleRequest(requestPayload bzwebdial.WebInputActionPayload) error {
@@ -204,7 +213,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, streamTypeV2 smsg.StreamType, more bool, payload *bzwebdial.WebOutputActionPayload) {
 	responsePayloadBytes, _ := json.Marshal(payload)
 	message := smsg.StreamMessage{
-		SchemaVersion:  smsg.CurrentSchema,
+		SchemaVersion:  w.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		Action:         string(webaction.Dial),
 		Type:           streamType,

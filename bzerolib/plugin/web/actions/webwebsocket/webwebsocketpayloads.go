@@ -1,5 +1,9 @@
 package webwebsocket
 
+import (
+	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+)
+
 type WebWebsocketSubAction string
 
 const (
@@ -9,10 +13,11 @@ const (
 )
 
 type WebWebsocketStartActionPayload struct {
-	RequestId string              `json:"requestId"`
-	Endpoint  string              `json:"endpoint"`
-	Headers   map[string][]string `json:"headers"`
-	Method    string              `json:"method"`
+	RequestId            string              `json:"requestId"`
+	StreamMessageVersion smsg.SchemaVersion  `json:"streamMessageVersion"`
+	Endpoint             string              `json:"endpoint"`
+	Headers              map[string][]string `json:"headers"`
+	Method               string              `json:"method"`
 }
 
 type WebWebsocketDataInActionPayload struct {

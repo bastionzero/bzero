@@ -49,7 +49,8 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 	// Build and send the action payload to start the tcp connection on the agent
 	payload := dial.DialActionPayload{
-		RequestId: d.requestId,
+		RequestId:            d.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
 	}
 	d.sendOutputMessage(dial.DialStart, payload)
 

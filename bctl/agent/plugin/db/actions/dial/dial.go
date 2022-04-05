@@ -25,7 +25,8 @@ type Dial struct {
 	closed bool
 
 	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan chan smsg.StreamMessage
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
 
 	requestId     string
 	remoteAddress *net.TCPAddr
@@ -120,9 +121,11 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 }
 
 func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (string, []byte, error) {
-	// Set our requestId
+	// keep track of who we're talking to
 	d.requestId = dialActionRequest.RequestId
 	d.logger.Infof("Setting request id: %s", d.requestId)
+	d.streamMessageVersion = dialActionRequest.StreamMessageVersion
+	d.logger.Infof("Setting stream message version: %s", d.streamMessageVersion)
 
 	// For each start, call the dial the TCP address
 	if remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress); err != nil {
@@ -190,7 +193,7 @@ func (d *Dial) sendStreamMessage(
 	toSendBytes []byte,
 ) {
 	message := smsg.StreamMessage{
-		SchemaVersion:  smsg.CurrentSchema,
+		SchemaVersion:  d.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		Action:         string(dbaction.Dial),
 		Type:           streamType,

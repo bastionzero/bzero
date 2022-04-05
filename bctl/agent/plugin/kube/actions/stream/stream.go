@@ -25,8 +25,9 @@ type StreamAction struct {
 	tmb    *tomb.Tomb
 	closed bool
 
-	streamOutputChan chan smsg.StreamMessage
-	doneChan         chan bool
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
+	doneChan             chan bool
 
 	requestId           string
 	serviceAccountToken string
