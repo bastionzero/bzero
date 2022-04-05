@@ -2,12 +2,10 @@ package exec
 
 import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
-	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
 type TerminalSizeQueue struct {
-	StreamType        smsg.StreamType
 	execResizeChannel chan exec.KubeExecResizeActionPayload // pretty sure this needs to be buffered
 	RequestId         string
 }
