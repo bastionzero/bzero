@@ -140,12 +140,13 @@ func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, re
 
 	// Let Bastion know we want this stream
 	payload := portforward.KubePortForwardStartActionPayload{
-		RequestId:       p.requestId,
-		LogId:           p.logId,
-		ErrorHeaders:    errorHeaders,
-		DataHeaders:     dataHeaders,
-		Endpoint:        p.endpoint,
-		CommandBeingRun: p.commandBeingRun,
+		RequestId:            p.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+		LogId:                p.logId,
+		ErrorHeaders:         errorHeaders,
+		DataHeaders:          dataHeaders,
+		Endpoint:             p.endpoint,
+		CommandBeingRun:      p.commandBeingRun,
 	}
 	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{

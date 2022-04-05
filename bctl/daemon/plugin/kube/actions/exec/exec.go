@@ -209,11 +209,12 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 
 func wrapStartPayload(isTty bool, requestId string, logId string, command []string, endpoint string) plugin.ActionWrapper {
 	payload := exec.KubeExecStartActionPayload{
-		RequestId: requestId,
-		LogId:     logId,
-		IsTty:     isTty,
-		Command:   command,
-		Endpoint:  endpoint,
+		RequestId:            requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+		LogId:                logId,
+		IsTty:                isTty,
+		Command:              command,
+		Endpoint:             endpoint,
 	}
 
 	payloadBytes, _ := json.Marshal(payload)

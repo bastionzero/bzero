@@ -85,13 +85,14 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 
 	// Build the action payload
 	payload := stream.KubeStreamActionPayload{
-		Endpoint:        request.URL.String(),
-		Headers:         headers,
-		Method:          request.Method,
-		Body:            string(bodyInBytes), // fix this
-		RequestId:       s.requestId,
-		LogId:           s.logId,
-		CommandBeingRun: s.commandBeingRun,
+		Endpoint:             request.URL.String(),
+		Headers:              headers,
+		Method:               request.Method,
+		Body:                 string(bodyInBytes), // TODO: fix this
+		RequestId:            s.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+		LogId:                s.logId,
+		CommandBeingRun:      s.commandBeingRun,
 	}
 
 	// Send payload to plugin output queue

@@ -72,8 +72,6 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 			return action, []byte{}, rerr
 		}
 
-		s.requestId = streamActionRequest.RequestId
-
 		return s.StartStream(streamActionRequest, action)
 	case stream.StreamStop:
 		var streamActionRequest stream.KubeStreamActionPayload
@@ -102,6 +100,12 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 }
 
 func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPayload, action string) (string, []byte, error) {
+	// keep track of who we're talking to
+	s.requestId = streamActionRequest.RequestId
+	s.logger.Infof("Setting request id: %s", s.requestId)
+	s.streamMessageVersion = streamActionRequest.StreamMessageVersion
+	s.logger.Infof("Setting stream message version: %s", s.streamMessageVersion)
+
 	// Build our request
 	s.logger.Infof("Making request for %s", streamActionRequest.Endpoint)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -255,7 +259,7 @@ func (s *StreamAction) sendStreamMessage(
 ) {
 	// Stream the response back
 	streamMessage := smsg.StreamMessage{
-		SchemaVersion:  smsg.CurrentSchema,
+		SchemaVersion:  s.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		RequestId:      s.requestId,
 		Action:         string(kubeaction.Stream),

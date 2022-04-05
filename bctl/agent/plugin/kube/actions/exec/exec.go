@@ -77,8 +77,6 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			return "", []byte{}, rerr
 		}
 
-		e.logId = startExecRequest.LogId
-		e.requestId = startExecRequest.RequestId
 		return e.StartExec(startExecRequest)
 
 	case execaction.ExecInput:
@@ -148,6 +146,13 @@ func (e *ExecAction) validateRequestId(requestId string) error {
 }
 
 func (e *ExecAction) StartExec(startExecRequest execaction.KubeExecStartActionPayload) (string, []byte, error) {
+	// keep track of who we're talking to
+	e.requestId = startExecRequest.RequestId
+	e.logger.Infof("Setting request id: %s", e.requestId)
+	e.logId = startExecRequest.LogId
+	e.streamMessageVersion = startExecRequest.StreamMessageVersion
+	e.logger.Infof("Setting stream message version: %s", e.streamMessageVersion)
+
 	// Now open up our local exec session
 	// Create the in-cluster config
 	config, err := rest.InClusterConfig()
