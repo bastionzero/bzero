@@ -14,7 +14,7 @@ require (
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/websocket v1.4.2
 	github.com/stretchr/testify v1.7.0
-	github.com/wk8/go-ordered-map v0.2.0 // indirect
+	github.com/wk8/go-ordered-map v0.2.0
 	golang.org/x/build v0.0.0-20211108163316-3ce30f35b9aa
 	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
 	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d

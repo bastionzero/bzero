@@ -45,14 +45,13 @@ type WebDaemonPlugin struct {
 
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
-	actionParams bzweb.WebActionParams,
-	ksOutputChan chan plugin.ActionWrapper) (*WebDaemonPlugin, error) {
+	actionParams bzweb.WebActionParams) (*WebDaemonPlugin, error) {
 	plugin := WebDaemonPlugin{
 		tmb:    parentTmb,
 		logger: logger,
 
 		streamInputChan: make(chan smsg.StreamMessage, 25),
-		outputQueue:     ksOutputChan,
+		outputQueue:     make(chan plugin.ActionWrapper),
 
 		doneChan: make(chan struct{}),
 
@@ -78,6 +77,10 @@ func New(parentTmb *tomb.Tomb,
 	return &plugin, nil
 }
 
+func (w *WebDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
+	return w.outputQueue
+}
+
 func (w *WebDaemonPlugin) Done() <-chan struct{} {
 	return w.doneChan
 }
@@ -96,11 +99,12 @@ func (w *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	}
 }
 
-func (w *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
+func (w *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) error {
+	w.logger.Debugf("Received a keysplitting message with action: %s", action)
 	// the only keysplitting message that we would receive is the ack for our web action interrupt
 	// we don't do anything with it on the daemon side, so we receive it here and it will get logged
 	// but no particular action will be taken
-	return "", []byte{}, nil
+	return nil
 }
 
 func (w *WebDaemonPlugin) Feed(food interface{}) error {

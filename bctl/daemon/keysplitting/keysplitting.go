@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"sync"
 	"time"
 
 	orderedmap "github.com/wk8/go-ordered-map"
 
+	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
+	"bastionzero.com/bctl/v1/bzerolib/plugin"
 )
 
 const (
@@ -51,9 +54,13 @@ type Keysplitting struct {
 	ackPublicKey string
 
 	// ordered hash map to keep track of sent keysplitting messages
-	outboxMap      *orderedmap.OrderedMap
-	outboxQueue    chan *ksmsg.KeysplittingMessage
+	pipelineMap    *orderedmap.OrderedMap
+	pipelineQueue  chan *ksmsg.KeysplittingMessage
+	pipelineLock   sync.Mutex
 	outOfOrderAcks map[string]*ksmsg.KeysplittingMessage
+
+	// all the messages we pre-calculated and now need to recalculate because there was an error
+	recalculateQueue []*plugin.ActionWrapper
 
 	// not the last ack we've received but the last ack we've received *in order*
 	lastAck *ksmsg.KeysplittingMessage
@@ -71,16 +78,57 @@ func New(
 		zliRefreshTokenCommand: refreshTokenCommand,
 		agentPubKey:            agentPubKey,
 		ackPublicKey:           "",
-		outboxMap:              orderedmap.New(),
-		outboxQueue:            make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
+		pipelineMap:            orderedmap.New(),
+		pipelineQueue:          make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
 		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
 	}
 
 	return keysplitter, nil
 }
 
-func (k *Keysplitting) OutputQueue() <-chan *ksmsg.KeysplittingMessage {
-	return k.outboxQueue
+func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
+	return k.pipelineQueue
+}
+
+// We can either recover from an hpointer or from a timestamp. This is because if we're recovering
+// based on an error message, there may have been an error hashing the previous message but we should
+// always at least have a timestamp.
+func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
+	k.pipelineLock.Lock()
+
+	if errMessage.HPointer != "" {
+		for pair := k.pipelineMap.GetPair(errMessage.HPointer); pair != nil; pair.Next() {
+			// add our messages to the recalculate queue so that when we get our syn/ack
+			// we can pipeline the ones we have all over again
+			ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
+			k.recalculateQueue = append(k.recalculateQueue, &plugin.ActionWrapper{
+				Action:        ksMessage.GetAction(),
+				ActionPayload: ksMessage.GetActionPayload(),
+			})
+		}
+	}
+	// else if timestamp != 0 {
+	// 	errorTime := time.Unix(timestamp, 0)
+	// 	for pair := k.outboxMap.Oldest(); pair != nil; pair.Next() {
+	// 		// add our messages to the recalculate queue so that when we get our syn/ack
+	// 		// we can pipeline the ones we have all over again
+	// 		ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
+	// 		ksTime := time.Unix(ksMessage.GetTimestamp(), 0)
+	// 		if ksTime.After(errorTime) {
+	// 			k.recalculateQueue = append(k.recalculateQueue, &plugin.ActionWrapper{
+	// 				Action:        ksMessage.GetAction(),
+	// 				ActionPayload: ksMessage.GetActionPayload(),
+	// 			})
+	// 		}
+	// 	}
+	// }
+
+	if msg, err := k.BuildSyn("", []byte{}); err != nil {
+		return err
+	} else {
+		k.pipelineQueue <- &msg
+		return nil
+	}
 }
 
 func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
@@ -93,6 +141,13 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		if k.ackPublicKey == "" {
 			k.ackPublicKey = msg.TargetPublicKey
 		}
+
+		// as part of our recovery, we need to recalculate and resend all of our in limbo messages
+		for _, wrapped := range k.recalculateQueue {
+			k.pipeline(wrapped.Action, wrapped.ActionPayload)
+		}
+
+		k.pipelineLock.Unlock()
 	case ksmsg.DataAckPayload:
 		hpointer = msg.HPointer
 	default:
@@ -108,17 +163,17 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	}
 
 	// Check this messages is in response to one we've sent
-	if _, ok := k.outboxMap.Get(hpointer); ok {
-		if pair := k.outboxMap.Oldest(); pair != nil {
+	if _, ok := k.pipelineMap.Get(hpointer); ok {
+		if pair := k.pipelineMap.Oldest(); pair != nil {
 			return fmt.Errorf("where did this ack come from?! we're not waiting for a response to any messages")
 		} else if pair.Key != hpointer {
 			if len(k.outOfOrderAcks) > pipelineLimit {
-				return fmt.Errorf("hold up, we're missing an ack") // LUCIE: RECOVER FROM THIS
+				return fmt.Errorf("hold up, we're missing an ack") // LUCIE: RECOVER FROM THIS?
 			}
 			k.outOfOrderAcks[hpointer] = ksMessage
 		} else {
 			k.lastAck = ksMessage
-			k.outboxMap.Delete(hpointer)
+			k.pipelineMap.Delete(hpointer)
 			k.processOutOfOrderAcks()
 		}
 	} else {
@@ -129,21 +184,27 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 }
 
 func (k *Keysplitting) processOutOfOrderAcks() {
-	for pair := k.outboxMap.Oldest(); pair != nil; pair.Next() {
+	for pair := k.pipelineMap.Oldest(); pair != nil; pair.Next() {
 		if ack, ok := k.outOfOrderAcks[pair.Key.(string)]; !ok {
 			return
 		} else {
 			k.lastAck = ack
-			k.outboxMap.Delete(pair.Key)
+			k.pipelineMap.Delete(pair.Key)
 		}
 	}
 }
 
-func (k *Keysplitting) Pipeline(action string, actionPayload []byte) error {
+func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
+	k.pipelineLock.Lock()
+	defer k.pipelineLock.Unlock()
+	return k.pipeline(action, actionPayload)
+}
+
+func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	var ack *ksmsg.KeysplittingMessage
 
 	// get the last message we sent
-	if pair := k.outboxMap.Newest(); pair != nil {
+	if pair := k.pipelineMap.Newest(); pair != nil {
 		// if there is none, then we're building off our last ack
 		if k.lastAck != nil {
 			ack = k.lastAck
@@ -238,13 +299,16 @@ func (k *Keysplitting) addToOutbox(ksMessage ksmsg.KeysplittingMessage) error {
 		return fmt.Errorf("failed to hash message")
 	} else {
 		hash := base64.StdEncoding.EncodeToString(hashBytes)
-		k.outboxMap.Set(hash, ksMessage)
-		k.outboxQueue <- &ksMessage
+		k.pipelineMap.Set(hash, ksMessage)
+		k.pipelineQueue <- &ksMessage
 		return nil
 	}
 }
 
 func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error) {
+	// lock our pipeline because nothing can be calculated until we get our synack
+	k.pipelineLock.Lock()
+
 	// If this is the beginning of the hash chain, then we create a nonce with a random value,
 	// otherwise we use the hash of the previous value to maintain the hash chain and immutability
 	nonce := util.Nonce()
@@ -270,7 +334,7 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 
 	// Build the keysplitting message
 	synPayload := ksmsg.SynPayload{
-		Timestamp:     fmt.Sprint(time.Now().Unix()),
+		Timestamp:     time.Now().Unix(),
 		SchemaVersion: ksmsg.SchemaVersion,
 		Type:          string(ksmsg.Syn),
 		Action:        action,

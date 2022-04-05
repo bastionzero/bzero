@@ -1,7 +1,6 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 
@@ -72,6 +71,10 @@ func (d *DbDaemonPlugin) Done() <-chan struct{} {
 	return d.doneChan
 }
 
+func (d *DbDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
+	return d.outputQueue
+}
+
 func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 	d.logger.Debugf("db plugin received %v stream", smessage.Type)
 	d.streamInputChan <- smessage
@@ -86,38 +89,11 @@ func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	}
 }
 
-func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
-	d.logger.Infof("Received a keysplitting message with action: %s", action)
-	// First, process the incoming message
-	if err := d.processKeysplitting(action, actionPayload); err != nil {
-		return "", []byte{}, err
-	}
-
-	// Now that we've received, we wait for any new outgoing commands.  Because the existence of any
-	// such command is dependent on the user, there may not be one waiting so we wait for it.
-	d.logger.Info("Waiting for input...")
-
-	select {
-	case <-d.tmb.Dying():
-		return "", []byte{}, nil
-	case actionMessage := <-d.outputQueue: // some action's got something to say
-		d.logger.Infof("Sending input from action: %v", actionMessage.Action)
-
-		// turn the actionPayload into bytes and return it
-		if actionPayloadBytes, err := json.Marshal(actionMessage.ActionPayload); err != nil {
-			d.logger.Infof("actionPayload: %+v", actionPayload)
-			return "", []byte{}, fmt.Errorf("could not marshal actionPayload json: %s", err)
-		} else {
-			return actionMessage.Action, actionPayloadBytes, nil
-		}
-	}
-}
-
-func (d *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
-	d.logger.Infof("Db plugin received keysplitting message with action: %s", action)
-
-	// currently the only keysplitting message we care about is the acknowledgement of our request for the agent to stop the dial action
-	// but since we don't do anything with it we log it, make a comment, and return nil
+func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) error {
+	d.logger.Debugf("Received a keysplitting message with action: %s", action)
+	// the only keysplitting message that we would receive is the ack from the agent after stopping the dial action
+	// we don't do anything with it on the daemon side, so we receive it here and it will get logged
+	// but no particular action will be taken
 	return nil
 }
 

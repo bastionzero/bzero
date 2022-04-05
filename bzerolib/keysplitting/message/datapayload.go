@@ -2,14 +2,13 @@ package message
 
 import (
 	"encoding/base64"
-	"fmt"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
 
 type DataPayload struct {
-	Timestamp     string `json:"timestamp"` // Unix time
+	Timestamp     int64  `json:"timestamp"` // Unix time
 	SchemaVersion string `json:"schemaVersion"`
 	Type          string `json:"type"`
 	Action        string `json:"action"`
@@ -26,7 +25,7 @@ func (d DataPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (
 	hash := base64.StdEncoding.EncodeToString(hashBytes)
 
 	return DataAckPayload{
-		Timestamp:             fmt.Sprint(time.Now().Unix()),
+		Timestamp:             time.Now().Unix(),
 		SchemaVersion:         SchemaVersion,
 		Type:                  string(DataAck),
 		Action:                d.Action,

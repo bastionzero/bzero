@@ -17,6 +17,7 @@ const (
 	SynAck  KeysplittingPayloadType = "SynAck"
 	Data    KeysplittingPayloadType = "Data"
 	DataAck KeysplittingPayloadType = "DataAck"
+	Error   KeysplittingPayloadType = "Error"
 )
 
 const (
@@ -47,6 +48,51 @@ func (k *KeysplittingMessage) GetHpointer() (string, error) {
 		return msg.HPointer, nil
 	default:
 		return "", fmt.Errorf("could not get hpointer for invalid keysplitting message type: %T", k.KeysplittingPayload)
+	}
+}
+
+func (k *KeysplittingMessage) GetAction() string {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynPayload:
+		return msg.Action
+	case SynAckPayload:
+		return msg.Action
+	case DataPayload:
+		return msg.Action
+	case DataAckPayload:
+		return msg.Action
+	default:
+		return ""
+	}
+}
+
+func (k *KeysplittingMessage) GetActionPayload() []byte {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynPayload:
+		return msg.ActionPayload
+	case SynAckPayload:
+		return msg.ActionResponsePayload
+	case DataPayload:
+		return msg.ActionPayload
+	case DataAckPayload:
+		return msg.ActionResponsePayload
+	default:
+		return []byte{}
+	}
+}
+
+func (k *KeysplittingMessage) GetTimestamp() int64 {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynPayload:
+		return msg.Timestamp
+	case SynAckPayload:
+		return msg.Timestamp
+	case DataPayload:
+		return msg.Timestamp
+	case DataAckPayload:
+		return msg.Timestamp
+	default:
+		return 0
 	}
 }
 
@@ -137,6 +183,13 @@ func (k *KeysplittingMessage) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("malformed DataAck Payload")
 		} else {
 			k.KeysplittingPayload = dataAckPayload
+		}
+	case Error:
+		var errorPayload ErrorPayload
+		if err := json.Unmarshal(kPayload, &errorPayload); err != nil {
+			return fmt.Errorf("malformed Error Payload")
+		} else {
+			k.KeysplittingPayload = errorPayload
 		}
 	default:
 		// TODO: explicitly check type of outer vs. inner payload
