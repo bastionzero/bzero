@@ -11,19 +11,19 @@ type StdWriter struct {
 	RequestId      string
 	SequenceNumber int
 	Action         string
+	logId          string
 	Type           smsg.StreamType
-	TypeV2         smsg.StreamType
 }
 
 // Stdout or Stderr
-func NewStdWriter(ch chan smsg.StreamMessage, requestId string, streamAction string, streamType smsg.StreamType, streamTypeV2 smsg.StreamType) *StdWriter {
+func NewStdWriter(ch chan smsg.StreamMessage, requestId string, streamAction string, streamType smsg.StreamType, logId string) *StdWriter {
 	return &StdWriter{
 		outputChannel:  ch,
 		RequestId:      requestId,
 		SequenceNumber: 0,
 		Action:         streamAction,
 		Type:           streamType,
-		TypeV2:         streamTypeV2,
+		logId:          logId,
 	}
 }
 
@@ -35,7 +35,7 @@ func (w *StdWriter) Write(p []byte) (int, error) {
 		RequestId:      w.RequestId,
 		Action:         string(w.Action),
 		Type:           w.Type,
-		TypeV2:         w.TypeV2,
+		LogId:          w.logId,
 		Content:        str,
 		More:           true,
 	}
