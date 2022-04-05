@@ -190,9 +190,8 @@ func (e *ExecAction) StartExec(startExecRequest execaction.KubeExecStartActionPa
 		return string(execaction.ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}
 
-	// FIXME: add schema version to this...
-	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdErr, e.logId)
-	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdOut, e.logId)
+	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kubeaction.Exec), smsg.StdErr, e.logId)
+	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kubeaction.Exec), smsg.StdOut, e.logId)
 	stdinReader := stdin.NewStdReader(string(execaction.StdIn), startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
 
