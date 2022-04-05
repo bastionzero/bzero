@@ -3,6 +3,7 @@ package dial
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -50,9 +51,7 @@ func New(logger *logger.Logger,
 	return dial
 }
 
-func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
-	d.tmb = tmb
-
+func (d *DialAction) Start(lconn *net.TCPConn) error {
 	// Build and send the action payload to start the tcp connection on the agent
 	payload := dial.DialActionPayload{
 		RequestId:            d.requestId,
@@ -61,8 +60,50 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 	d.sendOutputMessage(dial.DialStart, payload)
 
 	// Listen to stream messages coming from the agent, and forward to our local connection
-	go func() {
+	d.tmb.Go(func() error {
 		defer lconn.Close()
+
+		d.tmb.Go(func() error {
+			defer close(d.doneChan)
+
+			// listen to messages coming from the local tcp connection and sends them to the agent
+			buf := make([]byte, chunkSize)
+			sequenceNumber := 0
+
+			for {
+				if n, err := lconn.Read(buf); err != nil {
+					if d.closed {
+						return nil
+					}
+
+					// print our error message
+					if err == io.EOF {
+						d.logger.Info("local tcp connection has been closed")
+					} else {
+						d.logger.Errorf("error reading from local tcp connection: %s", err)
+					}
+
+					// let the agent know we need to stop
+					payload := dial.DialActionPayload{
+						RequestId: d.requestId,
+					}
+					d.sendOutputMessage(dial.DialStop, payload)
+
+					return nil
+				} else {
+					// Build and send whatever we get from the local tcp connection to the agent
+					dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
+					payload := dial.DialInputActionPayload{
+						RequestId:      d.requestId,
+						SequenceNumber: sequenceNumber,
+						Data:           dataToSend,
+					}
+					d.sendOutputMessage(dial.DialInput, payload)
+
+					sequenceNumber += 1
+				}
+			}
+		})
 
 		// variables for ensuring we receive stream messages in order
 		expectedSequenceNumber := 0
@@ -70,11 +111,11 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 		for {
 			select {
-			case <-tmb.Dying():
-				return
+			case <-d.tmb.Dying():
+				return nil
 			case data := <-d.streamInputChan:
 				if d.closed {
-					return
+					return nil
 				}
 				streamMessages[data.SequenceNumber] = data
 
@@ -101,6 +142,10 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 							}
 						}
 
+						// since there's no more stream coming, close the local connection
+						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
+						d.closed = true
+						return nil
 					} else {
 						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 					}
@@ -113,55 +158,17 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 				}
 			}
 		}
-	}()
-
-	go func() {
-		defer close(d.doneChan)
-
-		// listen to messages coming from the local tcp connection and sends them to the agent
-		buf := make([]byte, chunkSize)
-		sequenceNumber := 0
-
-		for {
-			if n, err := lconn.Read(buf); err != nil {
-				if d.closed {
-					return
-				}
-
-				// print our error message
-				if err == io.EOF {
-					d.logger.Info("local tcp connection has been closed")
-				} else {
-					d.logger.Errorf("error reading from local tcp connection: %s", err)
-				}
-
-				// let the agent know we need to stop
-				payload := dial.DialActionPayload{
-					RequestId: d.requestId,
-				}
-				d.sendOutputMessage(dial.DialStop, payload)
-
-				return
-			} else {
-				// Build and send whatever we get from the local tcp connection to the agent
-				dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
-				payload := dial.DialInputActionPayload{
-					RequestId:      d.requestId,
-					SequenceNumber: sequenceNumber,
-					Data:           dataToSend,
-				}
-				d.sendOutputMessage(dial.DialInput, payload)
-
-				sequenceNumber += 1
-			}
-		}
-	}()
-
+	})
 	return nil
 }
 
 func (d *DialAction) Done() <-chan struct{} {
 	return d.doneChan
+}
+
+func (d *DialAction) Stop() {
+	d.tmb.Kill(fmt.Errorf("received stop request from higher ups")) // kills all datachannel, plugin, and action goroutines
+	d.tmb.Wait()
 }
 
 func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interface{}) {

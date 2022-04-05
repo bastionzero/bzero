@@ -21,6 +21,7 @@ const (
 )
 
 type WebDialAction struct {
+	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	requestId string
@@ -60,6 +61,11 @@ func (w *WebDialAction) Done() <-chan struct{} {
 	return w.doneChan
 }
 
+func (w *WebDialAction) Stop() {
+	w.tmb.Kill(fmt.Errorf("i was told to stop")) // kills all datachannel, plugin, and action goroutines
+	w.tmb.Wait()
+}
+
 func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
 	// Build the action payload to start the web action dial
 	payload := bzwebdial.WebDialActionPayload{
@@ -97,6 +103,8 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	// Listen to stream messages coming from bastion, and forward to our local connection
 	for {
 		select {
+		case <-w.tmb.Dying():
+			return nil
 		case <-request.Context().Done():
 			// only send one interrupt message to the agent
 			if !processInput {

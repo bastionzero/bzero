@@ -20,6 +20,7 @@ type IWebDaemonAction interface {
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error
 	Done() <-chan struct{}
+	Stop()
 }
 
 type WebDaemonPlugin struct {
@@ -83,6 +84,14 @@ func (w *WebDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
 
 func (w *WebDaemonPlugin) Done() <-chan struct{} {
 	return w.doneChan
+}
+
+func (w *WebDaemonPlugin) Stop() {
+	if w.action == nil {
+		return
+	} else {
+		w.action.Stop()
+	}
 }
 
 func (w *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {

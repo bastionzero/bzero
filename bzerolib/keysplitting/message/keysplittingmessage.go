@@ -17,7 +17,6 @@ const (
 	SynAck  KeysplittingPayloadType = "SynAck"
 	Data    KeysplittingPayloadType = "Data"
 	DataAck KeysplittingPayloadType = "DataAck"
-	Error   KeysplittingPayloadType = "Error"
 )
 
 const (
@@ -183,13 +182,6 @@ func (k *KeysplittingMessage) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("malformed DataAck Payload")
 		} else {
 			k.KeysplittingPayload = dataAckPayload
-		}
-	case Error:
-		var errorPayload ErrorPayload
-		if err := json.Unmarshal(kPayload, &errorPayload); err != nil {
-			return fmt.Errorf("malformed Error Payload")
-		} else {
-			k.KeysplittingPayload = errorPayload
 		}
 	default:
 		// TODO: explicitly check type of outer vs. inner payload

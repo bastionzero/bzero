@@ -3,6 +3,7 @@ package webwebsocket
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -17,6 +18,7 @@ import (
 )
 
 type WebWebsocketAction struct {
+	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	requestId string
@@ -150,6 +152,11 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 
 func (w *WebWebsocketAction) Done() <-chan struct{} {
 	return w.doneChan
+}
+
+func (w *WebWebsocketAction) Stop() {
+	w.tmb.Kill(fmt.Errorf("stop requested by higher ups"))
+	<-w.doneChan
 }
 
 func (w *WebWebsocketAction) ReceiveStream(smessage smsg.StreamMessage) {

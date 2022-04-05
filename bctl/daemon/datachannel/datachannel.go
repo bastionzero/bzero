@@ -17,7 +17,7 @@ import (
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
@@ -36,7 +36,6 @@ type IKeysplitting interface {
 	BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error)
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
 	Recover(errorMessage rrr.ErrorMessage) error
-	// BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
 	Inbox(action string, actionPayload []byte) error
 	Outbox() <-chan *ksmsg.KeysplittingMessage
 }
@@ -45,9 +44,9 @@ type IPlugin interface {
 	ReceiveKeysplitting(action string, actionPayload []byte) error
 	ReceiveStream(smessage smsg.StreamMessage)
 	Feed(food interface{}) error
-	Outbox() <-chan plugin.ActionWrapper
+	Outbox() <-chan bzplugin.ActionWrapper
 	Done() <-chan struct{}
-	// Stop()
+	Stop()
 }
 
 type DataChannel struct {
@@ -132,7 +131,7 @@ func New(logger *logger.Logger,
 		}
 	} else {
 		logger.Infof("Sending SYN on existing datachannel %s with actions %s.", dc.id, action)
-		dc.sendSyn(action)
+		// dc.sendSyn(action)
 	}
 
 	pluginName, err := getPluginNameFromAction(action)
@@ -159,15 +158,7 @@ func New(logger *logger.Logger,
 				return errors.New("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
 				dc.logger.Infof("Killing datachannel and its subsidiaries because %s", dc.tmb.Err())
-				// Don't sleep in the case of the shell plugin because it will
-				// cause the daemon to not exit right away and the zli connect
-				// command will hang. This shouldnt be an issue for shell
-				// because each shell connection starts a separate daemon
-				// process and the datachannel will be killed on the agent side
-				// when the daemon websocket disconnects
-				if pluginName != bzplugin.Shell {
-					time.Sleep(10 * time.Second) // give datachannel time to close correctly
-				}
+				dc.plugin.Stop()
 				return nil
 			case <-dc.plugin.Done():
 				dc.Close(fmt.Errorf("datachannel's sole action is closed"))
@@ -271,7 +262,7 @@ func (d *DataChannel) openDataChannel(action string, actionParams []byte) error 
 
 func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams []byte) error {
 	// start plugin based on name
-	pluginName := parsePluginName(action)
+	// pluginName := parsePluginName(action)
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
 	switch pluginName {
 	// case Kube:
@@ -318,13 +309,13 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 	return nil
 }
 
-func parsePluginName(action string) PluginName {
+func parsePluginName(action string) bzplugin.PluginName {
 	// parse our plugin name
 	parsedAction := strings.Split(action, "/")
 	if len(parsedAction) == 0 {
 		return ""
 	}
-	return PluginName(parsedAction[0])
+	return bzplugin.PluginName(parsedAction[0])
 }
 
 func (d *DataChannel) Feed(data interface{}) error {

@@ -18,8 +18,9 @@ import (
 type IDbDaemonAction interface {
 	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
+	Start(lconn *net.TCPConn) error
 	Done() <-chan struct{}
+	Stop()
 }
 
 type DbDaemonPlugin struct {
@@ -65,6 +66,14 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 	}()
 
 	return &plugin, nil
+}
+
+func (d *DbDaemonPlugin) Stop() {
+	if d.action == nil {
+		return
+	} else {
+		d.action.Stop()
+	}
 }
 
 func (d *DbDaemonPlugin) Done() <-chan struct{} {
@@ -131,7 +140,7 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 	d.logger.Infof("Created %s action", string(dbFood.Action))
 
 	// send local tcp connection to action
-	if err := d.action.Start(d.tmb, dbFood.Conn); err != nil {
+	if err := d.action.Start(dbFood.Conn); err != nil {
 		return fmt.Errorf("%s error: %s", string(dbFood.Action), err)
 	}
 
