@@ -7,11 +7,11 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	kubestream "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/stream"
 	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -84,7 +84,7 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	}
 
 	// Build the action payload
-	payload := kubestream.KubeStreamActionPayload{
+	payload := stream.KubeStreamActionPayload{
 		Endpoint:        request.URL.String(),
 		Headers:         headers,
 		Method:          request.Method,
@@ -97,7 +97,7 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        string(kubestream.StreamStart),
+		Action:        string(stream.StreamStart),
 		ActionPayload: payloadBytes,
 	}
 
@@ -114,7 +114,7 @@ outOfOrderMessageHandler:
 			contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
 
 			// Attempt to decode contentBytes
-			var kubestreamHeadersPayload kubestream.KubeStreamHeadersPayload
+			var kubestreamHeadersPayload stream.KubeStreamHeadersPayload
 			if err := json.Unmarshal(contentBytes, &kubestreamHeadersPayload); err != nil {
 				// If we see an error this must be an early message
 				s.outOfOrderMessages[watchData.SequenceNumber] = watchData
@@ -143,7 +143,7 @@ outOfOrderMessageHandler:
 			s.logger.Infof("Watch request %v was cancelled", s.requestId)
 
 			// Build the action payload
-			payload := kubestream.KubeStreamActionPayload{
+			payload := stream.KubeStreamActionPayload{
 				Endpoint:  request.URL.String(),
 				Headers:   headers,
 				Method:    request.Method,
@@ -154,7 +154,7 @@ outOfOrderMessageHandler:
 
 			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
-				Action:        string(kubestream.StreamStop),
+				Action:        string(stream.StreamStop),
 				ActionPayload: payloadBytes,
 			}
 

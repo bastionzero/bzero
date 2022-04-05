@@ -12,23 +12,10 @@ import (
 	kubedaemonutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	kubeaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
+	execaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	stdin "bastionzero.com/bctl/v1/bzerolib/stream/stdreader"
 	stdout "bastionzero.com/bctl/v1/bzerolib/stream/stdwriter"
-)
-
-type ExecSubAction string
-
-const (
-	ExecStart  ExecSubAction = "kube/exec/start"
-	ExecInput  ExecSubAction = "kube/exec/input"
-	ExecResize ExecSubAction = "kube/exec/resize"
-	ExecStop   ExecSubAction = "kube/exec/stop"
-	StdIn      ExecSubAction = "kube/exec/stdin"
-)
-
-const (
-	EscChar = "^[" // ESC char
 )
 
 type ExecAction struct {
@@ -41,7 +28,7 @@ type ExecAction struct {
 
 	// To send input/resize to our exec sessions
 	execStdinChannel  chan []byte
-	execResizeChannel chan KubeExecResizeActionPayload
+	execResizeChannel chan execaction.KubeExecResizeActionPayload
 
 	serviceAccountToken string
 	kubeHost            string
@@ -65,7 +52,7 @@ func New(logger *logger.Logger,
 		closed:              false,
 		streamOutputChan:    ch,
 		execStdinChannel:    make(chan []byte, 10),
-		execResizeChannel:   make(chan KubeExecResizeActionPayload, 10),
+		execResizeChannel:   make(chan execaction.KubeExecResizeActionPayload, 10),
 		serviceAccountToken: serviceAccountToken,
 		kubeHost:            kubeHost,
 		targetGroups:        targetGroups,
@@ -78,11 +65,11 @@ func (e *ExecAction) Closed() bool {
 }
 
 func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch ExecSubAction(action) {
+	switch execaction.ExecSubAction(action) {
 
 	// Start exec message required before anything else
-	case ExecStart:
-		var startExecRequest KubeExecStartActionPayload
+	case execaction.ExecStart:
+		var startExecRequest execaction.KubeExecStartActionPayload
 		if err := json.Unmarshal(actionPayload, &startExecRequest); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal start exec message: %s", err)
 			e.logger.Error(rerr)
@@ -93,8 +80,8 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 		e.requestId = startExecRequest.RequestId
 		return e.StartExec(startExecRequest)
 
-	case ExecInput:
-		var execInputAction KubeStdinActionPayload
+	case execaction.ExecInput:
+		var execInputAction execaction.KubeStdinActionPayload
 		if err := json.Unmarshal(actionPayload, &execInputAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stdin: %s", err)
 			e.logger.Error(rerr)
@@ -113,10 +100,10 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			}
 			e.execStdinChannel <- execInputAction.Stdin[i:end]
 		}
-		return string(ExecInput), []byte{}, nil
+		return string(execaction.ExecInput), []byte{}, nil
 
-	case ExecResize:
-		var execResizeAction KubeExecResizeActionPayload
+	case execaction.ExecResize:
+		var execResizeAction execaction.KubeExecResizeActionPayload
 		if err := json.Unmarshal(actionPayload, &execResizeAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling resize message: %s", err)
 			e.logger.Error(rerr)
@@ -128,9 +115,9 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 		}
 
 		e.execResizeChannel <- execResizeAction
-		return string(ExecResize), []byte{}, nil
-	case ExecStop:
-		var execStopAction KubeExecStopActionPayload
+		return string(execaction.ExecResize), []byte{}, nil
+	case execaction.ExecStop:
+		var execStopAction execaction.KubeExecStopActionPayload
 		if err := json.Unmarshal(actionPayload, &execStopAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stop message: %s", err)
 			e.logger.Error(rerr)
@@ -142,7 +129,7 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 		}
 
 		e.closed = true
-		return string(ExecStop), []byte{}, nil
+		return string(execaction.ExecStop), []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled exec action: %v", action)
 		e.logger.Error(rerr)
@@ -159,7 +146,7 @@ func (e *ExecAction) validateRequestId(requestId string) error {
 	return nil
 }
 
-func (e *ExecAction) StartExec(startExecRequest KubeExecStartActionPayload) (string, []byte, error) {
+func (e *ExecAction) StartExec(startExecRequest execaction.KubeExecStartActionPayload) (string, []byte, error) {
 	// Now open up our local exec session
 	// Create the in-cluster config
 	config, err := rest.InClusterConfig()
@@ -194,12 +181,12 @@ func (e *ExecAction) StartExec(startExecRequest KubeExecStartActionPayload) (str
 	// Turn it into a SPDY executor
 	exec, err := remotecommand.NewSPDYExecutor(config, "POST", kubeExecApiUrlParsed)
 	if err != nil {
-		return string(ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
+		return string(execaction.ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}
 
 	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdErr, e.logId)
 	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, e.requestId, string(kubeaction.Exec), smsg.StdOut, e.logId)
-	stdinReader := stdin.NewStdReader(string(StdIn), startExecRequest.RequestId, e.execStdinChannel)
+	stdinReader := stdin.NewStdReader(string(execaction.StdIn), startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
 
 	// This function listens for a closed datachannel.  If the datachannel is closed, it doesn't necessarily mean
@@ -240,10 +227,10 @@ func (e *ExecAction) StartExec(startExecRequest KubeExecStartActionPayload) (str
 		}
 
 		// Now close the stream
-		stdoutWriter.Write([]byte(EscChar))
+		stdoutWriter.Write([]byte(execaction.EscChar))
 
 		e.closed = true
 	}()
 
-	return string(ExecStart), []byte{}, nil
+	return string(execaction.ExecStart), []byte{}, nil
 }

@@ -1,5 +1,13 @@
 package webwebsocket
 
+type WebWebsocketSubAction string
+
+const (
+	Start      WebWebsocketSubAction = "web/websocket/start"
+	DataIn     WebWebsocketSubAction = "web/websocket/datain"
+	DaemonStop WebWebsocketSubAction = "web/websocket/daemonstop"
+)
+
 type WebWebsocketStartActionPayload struct {
 	RequestId string              `json:"requestId"`
 	Endpoint  string              `json:"endpoint"`

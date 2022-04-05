@@ -9,10 +9,10 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	kubeexec "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/exec"
 	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -94,7 +94,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 
 						// check for end of stream
 						contentBytes, _ := base64.StdEncoding.DecodeString(msg.Content)
-						if string(contentBytes) == kubeexec.EscChar {
+						if string(contentBytes) == exec.EscChar {
 							e.logger.Info("exec stream ended")
 							spdy.conn.Close()
 							break
@@ -188,14 +188,14 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 				return
 			case <-closeChan:
 				// Send message to agent to close the stream
-				payload := kubeexec.KubeExecStopActionPayload{
+				payload := exec.KubeExecStopActionPayload{
 					RequestId: e.requestId,
 					LogId:     e.logId,
 				}
 
 				payloadBytes, _ := json.Marshal(payload)
 				e.outputChan <- plugin.ActionWrapper{
-					Action:        string(kubeexec.ExecStop),
+					Action:        string(exec.ExecStop),
 					ActionPayload: payloadBytes,
 				}
 
@@ -208,7 +208,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 }
 
 func wrapStartPayload(isTty bool, requestId string, logId string, command []string, endpoint string) plugin.ActionWrapper {
-	payload := kubeexec.KubeExecStartActionPayload{
+	payload := exec.KubeExecStartActionPayload{
 		RequestId: requestId,
 		LogId:     logId,
 		IsTty:     isTty,
@@ -218,13 +218,13 @@ func wrapStartPayload(isTty bool, requestId string, logId string, command []stri
 
 	payloadBytes, _ := json.Marshal(payload)
 	return plugin.ActionWrapper{
-		Action:        string(kubeexec.ExecStart),
+		Action:        string(exec.ExecStart),
 		ActionPayload: payloadBytes,
 	}
 }
 
 func wrapResizePayload(requestId string, logId string, width uint16, height uint16) plugin.ActionWrapper {
-	payload := kubeexec.KubeExecResizeActionPayload{
+	payload := exec.KubeExecResizeActionPayload{
 		RequestId: requestId,
 		LogId:     logId,
 		Width:     width,
@@ -233,13 +233,13 @@ func wrapResizePayload(requestId string, logId string, width uint16, height uint
 
 	payloadBytes, _ := json.Marshal(payload)
 	return plugin.ActionWrapper{
-		Action:        string(kubeexec.ExecResize),
+		Action:        string(exec.ExecResize),
 		ActionPayload: payloadBytes,
 	}
 }
 
 func wrapStdinPayload(requestId string, logId string, stdin []byte) plugin.ActionWrapper {
-	payload := kubeexec.KubeStdinActionPayload{
+	payload := exec.KubeStdinActionPayload{
 		RequestId: requestId,
 		LogId:     logId,
 		Stdin:     stdin,
@@ -247,7 +247,7 @@ func wrapStdinPayload(requestId string, logId string, stdin []byte) plugin.Actio
 
 	payloadBytes, _ := json.Marshal(payload)
 	return plugin.ActionWrapper{
-		Action:        string(kubeexec.ExecInput),
+		Action:        string(exec.ExecInput),
 		ActionPayload: payloadBytes,
 	}
 }

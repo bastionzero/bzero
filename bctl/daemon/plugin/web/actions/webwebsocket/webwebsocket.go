@@ -6,11 +6,10 @@ import (
 	"log"
 	"net/http"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
-	bzwebwebsocket "bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webwebsocket"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"github.com/gorilla/websocket"
 
@@ -65,7 +64,7 @@ func (s *WebWebsocketAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, r
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        string(bzwebwebsocket.Start),
+		Action:        string(webwebsocket.Start),
 		ActionPayload: payloadBytes,
 	}
 
@@ -139,7 +138,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 
 			// Let the agent know to close the websocket
 			s.outputChan <- plugin.ActionWrapper{
-				Action:        string(bzwebwebsocket.DaemonStop),
+				Action:        string(webwebsocket.DaemonStop),
 				ActionPayload: payloadBytes,
 			}
 			break
@@ -158,7 +157,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 		// Send payload to plugin output queue
 		payloadBytes, _ := json.Marshal(payload)
 		s.outputChan <- plugin.ActionWrapper{
-			Action:        string(bzwebwebsocket.DataIn),
+			Action:        string(webwebsocket.DataIn),
 			ActionPayload: payloadBytes,
 		}
 	}

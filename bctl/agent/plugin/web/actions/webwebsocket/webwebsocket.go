@@ -10,16 +10,9 @@ import (
 	"gopkg.in/tomb.v2"
 
 	webaction "bastionzero.com/bctl/v1/bzerolib/plugin/web"
+	webwebsocket "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webwebsocket"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"github.com/gorilla/websocket"
-)
-
-type WebWebsocketSubAction string
-
-const (
-	Start      WebWebsocketSubAction = "web/websocket/start"
-	DataIn     WebWebsocketSubAction = "web/websocket/datain"
-	DaemonStop WebWebsocketSubAction = "web/websocket/daemonstop"
 )
 
 type WebWebsocket struct {
@@ -59,10 +52,10 @@ func (w *WebWebsocket) Closed() bool {
 }
 
 func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch WebWebsocketSubAction(action) {
-	case Start:
+	switch webwebsocket.WebWebsocketSubAction(action) {
+	case webwebsocket.Start:
 		// Deserialize the action payload, the only action passed is DataIn
-		var webWebsocketStartRequest WebWebsocketStartActionPayload
+		var webWebsocketStartRequest webwebsocket.WebWebsocketStartActionPayload
 		if err := json.Unmarshal(actionPayload, &webWebsocketStartRequest); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
 			w.logger.Error(rerr)
@@ -70,9 +63,9 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		}
 
 		return w.startWebsocket(webWebsocketStartRequest, action)
-	case DataIn:
+	case webwebsocket.DataIn:
 		// Deserialize the action payload, the only action passed is DataIn
-		var webWebsocketDataIn WebWebsocketDataInActionPayload
+		var webWebsocketDataIn webwebsocket.WebWebsocketDataInActionPayload
 		if err := json.Unmarshal(actionPayload, &webWebsocketDataIn); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
 			w.logger.Error(rerr)
@@ -80,10 +73,10 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		}
 
 		return w.dataInWebsocket(webWebsocketDataIn, action)
-	case DaemonStop:
+	case webwebsocket.DaemonStop:
 		// The daemon has closed the websocket, close this one as well
 		// Deserialize the action payload, the only action passed is DataIn
-		var webWebsocketDaemonStop WebWebsocketDaemonStopActionPayload
+		var webWebsocketDaemonStop webwebsocket.WebWebsocketDaemonStopActionPayload
 		if err := json.Unmarshal(actionPayload, &webWebsocketDaemonStop); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal daemonStop message: %s", err)
 			w.logger.Error(rerr)
@@ -104,7 +97,7 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 	}
 }
 
-func (w *WebWebsocket) dataInWebsocket(webWebsocketDataIn WebWebsocketDataInActionPayload, action string) (string, []byte, error) {
+func (w *WebWebsocket) dataInWebsocket(webWebsocketDataIn webwebsocket.WebWebsocketDataInActionPayload, action string) (string, []byte, error) {
 	// Decode the message
 	messageDecoded, err := base64.StdEncoding.DecodeString(webWebsocketDataIn.Message)
 	if err != nil {
@@ -120,7 +113,7 @@ func (w *WebWebsocket) dataInWebsocket(webWebsocketDataIn WebWebsocketDataInActi
 	return action, []byte{}, nil
 }
 
-func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStartActionPayload, action string) (string, []byte, error) {
+func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebWebsocketStartActionPayload, action string) (string, []byte, error) {
 	// Set our requestId
 	w.requestId = webWebsocketStartRequest.RequestId
 
@@ -164,7 +157,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest WebWebsocketStart
 			}
 
 			// Forward this message along to the daemon
-			toSend := WebWebsocketStreamDataOut{
+			toSend := webwebsocket.WebWebsocketStreamDataOut{
 				Message:     base64.StdEncoding.EncodeToString(message),
 				MessageType: mt,
 			}

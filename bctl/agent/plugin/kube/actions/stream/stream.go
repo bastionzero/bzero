@@ -15,15 +15,9 @@ import (
 	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	kubeaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
-)
-
-type StreamSubAction string
-
-const (
-	StreamStart StreamSubAction = "kube/stream/start"
-	StreamStop  StreamSubAction = "kube/stream/datain"
 )
 
 type StreamAction struct {
@@ -66,11 +60,11 @@ func (s *StreamAction) Closed() bool {
 }
 
 func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch StreamSubAction(action) {
+	switch stream.StreamSubAction(action) {
 
 	// Start exec message required before anything else
-	case StreamStart:
-		var streamActionRequest KubeStreamActionPayload
+	case stream.StreamStart:
+		var streamActionRequest stream.KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
 			s.logger.Error(rerr)
@@ -80,8 +74,8 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 		s.requestId = streamActionRequest.RequestId
 
 		return s.StartStream(streamActionRequest, action)
-	case StreamStop:
-		var streamActionRequest KubeStreamActionPayload
+	case stream.StreamStop:
+		var streamActionRequest stream.KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
 			s.logger.Error(rerr)
@@ -106,7 +100,7 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 	}
 }
 
-func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, action string) (string, []byte, error) {
+func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPayload, action string) (string, []byte, error) {
 	// Build our request
 	s.logger.Infof("Making request for %s", streamActionRequest.Endpoint)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -131,7 +125,7 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 	for name, value := range res.Header {
 		headers[name] = value
 	}
-	kubeWatchHeadersPayload := KubeStreamHeadersPayload{
+	kubeWatchHeadersPayload := stream.KubeStreamHeadersPayload{
 		Headers: headers,
 	}
 	kubeWatchHeadersPayloadBytes, _ := json.Marshal(kubeWatchHeadersPayload)
@@ -217,7 +211,7 @@ func (s *StreamAction) buildHttpRequest(endpoint, body, method string, headers m
 
 // Helper function to try and see if there are any logs we can stream to the user
 // This is trigger in the case where the pod is terminated or crashing
-func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest KubeStreamActionPayload, sequenceNumber int) {
+func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest stream.KubeStreamActionPayload, sequenceNumber int) {
 	// Remove the follow query param
 	q := url.Query()
 	q.Del("follow")
