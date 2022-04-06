@@ -16,10 +16,26 @@ type SignalRNegotiateResponse struct {
 // the data channel will be sent using SignalR, so we have to be
 // able to unwrap and re-wrap it.  The AgentMessage is our generic
 // message for everything we care about.
-type SignalRWrapper struct {
-	Target    string            `json:"target"` // hub name
-	Type      int               `json:"type"`
-	Arguments []am.AgentMessage `json:"arguments"`
+
+type SignalRMessageTypeOnly struct {
+	Type int `json:"type"`
+}
+type SignalRInvocationMessage struct {
+	Type         int               `json:"type"`
+	Target       string            `json:"target"` // hub name
+	Arguments    []am.AgentMessage `json:"arguments"`
+	InvocationId *string           `json:"invocationId,omitempty"`
+}
+
+type SignalRCompletionMessage struct {
+	Type         int                `json:"type"`
+	InvocationId *string            `json:"invocationId"`
+	Result       *WebsocketResponse `json:"result"`
+	Error        *string            `json:"error"`
+}
+type WebsocketResponse struct {
+	ErrorMessage *string `json:"errorMessage"`
+	Error        bool    `json:"error"`
 }
 
 // This is our close message struct
