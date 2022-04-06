@@ -106,7 +106,6 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 		p.logger.Error(fmt.Errorf("unable to find stream chan for request: %s", kubePortforwardStreamMessageContent.PortForwardRequestId))
 		return
 	}
-	p.logger.Infof("HERE: %v", kubePortforwardStreamMessageContent)
 	streamChan <- RequestMapStruct{
 		streamMessageContent: kubePortforwardStreamMessageContent,
 		streamMessage:        stream,
@@ -257,7 +256,6 @@ func (p *PortForwardAction) portForward(portforwardSession *httpStreamPair) {
 
 	p.logger.Infof("Forwarding to port %v. Request: %v.", portString, portforwardSession.requestID)
 	err := p.forwardStreamPair(portforwardSession, port)
-	p.logger.Infof("HERE??? AFTER")
 	p.sendCloseRequestMessage(portforwardSession.requestID)
 	p.logger.Infof("Completed forwarding port %v. Request: %v.", portString, portforwardSession.requestID)
 
