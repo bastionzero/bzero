@@ -94,7 +94,7 @@ func (a *PortForwardAction) Receive(action string, actionPayload []byte) (string
 			return "", []byte{}, rerr
 		}
 
-		return a.StartPortForward(startPortForwardRequest)
+		return a.startPortForward(startPortForwardRequest)
 	case portforward.DataInPortForward, portforward.ErrorInPortForward:
 		var dataInputAction portforward.KubePortForwardActionPayload
 		if err := json.Unmarshal(actionPayload, &dataInputAction); err != nil {
@@ -191,7 +191,7 @@ func (a *PortForwardAction) Receive(action string, actionPayload []byte) (string
 	}
 }
 
-func (a *PortForwardAction) StartPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) (string, []byte, error) {
+func (a *PortForwardAction) startPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) (string, []byte, error) {
 	// Update our object to keep track of the pod and url information
 	a.DataHeaders = startPortForwardRequest.DataHeaders
 	a.ErrorHeaders = startPortForwardRequest.ErrorHeaders
