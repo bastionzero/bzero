@@ -498,7 +498,6 @@ func (p *PortForwardAction) sendReadyMessage(errorMessage string) {
 		SequenceNumber: 0,
 		Content:        errorMessage,
 	}
-	p.logger.Infof("HERE: %v", message)
 	p.streamOutputChan <- message
 }
 
