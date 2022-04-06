@@ -342,7 +342,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				buf := make([]byte, portforward.DataStreamBufferSize)
 				n, err := portforwardSession.dataStream.Read(buf)
 				if err != nil || err != io.EOF {
-					p.logger.Error(fmt.Errorf("reviced error on datastream: %s", err))
+					p.logger.Error(fmt.Errorf("received error on datastream: %s", err))
 
 					doneChan <- true
 					return
