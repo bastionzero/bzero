@@ -236,10 +236,6 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 		return rerr
 	}
 
-	// Close this stream since we do not use it
-	// Ref: https://github.com/kubernetes/client-go/blob/v0.22.2/tools/portforward/portforward.go#L343
-	// errorStream.Close()
-
 	for name, value := range dataHeaders {
 		// Set so we override any error headers that were set
 		headers.Set(name, value)
@@ -259,7 +255,6 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 			case <-p.tmb.Dying():
 				return
 			case dataInMessage := <-p.portforwardDataInChannel:
-				p.logger.Infof("HERE? %v", dataInMessage)
 				// Make this request locally, and then return that info to the user
 				if _, err := io.Copy(dataStream, bytes.NewReader(dataInMessage)); err != nil {
 					p.logger.Error(fmt.Errorf("error writing to data stream: %s", err))
@@ -303,18 +298,35 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 			default:
 				buf := make([]byte, DataStreamBufferSize)
 				n, err := dataStream.Read(buf)
-				p.logger.Infof("READING? ")
 				if err != nil {
 					if err != io.EOF {
 						rerr := fmt.Errorf("error reading data from data stream: %s", err)
 						p.logger.Error(rerr)
 					}
+
+					content, err := p.wrapStreamMessageContent([]byte{}, portforwardRequestId)
+					if err != nil {
+						p.logger.Error(err)
+
+						// Alert on our done channel
+						p.doneChan <- true
+					}
+
+					// Send our end message
+					message := smsg.StreamMessage{
+						Type:           string(smsg.PortForwardEnd),
+						RequestId:      requestId,
+						LogId:          logId,
+						SequenceNumber: dataSeqNumber,
+						Content:        content,
+					}
+					p.streamOutputChan <- message
+
 					p.doneChan <- true
 					return
 				}
 
 				// Send this data back to the bastion
-				p.logger.Infof("READING: %s", buf[:n])
 				content, err := p.wrapStreamMessageContent(buf[:n], portforwardRequestId)
 				if err != nil {
 					p.logger.Error(err)

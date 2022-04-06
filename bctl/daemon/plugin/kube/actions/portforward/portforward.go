@@ -446,6 +446,9 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 					processErrorMessage(outOfOrderErrorContent)
 					outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
 				}
+			case string(smsg.PortForwardEnd):
+				// Alert on our done chan
+				doneChan <- true
 			}
 		}
 	}
