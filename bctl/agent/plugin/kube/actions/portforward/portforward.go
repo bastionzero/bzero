@@ -259,6 +259,7 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 			case <-p.tmb.Dying():
 				return
 			case dataInMessage := <-p.portforwardDataInChannel:
+				p.logger.Infof("HERE? %v", dataInMessage)
 				// Make this request locally, and then return that info to the user
 				if _, err := io.Copy(dataStream, bytes.NewReader(dataInMessage)); err != nil {
 					p.logger.Error(fmt.Errorf("error writing to data stream: %s", err))
@@ -302,6 +303,7 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 			default:
 				buf := make([]byte, DataStreamBufferSize)
 				n, err := dataStream.Read(buf)
+				p.logger.Infof("READING? ")
 				if err != nil {
 					if err != io.EOF {
 						rerr := fmt.Errorf("error reading data from data stream: %s", err)
@@ -312,6 +314,7 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 				}
 
 				// Send this data back to the bastion
+				p.logger.Infof("READING: %s", buf[:n])
 				content, err := p.wrapStreamMessageContent(buf[:n], portforwardRequestId)
 				if err != nil {
 					p.logger.Error(err)
@@ -483,6 +486,7 @@ func (p *PortForwardAction) sendReadyMessage(errorMessage string) {
 		SequenceNumber: 0,
 		Content:        errorMessage,
 	}
+	p.logger.Infof("HERE: %v", message)
 	p.streamOutputChan <- message
 }
 
