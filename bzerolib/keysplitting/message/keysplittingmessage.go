@@ -23,6 +23,12 @@ const (
 	SchemaVersion = "1.1"
 )
 
+// type IKeysplittingPayload interface {
+// 	GetHpointer() (string, error)
+// 	GetAction() string
+// 	GetActionPayload() []byte
+// }
+
 // type IKeysplittingMessage interface {
 // 	BuildResponse(actionPayload interface{}, publickey string) (KeysplittingMessage, error)
 // 	VerifySignature(publicKey string) error
@@ -33,6 +39,56 @@ type KeysplittingMessage struct {
 	Type                KeysplittingPayloadType `json:"type"`
 	KeysplittingPayload interface{}             `json:"keysplittingPayload"`
 	Signature           string                  `json:"signature"`
+}
+
+func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (KeysplittingMessage, string, error) {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynPayload:
+		if synAckPayload, hash, err := msg.BuildResponsePayload(payload, pubKey); err != nil {
+			return KeysplittingMessage{}, "", err
+		} else {
+			return KeysplittingMessage{
+				Type:                SynAck,
+				KeysplittingPayload: synAckPayload,
+			}, hash, nil
+		}
+	case DataPayload:
+		if dataAckPayload, hash, err := msg.BuildResponsePayload(payload, pubKey); err != nil {
+			return KeysplittingMessage{}, "", err
+		} else {
+			return KeysplittingMessage{
+				Type:                DataAck,
+				KeysplittingPayload: dataAckPayload,
+			}, hash, nil
+		}
+	default:
+		return KeysplittingMessage{}, "", fmt.Errorf("can't build ack for message type: %T", k.KeysplittingPayload)
+	}
+}
+
+func (k *KeysplittingMessage) BuildUnsignedResponse(action string, actionPayload []byte, bzcertHash string) (KeysplittingMessage, string, error) {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynAckPayload:
+		if dataPayload, hash, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash); err != nil {
+			return KeysplittingMessage{}, "", err
+		} else {
+			return KeysplittingMessage{
+				Type:                Data,
+				KeysplittingPayload: dataPayload,
+			}, hash, nil
+		}
+	case DataAckPayload:
+		if dataPayload, hash, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash); err != nil {
+			return KeysplittingMessage{}, "", err
+		} else {
+			return KeysplittingMessage{
+				Type:                Data,
+				KeysplittingPayload: dataPayload,
+			}, hash, nil
+		}
+	default:
+		return KeysplittingMessage{}, "", fmt.Errorf("can't build responses for message type: %T", k.KeysplittingPayload)
+	}
 }
 
 func (k *KeysplittingMessage) GetHpointer() (string, error) {
@@ -77,21 +133,6 @@ func (k *KeysplittingMessage) GetActionPayload() []byte {
 		return msg.ActionResponsePayload
 	default:
 		return []byte{}
-	}
-}
-
-func (k *KeysplittingMessage) GetTimestamp() int64 {
-	switch msg := k.KeysplittingPayload.(type) {
-	case SynPayload:
-		return msg.Timestamp
-	case SynAckPayload:
-		return msg.Timestamp
-	case DataPayload:
-		return msg.Timestamp
-	case DataAckPayload:
-		return msg.Timestamp
-	default:
-		return 0
 	}
 }
 

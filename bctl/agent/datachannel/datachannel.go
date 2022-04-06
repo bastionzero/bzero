@@ -237,18 +237,17 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
 
-	var plugin plgn.IPlugin
+	// var plugin plgn.IPlugin
 	var err error
-
 	switch pluginName {
-	case bzplugin.Db:
-		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case bzplugin.Kube:
-		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, action, payload)
-	case bzplugin.Shell:
-		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+		d.plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
+	case bzplugin.Db:
+		d.plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case bzplugin.Web:
-		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+		d.plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+	case bzplugin.Shell:
+		d.plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")
 	}
@@ -259,7 +258,6 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 		return rerr
 	} else {
 		d.logger.Infof("%s plugin started!", pluginName)
-		d.plugin = plugin
 		return nil
 	}
 }
