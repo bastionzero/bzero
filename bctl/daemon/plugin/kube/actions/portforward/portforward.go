@@ -306,7 +306,10 @@ func (p *PortForwardAction) sendCloseMessage() {
 
 func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair, remotePort int64) error {
 	// Make a done channel
-	doneChan := make(chan bool)
+	// there are 4 instances where you push true to the done channel.
+	// processErrorMessage and processDataMessage, the error on read, and PortForwardEnd could all theoretically happen at the same time (I think)
+	// So to remedy that I rounded up to 5.
+	doneChan := make(chan bool, 5)
 
 	// Make and update the stream channel for this requestId
 	p.updateRequestMap(make(chan RequestMapStruct), portforwardSession.requestID)
@@ -353,8 +356,8 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 			default:
 				buf := make([]byte, portforward.DataStreamBufferSize)
 				n, err := portforwardSession.dataStream.Read(buf)
-				if err == io.EOF {
-					p.logger.Error(fmt.Errorf("reviced EOF on datastream: %v", buf[:n]))
+				if err != nil || err != io.EOF {
+					p.logger.Error(fmt.Errorf("received error on datastream: %s", err))
 
 					doneChan <- true
 					return
@@ -414,7 +417,6 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 
 	// Set up the function to listen to bastion messages and push to the user
 	for {
-
 		select {
 		case <-doneChan:
 			// Delete the stream pair from our mapping
@@ -447,6 +449,12 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 						processDataMessage(outOfOrderDataContent)
 						outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
 					}
+
+					if !requestMapStruct.streamMessage.More {
+						// Alert on our done chan
+						doneChan <- true
+					}
+
 				} else if requestMapStruct.streamMessage.Type == smsg.Error || requestMapStruct.streamMessage.TypeV2 == smsg.Error {
 					if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
 						processErrorMessage(requestMapStruct.streamMessageContent.Content)
@@ -518,20 +526,23 @@ func (p *PortForwardAction) requestID(stream httpstream.Stream) (string, error) 
 
 // Helper function so we avoid writing to this map at the same time
 func (p *PortForwardAction) updateRequestMap(newStreamChan chan RequestMapStruct, key string) {
+	defer p.requestMapLock.Unlock()
+
 	p.requestMapLock.Lock()
 	p.requestMap[key] = newStreamChan
-	p.requestMapLock.Unlock()
 }
 
 func (p *PortForwardAction) deleteRequestMap(key string) {
+	defer p.requestMapLock.Unlock()
+
 	p.requestMapLock.Lock()
 	delete(p.requestMap, key)
-	p.requestMapLock.Unlock()
 }
 
 func (p *PortForwardAction) getRequestMap(key string) (chan RequestMapStruct, bool) {
-	p.requestMapLock.Lock()
 	defer p.requestMapLock.Unlock()
+
+	p.requestMapLock.Lock()
 	act, ok := p.requestMap[key]
 	return act, ok
 }

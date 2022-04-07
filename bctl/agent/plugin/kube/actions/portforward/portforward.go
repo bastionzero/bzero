@@ -328,10 +328,6 @@ func (r *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 		return rerr
 	}
 
-	// Close this stream since we do not use it
-	// Ref: https://github.com/kubernetes/client-go/blob/v0.22.2/tools/portforward/portforward.go#L343
-	// errorStream.Close()
-
 	for name, value := range dataHeaders {
 		// Set so we override any error headers that were set
 		headers.Set(name, value)
@@ -392,7 +388,7 @@ func (r *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 			case <-r.tmb.Dying():
 				return
 			default:
-				r.forwardStream(dataStream, dataSeqNumber, portforwardRequestId, requestId)
+				r.forwardStream(smsg.Data, dataStream, dataSeqNumber, portforwardRequestId, requestId, logId)
 				dataSeqNumber += 1
 			}
 		}
@@ -410,7 +406,7 @@ func (r *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 			case <-r.tmb.Dying():
 				return
 			default:
-				r.forwardStream(errorStream, errorSeqNumber, portforwardRequestId, requestId)
+				r.forwardStream(smsg.Error, errorStream, errorSeqNumber, portforwardRequestId, requestId, logId)
 				errorSeqNumber += 1
 			}
 		}
@@ -433,13 +429,43 @@ func (r *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 	return nil
 }
 
-func (r *PortForwardRequest) forwardStream(stream httpstream.Stream, sequenceNumber int, portforwardRequestId string, requestId string) {
+// NOTE: we don't need to use TypeV2 here because Portforward is broken on previous versions of bzero
+// thus, anyone using it at all is using the new version
+func (r *PortForwardRequest) forwardStream(
+	streamType smsg.StreamType,
+	stream httpstream.Stream,
+	sequenceNumber int,
+	portforwardRequestId string,
+	requestId string,
+	logId string,
+) {
 	buf := make([]byte, portforward.DataStreamBufferSize)
 	n, err := stream.Read(buf)
 	if err != nil {
 		if err != io.EOF {
 			rerr := fmt.Errorf("error reading data from data stream: %s", err)
 			r.logger.Error(rerr)
+		} else if streamType == smsg.Data {
+			content, err := r.wrapStreamMessageContent([]byte{}, portforwardRequestId)
+			if err != nil {
+				r.logger.Error(err)
+
+				// Alert on our done channel
+				r.doneChan <- true
+			}
+
+			// Send our end message
+			message := smsg.StreamMessage{
+				SchemaVersion:  smsg.CurrentSchema,
+				Action:         string(kubeaction.PortForward),
+				Type:           streamType,
+				RequestId:      requestId,
+				LogId:          logId,
+				SequenceNumber: sequenceNumber,
+				Content:        content,
+				More:           false,
+			}
+			r.streamOutputChan <- message
 		}
 		r.doneChan <- true
 		return
@@ -459,10 +485,10 @@ func (r *PortForwardRequest) forwardStream(stream httpstream.Stream, sequenceNum
 		SequenceNumber: sequenceNumber,
 		RequestId:      requestId,
 		Action:         string(kubeaction.PortForward),
-		Type:           smsg.DataPortForward,
-		TypeV2:         smsg.Data,
+		Type:           streamType,
 		More:           true,
 		Content:        content,
+		LogId:          logId,
 	}
 	r.streamOutputChan <- message
 }
