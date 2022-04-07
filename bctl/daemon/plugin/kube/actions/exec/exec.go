@@ -81,12 +81,10 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 			case <-tmb.Dying():
 				return
 			case streamMessage := <-e.streamInputChan:
-
 				// check if received message is out of order
 				if streamMessage.SequenceNumber != seqNumber {
 					streamQueue[streamMessage.SequenceNumber] = streamMessage
 				} else {
-
 					// process in-order message + any next messages that we already received
 					msg := streamMessage
 					ok := true
