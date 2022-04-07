@@ -9,7 +9,7 @@ import (
 )
 
 func MockLogger() *logger.Logger {
-	logger, err := logger.New(logger.DefaultLoggerConfig(logger.Debug.String()), "/dev/null")
+	logger, err := logger.New(logger.DefaultLoggerConfig(logger.Debug.String()), "/dev/null", false)
 	if err == nil {
 		return logger
 	}

@@ -25,12 +25,10 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/config"
-	plgn "bastionzero.com/bctl/v1/bctl/agent/plugin"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/execcmd"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -105,84 +103,79 @@ func New(parentTmb *tomb.Tomb,
 func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	k.logger.Infof("Plugin received Data message with %v action", action)
 
-	// parse action
-	parsedAction := strings.Split(action, "/")
-	if len(parsedAction) < 2 {
-		return "", []byte{}, fmt.Errorf("malformed action: %s", action)
+	if actionPayloadSafe, err := cleanPayload(actionPayload); err != nil {
+		k.logger.Error(err)
+		return "", []byte{}, err
+	} else {
+
+		switch bzshell.ShellSubAction(action) {
+		case bzshell.ShellOpen:
+			// We ignore the RunAsUser in the second Shell/Open message since it was set in the first one processed by .New.
+			//  This is important because the RunAsUser is part of policy and the policy check happens in the first Shell/Open message.
+			if err := k.open(); err != nil {
+				errorString := fmt.Errorf("unable to start shell: %s", err)
+				k.logger.Error(errorString)
+				time.Sleep(2 * time.Second)
+				return "", []byte{}, errorString
+			}
+		case bzshell.ShellClose:
+			if err := k.close(); err != nil {
+				rerr := fmt.Errorf("shell stop failed %v", err)
+				k.logger.Error(rerr)
+				return action, []byte{}, rerr
+			}
+		case bzshell.ShellInput:
+			var shellInput bzshell.ShellInputMessage
+
+			if err := json.Unmarshal(actionPayloadSafe, &shellInput); err != nil {
+				rerr := fmt.Errorf("malformed shell input payload %v: %s", actionPayload, err)
+				k.logger.Error(rerr)
+				return action, []byte{}, rerr
+			}
+
+			if err := k.shellInput(shellInput); err != nil {
+				rerr := fmt.Errorf("write to stdin failed %v", err)
+				k.logger.Error(rerr)
+				return action, []byte{}, rerr
+			}
+		case bzshell.ShellResize:
+			var shellResize bzshell.ShellResizeMessage
+
+			if err := json.Unmarshal(actionPayloadSafe, &shellResize); err != nil {
+				rerr := fmt.Errorf("malformed shell resize payload %v", actionPayload)
+				k.logger.Error(rerr)
+				return action, []byte{}, rerr
+			}
+
+			if err := k.setSize(shellResize.Cols, shellResize.Rows); err != nil {
+				rerr := fmt.Errorf("shell resize failed %v", err)
+				k.logger.Error(rerr)
+				return action, []byte{}, rerr
+			}
+		case bzshell.ShelllReplay:
+			var shellReplay bzshell.ShellReplayMessage
+
+			if err := json.Unmarshal(actionPayloadSafe, &shellReplay); err != nil {
+				rerr := fmt.Errorf("malformed shell replay output payload %v", actionPayload)
+				k.logger.Error(rerr)
+				return action, []byte{}, rerr
+			}
+
+			outbuff := make([]byte, config.ShellStdOutBuffCapacity)
+			k.stdoutbuffMutex.Lock()
+			n, err := k.stdoutbuff.Read(outbuff)
+			k.stdoutbuffMutex.Unlock()
+
+			if err != nil {
+				return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %v", err)
+			}
+			return action, outbuff[0:n], nil
+		default:
+			return action, []byte{}, fmt.Errorf("unrecognized shell action received: %s", action)
+		}
+
+		return action, []byte{}, nil
 	}
-	if plgn.PluginName(parsedAction[0]) != plgn.Shell {
-		return "", []byte{}, fmt.Errorf("malformed action: expected 'shell/.*' got %s", action)
-	}
-
-	shellAction := parsedAction[1]
-
-	actionPayloadSafe := []byte(string(actionPayload))
-
-	switch bzshell.ShellAction(shellAction) {
-	case bzshell.ShellOpen:
-		// We ignore the RunAsUser in the second Shell/Open message since it was set in the first one processed by .New.
-		//  This is important because the RunAsUser is part of policy and the policy check happens in the first Shell/Open message.
-		if err := k.open(); err != nil {
-			errorString := fmt.Errorf("unable to start shell: %s", err)
-			k.logger.Error(errorString)
-			time.Sleep(2 * time.Second)
-			return "", []byte{}, errorString
-		}
-	case bzshell.ShellClose:
-		if err := k.close(); err != nil {
-			rerr := fmt.Errorf("shell stop failed %v", err)
-			k.logger.Error(rerr)
-			return action, []byte{}, rerr
-		}
-	case bzshell.ShellInput:
-		var shellInput bzshell.ShellInputMessage
-
-		if err := json.Unmarshal(actionPayloadSafe, &shellInput); err != nil {
-			rerr := fmt.Errorf("malformed shell input payload %v", actionPayload)
-			k.logger.Error(rerr)
-			return action, []byte{}, rerr
-		}
-
-		if err := k.shellInput(shellInput); err != nil {
-			rerr := fmt.Errorf("write to stdin failed %v", err)
-			k.logger.Error(rerr)
-			return action, []byte{}, rerr
-		}
-	case bzshell.ShellResize:
-		var shellResize bzshell.ShellResizeMessage
-
-		if err := json.Unmarshal(actionPayloadSafe, &shellResize); err != nil {
-			rerr := fmt.Errorf("malformed shell resize payload %v", actionPayload)
-			k.logger.Error(rerr)
-			return action, []byte{}, rerr
-		}
-
-		if err := k.setSize(shellResize.Cols, shellResize.Rows); err != nil {
-			rerr := fmt.Errorf("shell resize failed %v", err)
-			k.logger.Error(rerr)
-			return action, []byte{}, rerr
-		}
-	case bzshell.ShelllReplay:
-		var shellReplay bzshell.ShellReplayMessage
-
-		if err := json.Unmarshal(actionPayloadSafe, &shellReplay); err != nil {
-			rerr := fmt.Errorf("malformed shell replay output payload %v", actionPayload)
-			k.logger.Error(rerr)
-			return action, []byte{}, rerr
-		}
-
-		outbuff := make([]byte, config.ShellStdOutBuffCapacity)
-		k.stdoutbuffMutex.Lock()
-		n, err := k.stdoutbuff.Read(outbuff)
-		k.stdoutbuffMutex.Unlock()
-
-		if err != nil {
-			return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %v", err)
-		}
-		return action, outbuff[0:n], nil
-	}
-
-	return action, []byte{}, nil
 }
 
 // Ready returns if the shell is running and can be interacted with
@@ -270,7 +263,7 @@ func (k *ShellPlugin) shellInput(shellInput bzshell.ShellInputMessage) error {
 
 // setSize resizes the pseudo-terminal pty
 func (k *ShellPlugin) setSize(cols, rows uint32) (err error) {
-	k.logger.Tracef("Pty Resize data received: cols: %d, rows: %d", cols, rows)
+	k.logger.Debugf("Pty Resize data received: cols: %d, rows: %d", cols, rows)
 	if err := SetSize(k.logger, cols, rows); err != nil {
 		k.logger.Errorf("Unable to set pty size: %s", err)
 		return err
@@ -336,5 +329,21 @@ func (k *ShellPlugin) writePump(logger *logger.Logger) int {
 
 		// Wait for stdout to process more data
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func cleanPayload(payload []byte) ([]byte, error) {
+	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
+	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
+	// so that we can murder its family
+	if len(payload) > 0 {
+		payload = payload[1 : len(payload)-1]
+	}
+
+	// Json unmarshalling encodes bytes in base64
+	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
+		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
+	} else {
+		return payloadSafe, nil
 	}
 }
