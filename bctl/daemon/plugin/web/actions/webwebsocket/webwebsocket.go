@@ -91,7 +91,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 			case "":
 				switch incomingMessage.Type {
 				case smsg.DataOut:
-					if writeErr := s.writeOutData(conn, err, incomingMessage.Content); writeErr != nil {
+					if writeErr := s.writeOutData(conn, incomingMessage.Content); writeErr != nil {
 						return
 					}
 				case smsg.AgentStop:
@@ -104,7 +104,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 				}
 			default:
 				if incomingMessage.Type == smsg.Data {
-					if writeErr := s.writeOutData(conn, err, incomingMessage.Content); writeErr != nil {
+					if writeErr := s.writeOutData(conn, incomingMessage.Content); writeErr != nil {
 						return
 					}
 				} else if incomingMessage.Type == smsg.Stop {
@@ -170,7 +170,7 @@ func (s *WebWebsocketAction) ReceiveStream(smessage smsg.StreamMessage) {
 	s.streamInputChan <- smessage
 }
 
-func (s *WebWebsocketAction) writeOutData(conn *websocket.Conn, err error, content string) error {
+func (s *WebWebsocketAction) writeOutData(conn *websocket.Conn, content string) error {
 	// Stream data to the local connection
 	// Undo the base 64 encoding
 	incomingContent, base64Err := base64.StdEncoding.DecodeString(content)
@@ -194,7 +194,7 @@ func (s *WebWebsocketAction) writeOutData(conn *websocket.Conn, err error, conte
 	}
 
 	// Send the message to the user!
-	err = conn.WriteMessage(streamDataOut.MessageType, websocketMessage)
+	err := conn.WriteMessage(streamDataOut.MessageType, websocketMessage)
 	if err != nil {
 		s.logger.Errorf("error writing to websocket: %s", err)
 	}
