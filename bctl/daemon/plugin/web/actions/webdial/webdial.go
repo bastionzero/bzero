@@ -121,7 +121,6 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				continue
 			}
 			switch data.SchemaVersion {
-			case smsg.CurrentSchema:
 			// prior to 202204
 			case "":
 				switch data.Type {
