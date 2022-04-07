@@ -90,6 +90,13 @@ func (c *ConnectionNodeController) CreateWebConnection(targetId string) (Connect
 	return c.createConnection(createWebConnectionRequest, "web")
 }
 
+func (c *ConnectionNodeController) CreateShellConnection(connectionId string) (ConnectionDetailsResponse, error) {
+	// Currently shell connections are still created by the zli before starting
+	// the daemon. So here we just need to directly query for the connection
+	// auth details
+	return c.createCnConnection(connectionId)
+}
+
 func (c *ConnectionNodeController) createConnection(request interface{}, connectionType string) (ConnectionDetailsResponse, error) {
 	// Build the endpoint we want to hit
 	endpoint := ""

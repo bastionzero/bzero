@@ -14,6 +14,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
+	shellplugin "bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -23,6 +24,7 @@ import (
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
+	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
@@ -36,9 +38,10 @@ const (
 type PluginName string
 
 const (
-	Kube PluginName = "kube"
-	Db   PluginName = "db"
-	Web  PluginName = "web"
+	Kube  PluginName = "kube"
+	Db    PluginName = "db"
+	Web   PluginName = "web"
+	Shell PluginName = "shell"
 )
 
 type OpenDataChannelPayload struct {
@@ -259,7 +262,20 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 
 		// start web plugin
 		if plugin, err := web.New(&d.tmb, subLogger, webParams); err != nil {
-			return fmt.Errorf("could not start db daemon plugin: %s", err)
+			return fmt.Errorf("could not start web daemon plugin: %s", err)
+		} else {
+			d.plugin = plugin
+		}
+	case Shell:
+		// Deserialize the action params
+		var shellParams bzshell.ShellActionParams
+		if err := json.Unmarshal(actionParams, &shellParams); err != nil {
+			return fmt.Errorf("error deserializing actions params")
+		}
+
+		// start shell plugin
+		if plugin, err := shellplugin.New(&d.tmb, subLogger, shellParams); err != nil {
+			return fmt.Errorf("could not start shell daemon plugin: %s", err)
 		} else {
 			d.plugin = plugin
 		}

@@ -3,6 +3,7 @@ package logger
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -57,7 +58,7 @@ func DefaultLoggerConfig(logLevel string) *LoggerConfig {
 	}
 }
 
-func New(config *LoggerConfig, logFilePath string) (*Logger, error) {
+func New(config *LoggerConfig, logFilePath string, writeToConsole bool) (*Logger, error) {
 	// Let's us display stack info on errors
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	zerolog.SetGlobalLevel(config.LogLevel)
@@ -79,8 +80,13 @@ func New(config *LoggerConfig, logFilePath string) (*Logger, error) {
 			// Compress:   true
 		}
 
-		consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
-		multi := zerolog.MultiLevelWriter(consoleWriter, logFileWithRotation)
+		writers := []io.Writer{logFileWithRotation}
+
+		if writeToConsole {
+			consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
+			writers = append(writers, consoleWriter)
+		}
+		multi := zerolog.MultiLevelWriter(writers...)
 
 		logger := Logger{
 			logger: zerolog.New(multi).With().Timestamp().Logger(),

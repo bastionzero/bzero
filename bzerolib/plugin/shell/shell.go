@@ -13,6 +13,16 @@
 
 package shell
 
+type ShellAction string
+
+const (
+	UnixShell ShellAction = "unixshell"
+)
+
+type ShellActionParams struct {
+	TargetUser string `json:"targetUser"`
+}
+
 type ShellOpenMessage struct {
 	TargetUser string `json:"targetUser"`
 }
@@ -30,12 +40,12 @@ type ShellResizeMessage struct {
 
 type ShellReplayMessage struct{}
 
-type ShellAction string
+type ShellSubAction string
 
 const (
-	ShellOpen    ShellAction = "open"
-	ShellClose   ShellAction = "close"
-	ShellResize  ShellAction = "resize"
-	ShellInput   ShellAction = "input"
-	ShelllReplay ShellAction = "replay"
+	ShellOpen    ShellSubAction = "shell/open"
+	ShellClose   ShellSubAction = "shell/close"
+	ShellResize  ShellSubAction = "shell/resize"
+	ShellInput   ShellSubAction = "shell/input"
+	ShelllReplay ShellSubAction = "shell/replay"
 )

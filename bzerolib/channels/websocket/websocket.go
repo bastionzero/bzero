@@ -36,6 +36,7 @@ const (
 	Cluster = 2
 	Db      = 3
 	Web     = 4
+	Shell   = 5
 
 	// Enum target types for agent side connections
 	AgentWebsocket = -1
@@ -326,7 +327,7 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 		} else if signalRMessageType.Type == signalRInvocationMessageType {
 			var invocationMessage SignalRInvocationMessage
 			if err := json.Unmarshal(msg, &invocationMessage); err != nil {
-				return messages, fmt.Errorf("error unmarshalling SignalR invocation message from Bastion: %v", string(msg))
+				return messages, fmt.Errorf("error unmarshalling SignalR invocation message from Bastion: %s. Error: %s", string(msg), err)
 			}
 
 			// make sure there is an AgentMessage
@@ -440,6 +441,10 @@ func (w *Websocket) connect() error {
 			case Web:
 				if err := w.connectWeb(); err != nil {
 					return fmt.Errorf("error making web connection: %s", err)
+				}
+			case Shell:
+				if err := w.connectShell(); err != nil {
+					return fmt.Errorf("error making shell connection: %s", err)
 				}
 			case AgentWebsocket:
 				if err := w.connectAgentWebsocket(); err != nil {
@@ -570,6 +575,17 @@ func (w *Websocket) connectWeb() error {
 	}
 
 	createConnectionResponse, err := cnController.CreateWebConnection(w.params["target_id"])
+
+	return w.buildCnUrl(createConnectionResponse, err)
+}
+
+func (w *Websocket) connectShell() error {
+	cnController, cnControllerErr := w.getCnController()
+	if cnControllerErr != nil {
+		return fmt.Errorf("error creating cnController")
+	}
+
+	createConnectionResponse, err := cnController.CreateShellConnection(w.params["connection_id"])
 
 	return w.buildCnUrl(createConnectionResponse, err)
 }

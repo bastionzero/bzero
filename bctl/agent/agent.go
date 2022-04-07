@@ -122,7 +122,8 @@ func setupLogger() (*logger.Logger, error) {
 	}
 
 	// setup our loggers
-	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile); err != nil {
+	writeToConsole := true
+	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile, writeToConsole); err != nil {
 		return logger, err
 	} else {
 		logger.AddAgentVersion(getAgentVersion())
