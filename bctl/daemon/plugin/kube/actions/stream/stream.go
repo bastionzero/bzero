@@ -192,7 +192,7 @@ outOfOrderMessageHandler:
 					s.logger.Errorf("unhandled stream message: %s", watchData.Type)
 				}
 			default:
-				if watchData.Type == smsg.Data || watchData.TypeV2 == smsg.Data {
+				if watchData.Type == smsg.Data {
 					if !watchData.More {
 						// End the stream
 						s.logger.Infof("Stream has been ended from the agent, closing request")
@@ -216,7 +216,7 @@ outOfOrderMessageHandler:
 						s.outOfOrderMessages[watchData.SequenceNumber] = watchData
 					}
 				} else {
-					s.logger.Errorf("unhandled stream type: %s and typeV2: %s", watchData.Type, watchData.TypeV2)
+					s.logger.Errorf("unhandled stream type: %s", watchData.Type)
 				}
 			}
 		}

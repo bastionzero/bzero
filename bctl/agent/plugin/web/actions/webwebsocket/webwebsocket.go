@@ -143,7 +143,13 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 	if err != nil {
 		w.logger.Errorf("dial error: %s", err)
 		// Do not return an error incase the user wants to try again in making this connection, rather send a close message
-		w.sendStreamMessage(0, smsg.AgentStop, smsg.Stop, false, []byte{})
+		switch w.streamMessageVersion {
+		// prior to 202204
+		case "":
+			w.sendStreamMessage(0, smsg.AgentStop, false, []byte{})
+		default:
+			w.sendStreamMessage(0, smsg.Stop, false, []byte{})
+		}
 		return action, []byte{}, nil
 	}
 
@@ -155,7 +161,13 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 			if err != nil {
 				w.logger.Infof("Read websocket error: %s", err)
 				// We have to let the daemon know the websocket has ended
-				w.sendStreamMessage(sequenceNumber, smsg.AgentStop, smsg.Stop, false, []byte{})
+				switch w.streamMessageVersion {
+				// prior to 202204
+				case "":
+					w.sendStreamMessage(sequenceNumber, smsg.AgentStop, false, []byte{})
+				default:
+					w.sendStreamMessage(sequenceNumber, smsg.Stop, false, []byte{})
+				}
 				sequenceNumber += 1
 				return
 			}
@@ -170,7 +182,13 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 				w.logger.Infof("Json marshell error: %s", err)
 				return
 			}
-			w.sendStreamMessage(sequenceNumber, smsg.DataOut, smsg.Data, true, toSendBytes)
+			switch w.streamMessageVersion {
+			// prior to 202204
+			case "":
+				w.sendStreamMessage(sequenceNumber, smsg.DataOut, true, toSendBytes)
+			default:
+				w.sendStreamMessage(sequenceNumber, smsg.Data, true, toSendBytes)
+			}
 			sequenceNumber += 1
 
 			w.logger.Infof("Received websocket message: %s", message)
@@ -182,22 +200,13 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 	return action, []byte{}, nil
 }
 
-func (w *WebWebsocket) sendStreamMessage(
-	sequenceNumber int,
-	streamType smsg.StreamType,
-	streamTypeV2 smsg.StreamType,
-	more bool,
-	toSendBytes []byte,
-) {
-	// Stream the response back
-	streamMessage := smsg.StreamMessage{
+func (w *WebWebsocket) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, toSendBytes []byte) {
+	w.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  w.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		Action:         string(webaction.Websocket),
 		Type:           streamType,
-		TypeV2:         streamTypeV2,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(toSendBytes),
 	}
-	w.streamOutputChan <- streamMessage
 }

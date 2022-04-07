@@ -190,6 +190,7 @@ func (e *ExecAction) StartExec(startExecRequest execaction.KubeExecStartActionPa
 		return string(execaction.ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}
 
+	// NOTE: don't need to version this because Type is not read on the other end
 	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kubeaction.Exec), smsg.StdErr, e.logId)
 	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kubeaction.Exec), smsg.StdOut, e.logId)
 	stdinReader := stdin.NewStdReader(string(execaction.StdIn), startExecRequest.RequestId, e.execStdinChannel)

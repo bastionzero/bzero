@@ -167,7 +167,13 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 				}
 
 				// Let our daemon know that we have got the error and we need to close the connection
-				d.sendStreamMessage(sequenceNumber, smsg.DbStreamEnd, smsg.Stream, false, buff[:n])
+				switch d.streamMessageVersion {
+				// prior to 202204
+				case "":
+					d.sendStreamMessage(sequenceNumber, smsg.DbStreamEnd, false, buff[:n])
+				default:
+					d.sendStreamMessage(sequenceNumber, smsg.Stream, false, buff[:n])
+				}
 
 				return
 			}
@@ -175,7 +181,13 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 			d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
 
 			// Now send this to daemon
-			d.sendStreamMessage(sequenceNumber, smsg.DbStream, smsg.Stream, true, buff[:n])
+			switch d.streamMessageVersion {
+			// prior to 202204
+			case "":
+				d.sendStreamMessage(sequenceNumber, smsg.DbStream, true, buff[:n])
+			default:
+				d.sendStreamMessage(sequenceNumber, smsg.Stream, true, buff[:n])
+			}
 
 			sequenceNumber += 1
 		}
@@ -185,21 +197,13 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 	return action, []byte{}, nil
 }
 
-func (d *Dial) sendStreamMessage(
-	sequenceNumber int,
-	streamType smsg.StreamType,
-	streamTypeV2 smsg.StreamType,
-	more bool,
-	toSendBytes []byte,
-) {
-	message := smsg.StreamMessage{
+func (d *Dial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, toSendBytes []byte) {
+	d.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  d.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		Action:         string(dbaction.Dial),
 		Type:           streamType,
-		TypeV2:         streamTypeV2,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(toSendBytes),
 	}
-	d.streamOutputChan <- message
 }

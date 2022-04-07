@@ -94,7 +94,7 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 		}
 	default:
 		// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-		if stream.Type == smsg.Ready || stream.TypeV2 == smsg.Ready {
+		if stream.Type == smsg.Ready {
 			p.streamInputChan <- stream
 			return
 		}
@@ -168,7 +168,7 @@ readyMessageLoop:
 				break readyMessageLoop
 			}
 		default:
-			if streamMessage.Type == smsg.Ready || streamMessage.TypeV2 == smsg.Ready {
+			if streamMessage.Type == smsg.Ready {
 				// See if we have an error to bubble up to the user
 				if len(streamMessage.Content) != 0 {
 					bubbleUpError(writer, streamMessage.Content)
@@ -427,7 +427,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				fallthrough
 			default:
 				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-				if requestMapStruct.streamMessage.Type == smsg.Data || requestMapStruct.streamMessage.TypeV2 == smsg.Data {
+				if requestMapStruct.streamMessage.Type == smsg.Data {
 					// Check our seqNumber
 					if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
 						processDataMessage(requestMapStruct.streamMessageContent.Content)
@@ -449,7 +449,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 						doneChan <- true
 					}
 
-				} else if requestMapStruct.streamMessage.Type == smsg.Error || requestMapStruct.streamMessage.TypeV2 == smsg.Error {
+				} else if requestMapStruct.streamMessage.Type == smsg.Error {
 					if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
 						processErrorMessage(requestMapStruct.streamMessageContent.Content)
 					} else {
@@ -465,7 +465,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 						outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
 					}
 				} else {
-					p.logger.Errorf("unhandled stream type: %s and typeV2: %s", requestMapStruct.streamMessage.Type, requestMapStruct.streamMessage.TypeV2)
+					p.logger.Errorf("unhandled stream type: %s", requestMapStruct.streamMessage.Type)
 				}
 			}
 		}

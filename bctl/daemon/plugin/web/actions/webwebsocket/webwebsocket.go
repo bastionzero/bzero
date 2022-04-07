@@ -103,18 +103,17 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 					s.logger.Errorf("unhandled stream type: %s", incomingMessage.Type)
 				}
 			default:
-				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-				if incomingMessage.Type == smsg.Data || incomingMessage.TypeV2 == smsg.Data {
+				if incomingMessage.Type == smsg.Data {
 					if writeErr := s.writeOutData(conn, err, incomingMessage.Content); writeErr != nil {
 						return
 					}
-				} else if incomingMessage.Type == smsg.Stop || incomingMessage.TypeV2 == smsg.Stop {
+				} else if incomingMessage.Type == smsg.Stop {
 					// End the local connection
 					s.logger.Infof("Received close message from agent, closing websocket")
 					conn.Close()
 					return
 				} else {
-					s.logger.Errorf("unhandled stream type: %s and typeV2: %s", incomingMessage.Type, incomingMessage.TypeV2)
+					s.logger.Errorf("unhandled stream type: %s", incomingMessage.Type)
 				}
 			}
 		}

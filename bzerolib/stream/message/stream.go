@@ -12,11 +12,10 @@ type StreamMessage struct {
 	RequestId      string        `json:"requestId"`
 	SchemaVersion  SchemaVersion `json:"schemaVersion"` // new as of schemaVersion 202204
 	SequenceNumber int           `json:"sequenceId"`
-	Action         string        `json:"action"` // new as of schemaVersion 202204
-	Type           StreamType    `json:"type"`   // either stdout or stderr, see "StreamType"
-	TypeV2         StreamType    `json:"typeV2"` // temporarily used while we transitioned to a versioned schema
-	More           bool          `json:"more"`   // new as of schemaVersion 202204
-	LogId          string        `json:"logId"`  // only used by Kube exec
+	Action         string        `json:"action"` // new as of schemaVersion 202204: a plugin's action, e.g. "Web/Stream"
+	Type           StreamType    `json:"type"`   // a plugin action's subaction, e.g. "Data"
+	More           bool          `json:"more"`   // new as of schemaVersion 202204: flagging this as false indicates no more content is coming
+	LogId          string        `json:"logId"`  // only used by Kube commands
 	Content        string        `json:"content"`
 }
 

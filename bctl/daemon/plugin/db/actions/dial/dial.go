@@ -93,8 +93,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 							d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 						}
 					default:
-						// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-						if streamMessage.Type == smsg.Stream || streamMessage.TypeV2 == smsg.Stream {
+						if streamMessage.Type == smsg.Stream {
 							if !streamMessage.More {
 								// since there's no more stream coming, close the local connection
 								d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
@@ -107,7 +106,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 								lconn.Write(contentBytes)
 							}
 						} else {
-							d.logger.Errorf("unhandled stream type: %s and typeV2: %s", streamMessage.Type, streamMessage.TypeV2)
+							d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 						}
 					}
 

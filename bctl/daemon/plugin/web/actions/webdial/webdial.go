@@ -164,8 +164,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 					w.logger.Errorf("unhandled stream type: %s", data.Type)
 				}
 			default:
-				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-				if data.Type == smsg.Stream || data.TypeV2 == smsg.Stream {
+				if data.Type == smsg.Stream {
 
 					w.streamMessages[data.SequenceNumber] = data
 
@@ -209,7 +208,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						}
 					}
 				} else {
-					w.logger.Errorf("unhandled stream type: %s and typeV2: %s", data.Type, data.TypeV2)
+					w.logger.Errorf("unhandled stream type: %s", data.Type)
 				}
 			}
 		}

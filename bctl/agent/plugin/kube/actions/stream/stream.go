@@ -135,7 +135,13 @@ func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPa
 	}
 	kubeWatchHeadersPayloadBytes, _ := json.Marshal(kubeWatchHeadersPayload)
 	// Stream the response back
-	s.sendStreamMessage(0, smsg.StreamData, smsg.Data, true, kubeWatchHeadersPayloadBytes[:], streamActionRequest.LogId)
+	switch s.streamMessageVersion {
+	// prior to 202204
+	case "":
+		s.sendStreamMessage(0, smsg.StreamData, true, kubeWatchHeadersPayloadBytes[:], streamActionRequest.LogId)
+	default:
+		s.sendStreamMessage(0, smsg.Data, true, kubeWatchHeadersPayloadBytes[:], streamActionRequest.LogId)
+	}
 
 	// Create our bufio object
 	buf := make([]byte, 1024)
@@ -179,12 +185,24 @@ func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPa
 					}
 
 					// Let the daemon know the stream has ended
-					s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, smsg.Stream, false, []byte{}, streamActionRequest.LogId)
+					switch s.streamMessageVersion {
+					// prior to 202204
+					case "":
+						s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, false, []byte{}, streamActionRequest.LogId)
+					default:
+						s.sendStreamMessage(sequenceNumber, smsg.Stream, false, []byte{}, streamActionRequest.LogId)
+					}
 					return
 				}
 
 				// Stream the response back
-				s.sendStreamMessage(sequenceNumber, smsg.StreamData, smsg.Data, true, buf[:numBytes], streamActionRequest.LogId)
+				switch s.streamMessageVersion {
+				// prior to 202204
+				case "":
+					s.sendStreamMessage(sequenceNumber, smsg.StreamData, true, buf[:numBytes], streamActionRequest.LogId)
+				default:
+					s.sendStreamMessage(sequenceNumber, smsg.Data, true, buf[:numBytes], streamActionRequest.LogId)
+				}
 				sequenceNumber += 1
 			}
 		}
@@ -229,7 +247,13 @@ func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest str
 			// Parse out the body
 			if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
 				// Stream the context back to the user
-				s.sendStreamMessage(sequenceNumber, smsg.StreamData, smsg.Data, true, bodyBytes, streamActionRequest.LogId)
+				switch s.streamMessageVersion {
+				// prior to 202204
+				case "":
+					s.sendStreamMessage(sequenceNumber, smsg.StreamData, true, bodyBytes, streamActionRequest.LogId)
+				default:
+					s.sendStreamMessage(sequenceNumber, smsg.Data, true, bodyBytes, streamActionRequest.LogId)
+				}
 			} else {
 				s.logger.Errorf("error reading body of http request: %s", err)
 			}
@@ -253,22 +277,18 @@ func convertToUrlObject(inURL string) (*url.URL, error) {
 func (s *StreamAction) sendStreamMessage(
 	sequenceNumber int,
 	streamType smsg.StreamType,
-	streamTypeV2 smsg.StreamType,
 	more bool,
 	toSendBytes []byte,
 	logId string,
 ) {
-	// Stream the response back
-	streamMessage := smsg.StreamMessage{
+	s.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  s.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		RequestId:      s.requestId,
 		LogId:          logId,
 		Action:         string(kubeaction.Stream),
 		Type:           streamType,
-		TypeV2:         streamTypeV2,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(toSendBytes),
 	}
-	s.streamOutputChan <- streamMessage
 }

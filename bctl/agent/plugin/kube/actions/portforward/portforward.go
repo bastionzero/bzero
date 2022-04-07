@@ -238,18 +238,23 @@ func (a *PortForwardAction) startPortForward(startPortForwardRequest portforward
 
 	hostIP := strings.TrimLeft(config.Host, "htps:/")
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "https", Path: a.Endpoint, Host: hostIP})
+
+	var readyMessageErr string
 	streamCh, protocolSelected, err := dialer.Dial(kubeutilsdaemon.PortForwardProtocolV1Name)
 	if err != nil {
 		rerr := fmt.Errorf("error dialing portforward spdy stream: %s", err)
 		a.logger.Error(rerr)
-
-		// Let the user know about this error
-		a.sendReadyMessage(err.Error())
+		readyMessageErr = err.Error()
 	} else {
 		a.logger.Infof("Dial successful. Selected protocol: %s", protocolSelected)
+	}
 
-		// Let the user know we are ready
-		a.sendReadyMessage("")
+	switch a.streamMessageVersion {
+	// prior to 202204
+	case "":
+		a.sendReadyMessage(smsg.ReadyPortForward, readyMessageErr)
+	default:
+		a.sendReadyMessage(smsg.Ready, readyMessageErr)
 	}
 
 	// Save the streamCh to use later
@@ -258,17 +263,16 @@ func (a *PortForwardAction) startPortForward(startPortForwardRequest portforward
 	return string(portforward.StartPortForward), []byte{}, nil
 }
 
-func (a *PortForwardAction) sendReadyMessage(errorMessage string) {
-	message := smsg.StreamMessage{
+func (a *PortForwardAction) sendReadyMessage(streamType smsg.StreamType, errorMessage string) {
+	a.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  a.streamMessageVersion,
 		SequenceNumber: 0,
 		RequestId:      a.requestId,
+		LogId:          a.logId,
 		Action:         string(kubeaction.PortForward),
-		Type:           smsg.ReadyPortForward,
-		TypeV2:         smsg.Ready,
+		Type:           streamType,
 		Content:        errorMessage,
 	}
-	a.streamOutputChan <- message
 }
 
 // Helper function so we avoid writing to this map at the same time
@@ -454,18 +458,8 @@ func (r *PortForwardRequest) forwardStream(
 				r.doneChan <- true
 			}
 
-			// Send our end message
-			message := smsg.StreamMessage{
-				SchemaVersion:  smsg.CurrentSchema,
-				Action:         string(kubeaction.PortForward),
-				Type:           streamType,
-				RequestId:      requestId,
-				LogId:          logId,
-				SequenceNumber: sequenceNumber,
-				Content:        content,
-				More:           false,
-			}
-			r.streamOutputChan <- message
+			// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
+			r.sendStreamMessage(sequenceNumber, requestId, logId, streamType, false, content)
 		}
 		r.doneChan <- true
 		return
@@ -479,18 +473,8 @@ func (r *PortForwardRequest) forwardStream(
 		// Alert on our done channel
 		r.doneChan <- true
 	}
-
-	message := smsg.StreamMessage{
-		SchemaVersion:  r.streamMessageVersion,
-		SequenceNumber: sequenceNumber,
-		RequestId:      requestId,
-		Action:         string(kubeaction.PortForward),
-		Type:           streamType,
-		More:           true,
-		Content:        content,
-		LogId:          logId,
-	}
-	r.streamOutputChan <- message
+	// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
+	r.sendStreamMessage(sequenceNumber, requestId, logId, streamType, true, content)
 }
 
 func (r *PortForwardRequest) wrapStreamMessageContent(content []byte, portforwardRequestId string) (string, error) {
@@ -506,4 +490,24 @@ func (r *PortForwardRequest) wrapStreamMessageContent(content []byte, portforwar
 	}
 
 	return base64.StdEncoding.EncodeToString(streamMessageToSendBytes), nil
+}
+
+func (r *PortForwardRequest) sendStreamMessage(
+	sequenceNumber int,
+	requestId string,
+	logId string,
+	streamType smsg.StreamType,
+	more bool,
+	content string,
+) {
+	r.streamOutputChan <- smsg.StreamMessage{
+		SchemaVersion:  r.streamMessageVersion,
+		SequenceNumber: sequenceNumber,
+		RequestId:      requestId,
+		LogId:          logId,
+		Action:         string(kubeaction.PortForward),
+		Type:           streamType,
+		More:           more,
+		Content:        content,
+	}
 }
