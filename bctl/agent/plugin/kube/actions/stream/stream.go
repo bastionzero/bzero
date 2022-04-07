@@ -130,7 +130,7 @@ func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPa
 	}
 	kubeWatchHeadersPayloadBytes, _ := json.Marshal(kubeWatchHeadersPayload)
 	// Stream the response back
-	s.sendStreamMessage(0, smsg.StreamData, smsg.Data, true, kubeWatchHeadersPayloadBytes[:])
+	s.sendStreamMessage(0, smsg.StreamData, smsg.Data, true, kubeWatchHeadersPayloadBytes[:], streamActionRequest.LogId)
 
 	// Create our bufio object
 	buf := make([]byte, 1024)
@@ -174,12 +174,12 @@ func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPa
 					}
 
 					// Let the daemon know the stream has ended
-					s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, smsg.Stream, false, []byte{})
+					s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, smsg.Stream, false, []byte{}, streamActionRequest.LogId)
 					return
 				}
 
 				// Stream the response back
-				s.sendStreamMessage(sequenceNumber, smsg.StreamData, smsg.Data, true, buf[:numBytes])
+				s.sendStreamMessage(sequenceNumber, smsg.StreamData, smsg.Data, true, buf[:numBytes], streamActionRequest.LogId)
 				sequenceNumber += 1
 			}
 		}
@@ -224,7 +224,7 @@ func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest str
 			// Parse out the body
 			if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
 				// Stream the context back to the user
-				s.sendStreamMessage(sequenceNumber, smsg.StreamData, smsg.Data, true, bodyBytes)
+				s.sendStreamMessage(sequenceNumber, smsg.StreamData, smsg.Data, true, bodyBytes, streamActionRequest.LogId)
 			} else {
 				s.logger.Errorf("error reading body of http request: %s", err)
 			}
@@ -251,12 +251,14 @@ func (s *StreamAction) sendStreamMessage(
 	streamTypeV2 smsg.StreamType,
 	more bool,
 	toSendBytes []byte,
+	logId string,
 ) {
 	// Stream the response back
 	streamMessage := smsg.StreamMessage{
 		SchemaVersion:  smsg.CurrentSchema,
 		SequenceNumber: sequenceNumber,
 		RequestId:      s.requestId,
+		LogId:          logId,
 		Action:         string(kubeaction.Stream),
 		Type:           streamType,
 		TypeV2:         streamTypeV2,
