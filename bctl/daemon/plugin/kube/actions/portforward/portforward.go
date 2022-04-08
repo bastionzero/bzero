@@ -85,21 +85,13 @@ func (p *PortForwardAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapp
 }
 
 func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
-	switch stream.SchemaVersion {
-	// prior to 202204
-	case "":
-		if stream.Type == smsg.ReadyPortForward {
-			p.streamInputChan <- stream
-			return
-		}
-	default:
-		// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-		if stream.Type == smsg.Ready {
-			p.streamInputChan <- stream
-			return
-		}
+
+	// may be hearing about this via old or new language, depending on what we asked for
+	if stream.Type == smsg.ReadyPortForward || stream.Type == smsg.Ready {
+		// If this is our ready message, send to our ready channel
+		p.streamInputChan <- stream
+		return
 	}
-	// If this is our ready message, send to our ready channel
 
 	// Unmarshal our content
 	var kubePortforwardStreamMessageContent portforward.KubePortForwardStreamMessageContent
@@ -154,30 +146,16 @@ func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, re
 readyMessageLoop:
 	for {
 		streamMessage := <-p.streamInputChan
-		switch streamMessage.SchemaVersion {
-		// prior to 202204
-		case "":
-			if streamMessage.Type == smsg.ReadyPortForward {
-				// See if we have an error to bubble up to the user
-				if len(streamMessage.Content) != 0 {
-					bubbleUpError(writer, streamMessage.Content)
+		// may be hearing about this via old or new language, depending on what we asked for
+		if streamMessage.Type == smsg.ReadyPortForward || streamMessage.Type == smsg.Ready {
+			// See if we have an error to bubble up to the user
+			if len(streamMessage.Content) != 0 {
+				bubbleUpError(writer, streamMessage.Content)
 
-					p.sendCloseMessage()
-					return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
-				}
-				break readyMessageLoop
+				p.sendCloseMessage()
+				return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
 			}
-		default:
-			if streamMessage.Type == smsg.Ready {
-				// See if we have an error to bubble up to the user
-				if len(streamMessage.Content) != 0 {
-					bubbleUpError(writer, streamMessage.Content)
-
-					p.sendCloseMessage()
-					return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
-				}
-				break readyMessageLoop
-			}
+			break readyMessageLoop
 		}
 	}
 
@@ -420,53 +398,46 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		case requestMapStruct := <-requestMapChannel:
 			// contentBytes, _ := base64.StdEncoding.DecodeString(streamMessage.Content)
 
-			switch requestMapStruct.streamMessage.SchemaVersion {
-			// prior to 202204
-			case "":
-				// since portforwarding was broken prior to 202204, the only valid messages coming in will be from newer schemas
-				fallthrough
-			default:
-				// look at Type and TypeV2 -- that way, when the agent removes TypeV2, we won't break
-				if requestMapStruct.streamMessage.Type == smsg.Data {
-					// Check our seqNumber
-					if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
-						processDataMessage(requestMapStruct.streamMessageContent.Content)
-					} else {
-						// Update our buffer
-						dataBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
-					}
-
-					// Always attempt to processes out of order messages
-					outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
-					for ok {
-						// Keep pulling older messages
-						processDataMessage(outOfOrderDataContent)
-						outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
-					}
-
-					if !requestMapStruct.streamMessage.More {
-						// Alert on our done chan
-						doneChan <- true
-					}
-
-				} else if requestMapStruct.streamMessage.Type == smsg.Error {
-					if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
-						processErrorMessage(requestMapStruct.streamMessageContent.Content)
-					} else {
-						// Update our buffer
-						errorBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
-					}
-
-					// Always attempt to process out of order messages
-					outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
-					for ok {
-						// Keep pulling older messages
-						processErrorMessage(outOfOrderErrorContent)
-						outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
-					}
+			if requestMapStruct.streamMessage.Type == smsg.Data {
+				// Check our seqNumber
+				if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
+					processDataMessage(requestMapStruct.streamMessageContent.Content)
 				} else {
-					p.logger.Errorf("unhandled stream type: %s", requestMapStruct.streamMessage.Type)
+					// Update our buffer
+					dataBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
 				}
+
+				// Always attempt to processes out of order messages
+				outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
+				for ok {
+					// Keep pulling older messages
+					processDataMessage(outOfOrderDataContent)
+					outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
+				}
+
+				if !requestMapStruct.streamMessage.More {
+					// Alert on our done chan
+					doneChan <- true
+				}
+
+			} else if requestMapStruct.streamMessage.Type == smsg.Error {
+				if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
+					processErrorMessage(requestMapStruct.streamMessageContent.Content)
+				} else {
+					// Update our buffer
+					errorBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+				}
+
+				// Always attempt to process out of order messages
+				outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
+				for ok {
+					// Keep pulling older messages
+					processErrorMessage(outOfOrderErrorContent)
+					outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
+				}
+
+			} else {
+				p.logger.Errorf("unhandled stream type: %s", requestMapStruct.streamMessage.Type)
 			}
 		}
 	}
