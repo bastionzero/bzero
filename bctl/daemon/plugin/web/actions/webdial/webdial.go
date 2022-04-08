@@ -120,95 +120,45 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 			if !processInput {
 				continue
 			}
-			switch data.SchemaVersion {
-			// prior to 202204
-			case "":
-				switch data.Type {
-				case smsg.WebStream, smsg.WebStreamEnd:
-					w.streamMessages[data.SequenceNumber] = data
 
-					// process the incoming stream messages *in order*
-					for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
-						var response bzwebdial.WebOutputActionPayload
-						if contentBytes, err := base64.StdEncoding.DecodeString(nextMessage.Content); err != nil {
-							return err
-						} else if err := json.Unmarshal(contentBytes, &response); err != nil {
-							rerr := fmt.Errorf("could not unmarshal web dial output action payload: %s", err)
-							w.logger.Error(rerr)
-							return rerr
-						} else {
-							// we only write this header once
-							// ref: https://stackoverflow.com/questions/57828645/how-to-handle-superfluous-response-writeheader-call-in-order-to-return-500
-							if !headerSet {
-								// extract and build our writer headers
-								for name, values := range response.Headers {
-									for _, value := range values {
-										writer.Header().Add(name, value)
-									}
+			// may have gotten an old-fashioned or newfangled message type, depending on what we asked for
+			if data.Type == smsg.WebStream || data.Type == smsg.WebStreamEnd || data.Type == smsg.Stream {
+				w.streamMessages[data.SequenceNumber] = data
+				// process the incoming stream messages *in order*
+				for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
+					var response bzwebdial.WebOutputActionPayload
+					if contentBytes, err := base64.StdEncoding.DecodeString(nextMessage.Content); err != nil {
+						return err
+					} else if err := json.Unmarshal(contentBytes, &response); err != nil {
+						rerr := fmt.Errorf("could not unmarshal web dial output action payload: %s", err)
+						w.logger.Error(rerr)
+						return rerr
+					} else {
+						// we only write this header once
+						// ref: https://stackoverflow.com/questions/57828645/how-to-handle-superfluous-response-writeheader-call-in-order-to-return-500
+						if !headerSet {
+							// extract and build our writer headers
+							for name, values := range response.Headers {
+								for _, value := range values {
+									writer.Header().Add(name, value)
 								}
-								writer.WriteHeader(response.StatusCode)
-								headerSet = true
 							}
-							// write response to user
-							w.logger.Tracef("Writing chunk #%d of size %d", w.expectedSequenceNumber, len(response.Content))
-							writer.Write(response.Content)
+							writer.WriteHeader(response.StatusCode)
+							headerSet = true
+						}
+						// write response to user
+						w.logger.Tracef("Writing chunk #%d of size %d", w.expectedSequenceNumber, len(response.Content))
+						writer.Write(response.Content)
 
-							// if this is our last stream message, then we can return
-							if nextMessage.Type == smsg.WebStreamEnd {
-								return nil
-							}
+						// if this is our last stream message, then we can return
+						// again, might be hearing about this via old language or new
+						if nextMessage.Type == smsg.WebStreamEnd || (nextMessage.Type == smsg.Stream && !nextMessage.More) {
+							return nil
 						}
 					}
-				default:
-					w.logger.Errorf("unhandled stream type: %s", data.Type)
 				}
-			default:
-				if data.Type == smsg.Stream {
-
-					w.streamMessages[data.SequenceNumber] = data
-
-					// process the incoming stream messages *in order*
-					for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
-						var response bzwebdial.WebOutputActionPayload
-						if contentBytes, err := base64.StdEncoding.DecodeString(nextMessage.Content); err != nil {
-							return err
-						} else if err := json.Unmarshal(contentBytes, &response); err != nil {
-							rerr := fmt.Errorf("could not unmarshal web dial output action payload: %s", err)
-							w.logger.Error(rerr)
-							return rerr
-						} else {
-
-							// we only write this header once
-							// ref: https://stackoverflow.com/questions/57828645/how-to-handle-superfluous-response-writeheader-call-in-order-to-return-500
-							if !headerSet {
-
-								// extract and build our writer headers
-								for name, values := range response.Headers {
-									for _, value := range values {
-										writer.Header().Add(name, value)
-									}
-								}
-
-								writer.WriteHeader(response.StatusCode)
-								headerSet = true
-							}
-
-							// write response to user
-							w.logger.Tracef("Writing chunk #%d of size %d", w.expectedSequenceNumber, len(response.Content))
-							writer.Write(response.Content)
-
-							// if this is our last stream message, then we can return
-							if !data.More {
-								return nil
-							}
-
-							delete(w.streamMessages, w.expectedSequenceNumber)
-							w.expectedSequenceNumber += 1
-						}
-					}
-				} else {
-					w.logger.Errorf("unhandled stream type: %s", data.Type)
-				}
+			} else {
+				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}
 	}
