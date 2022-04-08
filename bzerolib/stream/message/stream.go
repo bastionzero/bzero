@@ -38,6 +38,7 @@ const (
 	Ready StreamType = "ready"
 )
 
+// old-fashioned messages we can stop sending once daemons older than 4.5.0 are extinct in the wild
 const (
 	ReadyPortForward StreamType = "kube/portforward/ready"
 	DataPortForward  StreamType = "kube/portforward/data"
