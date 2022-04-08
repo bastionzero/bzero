@@ -86,35 +86,19 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 	go func() {
 		for {
 			incomingMessage := <-s.streamInputChan
-			switch incomingMessage.SchemaVersion {
-			// prior to 202204
-			case "":
-				switch incomingMessage.Type {
-				case smsg.DataOut:
-					if writeErr := s.writeOutData(conn, incomingMessage.Content); writeErr != nil {
-						return
-					}
-				case smsg.AgentStop:
-					// End the local connection
-					s.logger.Infof("Received close message from agent, closing websocket")
-					conn.Close()
+			// may be getting an old-fashioned or newfangled message, depending on what we asked for
+			if incomingMessage.Type == smsg.DataOut || incomingMessage.Type == smsg.Data {
+				if writeErr := s.writeOutData(conn, incomingMessage.Content); writeErr != nil {
 					return
-				default:
-					s.logger.Errorf("unhandled stream type: %s", incomingMessage.Type)
 				}
-			default:
-				if incomingMessage.Type == smsg.Data {
-					if writeErr := s.writeOutData(conn, incomingMessage.Content); writeErr != nil {
-						return
-					}
-				} else if incomingMessage.Type == smsg.Stop {
-					// End the local connection
-					s.logger.Infof("Received close message from agent, closing websocket")
-					conn.Close()
-					return
-				} else {
-					s.logger.Errorf("unhandled stream type: %s", incomingMessage.Type)
-				}
+			}
+			if incomingMessage.Type == smsg.AgentStop || incomingMessage.Type == smsg.Stop {
+				// End the local connection
+				s.logger.Infof("Received close message from agent, closing websocket")
+				conn.Close()
+				return
+			} else {
+				s.logger.Errorf("unhandled stream type: %s", incomingMessage.Type)
 			}
 		}
 	}()
