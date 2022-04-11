@@ -35,7 +35,8 @@ var (
 
 	// Shell specific values
 	// targetUser string (shared with kube)
-	connectionId string
+	connectionId  string
+	dataChannelId string
 )
 
 const (
@@ -128,13 +129,14 @@ func startServer(logger *logger.Logger, headers map[string]string, params map[st
 }
 
 func startShellServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
-	subLogger := logger.GetComponentLogger("shellterminal")
+	subLogger := logger.GetComponentLogger("shellserver")
 
 	params["connection_id"] = connectionId
 
 	return shellserver.StartShellServer(
 		subLogger,
 		targetUser,
+		dataChannelId,
 		refreshTokenCommand,
 		configPath,
 		serviceUrl,
@@ -251,6 +253,7 @@ func parseFlags() error {
 
 	// Shell plugin variables
 	flag.StringVar(&connectionId, "connectionId", "", "The bzero connection id for the shell connection")
+	flag.StringVar(&dataChannelId, "dataChannelId", "", "The data channel id to attach to an existing shell connection")
 
 	flag.Parse()
 

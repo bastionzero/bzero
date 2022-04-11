@@ -64,6 +64,7 @@ type DataChannel struct {
 	plugin       plugin.IPlugin
 	keysplitting IKeysplitting
 	handshook    bool // bool to indicate if we have received a valid syn ack (initally set to false)
+	attach       bool // bool to indicate if we are attaching to an existing data channel
 
 	// channels for incoming messages
 	inputChan chan am.AgentMessage
@@ -93,6 +94,7 @@ func New(logger *logger.Logger,
 	action string,
 	actionParams []byte,
 	agentPubKey string,
+	attach bool,
 ) (*DataChannel, *tomb.Tomb, error) {
 
 	keysplitter, err := keysplitting.New(agentPubKey, configPath, refreshTokenCommand)
@@ -109,6 +111,7 @@ func New(logger *logger.Logger,
 
 		keysplitting: keysplitter,
 		handshook:    false,
+		attach:       attach,
 
 		inputChan:   make(chan am.AgentMessage, 25),
 		ksInputChan: make(chan am.AgentMessage, 25),
@@ -121,11 +124,16 @@ func New(logger *logger.Logger,
 	// register with websocket so datachannel can send a receive messages
 	websocket.Subscribe(id, dc)
 
-	// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
-	logger.Info("Sending request to agent to open a new datachannel")
-	if err := dc.openDataChannel(action, actionParams); err != nil {
-		logger.Error(err)
-		return nil, &tomb.Tomb{}, err
+	if !attach {
+		// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
+		logger.Info("Sending request to agent to open a new datachannel")
+		if err := dc.openDataChannel(action, actionParams); err != nil {
+			logger.Error(err)
+			return nil, &tomb.Tomb{}, err
+		}
+	} else {
+		logger.Infof("Sending SYN on existing data channel %s with actions %s.", dc.id, action)
+		dc.sendSyn(action)
 	}
 
 	// start our plugin
@@ -143,7 +151,6 @@ func New(logger *logger.Logger,
 				return errors.New("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
 				dc.logger.Infof("Killing datachannel and its subsidiaries because %s", dc.tmb.Err())
-				time.Sleep(10 * time.Second) // give datachannel time to close correctly
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
 
@@ -178,8 +185,8 @@ func (d *DataChannel) Ready() bool {
 }
 
 func (d *DataChannel) Close(reason error) {
+	d.logger.Infof("killing data channel tomb")
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
-	d.tmb.Wait()
 }
 
 func (d *DataChannel) openDataChannel(action string, actionParams []byte) error {
@@ -274,7 +281,7 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		}
 
 		// start shell plugin
-		if plugin, err := shellplugin.New(&d.tmb, subLogger, shellParams); err != nil {
+		if plugin, err := shellplugin.New(&d.tmb, subLogger, shellParams, d.attach); err != nil {
 			return fmt.Errorf("could not start shell daemon plugin: %s", err)
 		} else {
 			d.plugin = plugin
@@ -337,7 +344,14 @@ func (d *DataChannel) sendSyn(action string) error {
 		d.logger.Error(rerr)
 		return rerr
 	} else {
-		d.send(am.Keysplitting, synMessage)
+		messageBytes, _ := json.Marshal(synMessage)
+		agentMessage := am.AgentMessage{
+			ChannelId:      d.id,
+			MessageType:    string(am.Keysplitting),
+			SchemaVersion:  am.SchemaVersion,
+			MessagePayload: messageBytes,
+		}
+		d.websocket.Send(agentMessage)
 		return nil
 	}
 }

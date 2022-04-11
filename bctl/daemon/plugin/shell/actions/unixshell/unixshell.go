@@ -48,18 +48,26 @@ func New(logger *logger.Logger) (*UnixShell, chan plugin.ActionWrapper) {
 	return shellAction, shellAction.outputChan
 }
 
-func (s *UnixShell) Start(tmb *tomb.Tomb) error {
+func (s *UnixShell) Start(tmb *tomb.Tomb, attach bool) error {
 	s.tmb = tmb
 
-	// Send openShell data message to start the pty on the target
-	openShellDataMessage := bzshell.ShellOpenMessage{
-		// note the TargetUser in this data message is ignored by the agent
-		// because it is policy-checked by bzero when its sent in the SYN
-		// message when opening the data channel and should never be changed
-		// afterwards
-		TargetUser: "",
+	if attach {
+		// If we are attaching send a shell replay message to replay terminal
+		// output
+		shellReplayDataMessage := bzshell.ShellReplayMessage{}
+		s.sendOutputMessage(bzshell.ShellReplay, shellReplayDataMessage)
+	} else {
+		// If we are not attaching then send a ShellOpen data message to start
+		// the pty on the target
+		openShellDataMessage := bzshell.ShellOpenMessage{
+			// note the TargetUser in this data message is ignored by the agent
+			// because it is policy-checked by bzero when its sent in the SYN
+			// message when opening the data channel and should never be changed
+			// afterwards
+			TargetUser: "",
+		}
+		s.sendOutputMessage(bzshell.ShellOpen, openShellDataMessage)
 	}
-	s.sendOutputMessage(bzshell.ShellOpen, openShellDataMessage)
 
 	// Set initial terminal dimensions and then listen for any changes to
 	// terminal size
@@ -76,6 +84,21 @@ func (s *UnixShell) Start(tmb *tomb.Tomb) error {
 	return nil
 }
 
+func (s *UnixShell) Replay(replayData []byte) error {
+	s.logger.Debug("Unix shell received replay message with action")
+	if _, err := os.Stdout.Write(replayData); err != nil {
+		s.logger.Errorf("Error writing shell replay message to Stdout: %s", err)
+		return err
+	}
+
+	return nil
+}
+
+func (s *UnixShell) ReceiveStream(smessage smsg.StreamMessage) {
+	s.logger.Debugf("Unix shell received %v stream, message count: %d", smessage.Type, len(s.streamInputChan)+1)
+	s.streamInputChan <- smessage
+}
+
 func (s *UnixShell) sendOutputMessage(action bzshell.ShellSubAction, payload interface{}) {
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
@@ -83,15 +106,6 @@ func (s *UnixShell) sendOutputMessage(action bzshell.ShellSubAction, payload int
 		Action:        string(action),
 		ActionPayload: payloadBytes,
 	}
-}
-
-func (s *UnixShell) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	s.logger.Debugf("Shell plugin action received keysplitting message with action: %s", wrappedAction.Action)
-}
-
-func (s *UnixShell) ReceiveStream(smessage smsg.StreamMessage) {
-	s.logger.Debugf("Shell plugin action received %v stream, message count: %d", smessage.Type, len(s.streamInputChan)+1)
-	s.streamInputChan <- smessage
 }
 
 func (s *UnixShell) handleStreamMessages() {

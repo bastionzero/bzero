@@ -170,6 +170,7 @@ func (h *KubeServer) newWebsocket(wsId string) error {
 func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
+	attach := false
 	subLogger := h.logger.GetDatachannelLogger(dcId)
 
 	h.logger.Infof("Creating new datachannel id: %v", dcId)
@@ -187,7 +188,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 	}
 
 	action = "kube/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey, attach); err != nil {
 		h.logger.Error(err)
 		return datachannel, err
 	} else {
