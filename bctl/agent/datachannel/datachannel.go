@@ -259,7 +259,7 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 	case Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case Shell:
-		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, payload)
+		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")
 	}

@@ -11,7 +11,7 @@
 // either express or implied. See the License for the specific language governing
 // permissions and limitations under the License.
 
-package shell
+package unixshell
 
 import (
 	"encoding/base64"
@@ -44,12 +44,9 @@ func StreamMessageToString(t *testing.T, msg smsg.StreamMessage) string {
 func SpawnTerminal(t *testing.T, streamOutputChan chan smsg.StreamMessage) *ShellPlugin {
 	subLogger := testutils.MockLogger().GetPluginLogger(string("unittest shell"))
 	testshelluser := testutils.GetRunAsUser(t)
-
 	var tmb tomb.Tomb
-	synPayload, _ := json.Marshal(bzshell.ShellOpenMessage{
-		TargetUser: testshelluser,
-	})
-	plugin, err := New(&tmb, subLogger, streamOutputChan, synPayload)
+
+	plugin, err := New(&tmb, subLogger, streamOutputChan, testshelluser)
 	if err != nil {
 		t.Errorf("Shell plugin new failed: %v", err.Error())
 	}
@@ -125,7 +122,7 @@ func SendToStdIn(t *testing.T, plugin *ShellPlugin, stdinstr string) {
 	action := "shell/input"
 
 	inputPayload, _ := json.Marshal(bzshell.ShellInputMessage{
-		Data: base64.StdEncoding.EncodeToString([]byte(stdinstr)),
+		Data: []byte(stdinstr),
 	})
 
 	respstr, respbytes, err := plugin.Receive(action, inputPayload)
@@ -137,7 +134,7 @@ func SendToStdIn(t *testing.T, plugin *ShellPlugin, stdinstr string) {
 	assert.NotEmpty(t, respstr)
 }
 
-// This function ensures that if the channel doesn't receive any output the test won't hang forever
+// This function ensures that if the channel doesn't ReceiveInternal any output the test won't hang forever
 //  TODO: I don't like this pattern. I should replace it write an anonymous function that writes to a buffer
 func ReadOutputOrTimeout(t *testing.T, ch chan smsg.StreamMessage) (string, error) {
 	select {
@@ -229,9 +226,8 @@ func TestClose(t *testing.T) {
 	SendClose(t, plugin)
 
 	action := "shell/input"
-	b64instr := base64.StdEncoding.EncodeToString([]byte("ls -l\n"))
 	inputPayload, _ := json.Marshal(bzshell.ShellInputMessage{
-		Data: b64instr,
+		Data: []byte("ls -l\n"),
 	})
 
 	// Throw an error because the shell is now closed
@@ -249,11 +245,7 @@ func TestNoUserExistsErr(t *testing.T) {
 	var tmb tomb.Tomb
 
 	userThatDoesNotExist := "NoSuchUser"
-
-	synPayload, _ := json.Marshal(bzshell.ShellOpenMessage{
-		TargetUser: userThatDoesNotExist,
-	})
-	plugin, err := New(&tmb, subLogger, streamOutputChan, synPayload)
+	plugin, err := New(&tmb, subLogger, streamOutputChan, userThatDoesNotExist)
 	if err != nil {
 		t.Errorf("shell plugin new failed: %v", err.Error())
 	}

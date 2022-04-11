@@ -14,7 +14,6 @@
 package datachannel
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -79,7 +78,7 @@ func CreateSynMsg(t *testing.T) []byte {
 		Timestamp:     fmt.Sprint(time.Now().Unix()),
 		SchemaVersion: ksmsg.SchemaVersion,
 		Type:          string(ksmsg.Syn),
-		Action:        "shell/open",
+		Action:        "shell/unixshell",
 		ActionPayload: synActionPayload,
 		TargetId:      "currently unused",
 		Nonce:         "fake nonce",
@@ -120,7 +119,7 @@ func CreateOpenShellDataMsg() []byte {
 
 func CreateInputShellDataMsg() []byte {
 	dataActionPayload, err := json.Marshal(bzshell.ShellInputMessage{
-		Data: base64.StdEncoding.EncodeToString([]byte("e")),
+		Data: []byte("e"),
 	})
 
 	if err != nil {
@@ -132,7 +131,7 @@ func CreateInputShellDataMsg() []byte {
 		SchemaVersion: ksmsg.SchemaVersion,
 		Type:          string(ksmsg.Data),
 		Action:        "shell/input",
-		ActionPayload: dataActionPayload,
+		ActionPayload: testutils.B64Encode(dataActionPayload),
 		TargetId:      "fake",
 		BZCertHash:    "fake",
 	}
@@ -206,7 +205,7 @@ func TestShelllDatachannel(t *testing.T) {
 
 func TestShelllSimpleDeserialization(t *testing.T) {
 	actionPayloadSafe, _ := json.Marshal(
-		bzshell.ShellInputMessage{Data: base64.StdEncoding.EncodeToString([]byte("e"))})
+		bzshell.ShellInputMessage{Data: []byte("e")})
 
 	var shellInput bzshell.ShellInputMessage
 
