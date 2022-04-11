@@ -30,7 +30,8 @@ type ShellServer struct {
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	// Shell specific vars
-	targetUser string
+	targetUser    string
+	dataChannelId string
 
 	// fields for new datachannels
 	params              map[string]string
@@ -44,6 +45,7 @@ type ShellServer struct {
 func StartShellServer(
 	logger *logger.Logger,
 	targetUser string,
+	dataChannelId string,
 	refreshTokenCommand string,
 	configPath string,
 	serviceUrl string,
@@ -61,6 +63,7 @@ func StartShellServer(
 		configPath:          configPath,
 		refreshTokenCommand: refreshTokenCommand,
 		targetUser:          targetUser,
+		dataChannelId:       dataChannelId,
 		agentPubKey:         agentPubKey,
 	}
 
@@ -94,11 +97,18 @@ func (ss *ShellServer) newWebsocket(wsId string) error {
 
 // for creating new datachannels
 func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
-	dcId := uuid.New().String()
-	subLogger := ss.logger.GetDatachannelLogger(dcId)
+	var attach bool
+	if ss.dataChannelId == "" {
+		ss.dataChannelId = uuid.New().String()
+		attach = false
+		ss.logger.Infof("Creating new datachannel id: %s", ss.dataChannelId)
+	} else {
+		attach = true
+		ss.logger.Infof("Attaching to an existing datachannel id: %s", ss.dataChannelId)
+	}
 
-	ss.logger.Infof("Creating new datachannel id: %s", dcId)
+	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+	subLogger := ss.logger.GetDatachannelLogger(ss.dataChannelId)
 
 	// Build the action payload to send in the syn message when opening the data channel
 	actionParams := bzshell.ShellOpenMessage{
@@ -107,6 +117,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
 	action = "shell/" + action
+	if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, ss.refreshTokenCommand, ss.configPath, action, actionParamsMarshalled, ss.agentPubKey, attach); err != nil {
 		ss.logger.Error(err)
 		return nil, err
 	} else {
@@ -121,14 +132,6 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 				case <-dcTmb.Dying():
 					// Wait until everything is dead and any close processes are sent before killing the datachannel
 					dcTmb.Wait()
-
-					// notify agent to close the datachannel
-					ss.logger.Info("Sending DataChannel Close")
-					cdMessage := am.AgentMessage{
-						ChannelId:   dcId,
-						MessageType: string(am.CloseDataChannel),
-					}
-					ss.websocket.Send(cdMessage)
 
 					errorCode := 1
 					os.Exit(errorCode)
