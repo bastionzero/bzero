@@ -154,7 +154,7 @@ func (s *UnixShell) readStdIn() {
 		default:
 			n, err := os.Stdin.Read(b)
 			if err != nil || n != 1 {
-				s.logger.Errorf("Error reading last keypress from Stdin: %s", err)
+				s.tmb.Kill(fmt.Errorf("Error reading last keypress from Stdin: %s", err))
 				return
 			}
 
@@ -165,7 +165,6 @@ func (s *UnixShell) readStdIn() {
 
 // processes input channel by debouncing all keypresses within a time interval
 func (s *UnixShell) processStdIn() {
-	defer close(s.outputChan)
 	inputBuf := make([]byte, InputBufferSize)
 
 	for {
