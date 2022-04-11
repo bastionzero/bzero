@@ -163,9 +163,8 @@ func (s *UnixShell) processStdIn() {
 		case <-time.After(InputDebounceTime):
 			if len(inputBuf) >= 1 {
 				// Send all accumulated keypresses in a shellInput data message
-				dataToSend := base64.StdEncoding.EncodeToString(inputBuf)
 				shellInputDataMessage := bzshell.ShellInputMessage{
-					Data: dataToSend,
+					Data: inputBuf,
 				}
 				s.sendOutputMessage(bzshell.ShellInput, shellInputDataMessage)
 

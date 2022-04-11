@@ -19,7 +19,7 @@
 // +build darwin freebsd linux netbsd openbsd
 
 // Package shell implements session shell plugin.
-package shell
+package unixshell
 
 import (
 	"errors"
@@ -30,7 +30,7 @@ import (
 	"strings"
 	"syscall"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/execcmd"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/actions/unixshell/execcmd"
 	"bastionzero.com/bctl/v1/bctl/agent/utility"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"github.com/creack/pty"
