@@ -30,7 +30,7 @@ type ShellOpenMessage struct {
 type ShellCloseMessage struct{}
 
 type ShellInputMessage struct {
-	Data string `json:"data"`
+	Data []byte `json:"data"`
 }
 
 type ShellResizeMessage struct {
@@ -43,9 +43,9 @@ type ShellReplayMessage struct{}
 type ShellSubAction string
 
 const (
-	ShellOpen    ShellSubAction = "shell/open"
-	ShellClose   ShellSubAction = "shell/close"
-	ShellResize  ShellSubAction = "shell/resize"
-	ShellInput   ShellSubAction = "shell/input"
-	ShelllReplay ShellSubAction = "shell/replay"
+	ShellOpen   ShellSubAction = "shell/open"
+	ShellClose  ShellSubAction = "shell/close"
+	ShellResize ShellSubAction = "shell/resize"
+	ShellInput  ShellSubAction = "shell/input"
+	ShellReplay ShellSubAction = "shell/replay"
 )

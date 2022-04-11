@@ -106,8 +106,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	}
 	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
-	action = string(bzshell.ShellOpen)
-	if dc, dcTmb, err := datachannel.New(subLogger, dcId, &ss.tmb, websocket, ss.refreshTokenCommand, ss.configPath, action, actionParamsMarshalled, ss.agentPubKey); err != nil {
+	action = "shell/" + action
 		ss.logger.Error(err)
 		return nil, err
 	} else {

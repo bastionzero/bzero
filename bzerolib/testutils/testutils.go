@@ -16,6 +16,7 @@ func MockLogger() *logger.Logger {
 	return nil
 }
 
+// TODO: remove this https://commonwealthcrypto.atlassian.net/browse/CWC-1644
 func B64Encode(b []byte) []byte {
 	// Adds quotes as the base64 encoded strings which receive gets over the data channel has quotes
 	return []byte("\"" + base64.StdEncoding.EncodeToString(b) + "\"")
