@@ -24,5 +24,8 @@ jobs:
     - name: Build
       run: cd bctl && GOOS=linux GOARCH=amd64 go build -v ./...
 
-    - name: Test
+    - name: agent/daemon unit tests
       run: cd bctl && go test -v ./...
+
+    - name: bzerolib unit tests
+      run: cd bzerolib && go test -v ./...
