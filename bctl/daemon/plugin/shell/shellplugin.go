@@ -7,15 +7,16 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell/actions/unixshell"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
 
 type IShellAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(tmb *tomb.Tomb) error
+	Start(tmb *tomb.Tomb, attach bool) error
+	Replay(replayData []byte) error
 }
 
 type ShellDaemonPlugin struct {
@@ -27,14 +28,16 @@ type ShellDaemonPlugin struct {
 	outputQueue     chan plugin.ActionWrapper
 
 	action IShellAction
+	attach bool
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzshell.ShellActionParams) (*ShellDaemonPlugin, error) {
+func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzshell.ShellActionParams, attach bool) (*ShellDaemonPlugin, error) {
 	shellDaemonPlugin := ShellDaemonPlugin{
 		tmb:             parentTmb,
 		logger:          logger,
 		streamInputChan: make(chan smsg.StreamMessage, 25),
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
+		attach:          attach,
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
@@ -77,7 +80,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzshell.Shell
 	}()
 
 	// Start the shell action
-	if err := shellDaemonPlugin.action.Start(shellDaemonPlugin.tmb); err != nil {
+	if err := shellDaemonPlugin.action.Start(shellDaemonPlugin.tmb, attach); err != nil {
 		return &shellDaemonPlugin, fmt.Errorf("Error starting the shell action: %s", err)
 	}
 
@@ -127,7 +130,13 @@ func (s *ShellDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []b
 
 func (s *ShellDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
 	s.logger.Infof("Shell plugin received keysplitting message with action: %s", action)
-	return nil
+
+	switch action {
+	case string(shell.ShellReplay):
+		return s.action.Replay(actionPayload)
+	default:
+		return nil
+	}
 }
 
 func (s *ShellDaemonPlugin) Feed(food interface{}) error {
