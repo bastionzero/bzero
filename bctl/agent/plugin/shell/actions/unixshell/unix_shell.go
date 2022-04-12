@@ -38,32 +38,23 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
-// ShellPlugin - Allows launching an interactive shell on the host which the agent is running on.
+// UnixShell - Allows launching an interactive shell on the host which the agent is running on. Implements IShellAction
 //
 //   New - Configures the shell including setting the RunAsUser but doesn't launch it
 //   Receive - receives MRZAP actions and dispatches them to the correct methods
 //
-//		Current shell actions
-// 			ShellOpen   KeysplittingAction = "shell/open"
-// 			ShellClose  KeysplittingAction = "shell/close"
-// 			ShellInput  KeysplittingAction = "shell/input"
-// 			ShellResize KeysplittingAction = "shell/resize"
-// 			FudDownload KeysplittingAction = "fud/download" -- Not currently implemented
-// 			FudUpload   KeysplittingAction = "fud/upload" -- Not currently implemented
-// 		 		- sourced from https://github.com/bastionzero/bzero-ssm-agent/blob/bzero-dev/agent/keysplitting/contracts/model.go#L106
-//
 //  User interaction works as follows:
-//  	user keypresses --> DataChannel --> plugin.Receive(shell/input) --> p.ShellInput(..) --> pty.stdIn
+//  	user keypresses --> DataChannel --> plugin.Receive(shell/input) --> p.action.Receive(shell/input) -> p.ShellInput(..) --> pty.stdIn
 //  	user terminal <-- streamOutputChan <-- p.writePump(...) <-- pty.stdOut <-- terminal output
 //
-// We follow a pattern of wrapping the pty functions in ShellPlugin
-// 		plugin.open --> pty.Start() Creates New pty
-// 		plugin.setSize --> pty.SetSize() ReSizes the pty
-//  	plugin.shellInput --> pty.stdIn
-//		plugin.close --> pty.ptyfile.close()
+// We follow a pattern of wrapping the pty functions in UnixShell
+// 		open --> pty.Start() Creates New pty
+// 		setSize --> pty.SetSize() ReSizes the pty
+//  	shellInput --> pty.stdIn
+//		close --> pty.ptyfile.close()
 //
-//		This should allow use to mock at the level of the ShellPlugin since none of the pty details are exposed
-type ShellPlugin struct {
+//		This should allow use to mock at the level of the UnixShell since none of the pty details are exposed
+type UnixShell struct {
 	tmb              *tomb.Tomb // datachannel's tomb
 	logger           *logger.Logger
 	stdin            *os.File
@@ -76,13 +67,13 @@ type ShellPlugin struct {
 	stdoutbuffMutex  sync.Mutex
 }
 
-// New returns a new instance of the Shell Plugin
+// New returns a new instance of the UnixShell
 func New(
 	parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
-	runAsUser string) (*ShellPlugin, error) {
-	var plugin = ShellPlugin{
+	runAsUser string) (*UnixShell, error) {
+	var unixShell = UnixShell{
 		runAsUser:        runAsUser,
 		shellStarted:     false,
 		logger:           logger,
@@ -90,11 +81,11 @@ func New(
 		streamOutputChan: ch,
 	}
 
-	return &plugin, nil
+	return &unixShell, nil
 }
 
 // Receive takes input from a client using the MRZAP datachannel and returns output via the MRZAP datachannel
-func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (k *UnixShell) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	k.logger.Infof("Plugin received Data message with %v action", action)
 
 	switch bzshell.ShellSubAction(action) {
@@ -169,7 +160,7 @@ func (k *ShellPlugin) Receive(action string, actionPayload []byte) (string, []by
 }
 
 // Ready returns if the shell is running and can be interacted with
-func (k *ShellPlugin) Ready() bool {
+func (k *UnixShell) Ready() bool {
 	return !(k.stdin == nil || k.stdout == nil)
 }
 
@@ -177,12 +168,12 @@ var startPty = func(
 	logger *logger.Logger,
 	runAsUser string,
 	commands string,
-	plugin *ShellPlugin) (err error) {
+	plugin *UnixShell) (err error) {
 
 	return StartPty(logger, runAsUser, commands, plugin)
 }
 
-func (k *ShellPlugin) open() error {
+func (k *UnixShell) open() error {
 	// If this method "open" is called twice is means something has gone very
 	//  wrong and failing early is the safest action.
 	if k.shellStarted {
@@ -218,7 +209,7 @@ func (k *ShellPlugin) open() error {
 }
 
 // ctose closes pty file
-func (k *ShellPlugin) close() (err error) {
+func (k *UnixShell) close() (err error) {
 	k.logger.Info("Stopping pty")
 	if err := ptyFile.Close(); err != nil {
 		if err, ok := err.(*os.PathError); ok && err.Err != os.ErrClosed {
@@ -229,7 +220,7 @@ func (k *ShellPlugin) close() (err error) {
 }
 
 // shellInput passes payload byte stream to shell stdin
-func (k *ShellPlugin) shellInput(shellInput bzshell.ShellInputMessage) error {
+func (k *UnixShell) shellInput(shellInput bzshell.ShellInputMessage) error {
 	if !k.Ready() {
 		// This is to handle scenario when cli/console starts sending size data but pty has not been started yet
 		// Since packets are rejected, cli/console will resend these packets until pty starts successfully in separate thread
@@ -247,7 +238,7 @@ func (k *ShellPlugin) shellInput(shellInput bzshell.ShellInputMessage) error {
 }
 
 // setSize resizes the pseudo-terminal pty
-func (k *ShellPlugin) setSize(cols, rows uint32) (err error) {
+func (k *UnixShell) setSize(cols, rows uint32) (err error) {
 	k.logger.Debugf("Pty Resize data received: cols: %d, rows: %d", cols, rows)
 	if err := SetSize(k.logger, cols, rows); err != nil {
 		k.logger.Errorf("Unable to set pty size: %s", err)
@@ -257,7 +248,7 @@ func (k *ShellPlugin) setSize(cols, rows uint32) (err error) {
 }
 
 // writePump reads from pty stdout and writes to data channel.
-func (k *ShellPlugin) writePump(logger *logger.Logger) int {
+func (k *UnixShell) writePump(logger *logger.Logger) int {
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Println("WritePump thread crashed with message: \n", err)
@@ -314,21 +305,5 @@ func (k *ShellPlugin) writePump(logger *logger.Logger) int {
 
 		// Wait for stdout to process more data
 		time.Sleep(time.Millisecond)
-	}
-}
-
-func cleanPayload(payload []byte) ([]byte, error) {
-	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
-	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
-	// so that we can murder its family
-	if len(payload) > 0 {
-		payload = payload[1 : len(payload)-1]
-	}
-
-	// Json unmarshalling encodes bytes in base64
-	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
-		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
-	} else {
-		return payloadSafe, nil
 	}
 }

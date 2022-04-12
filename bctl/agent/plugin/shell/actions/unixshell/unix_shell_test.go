@@ -41,7 +41,7 @@ func StreamMessageToString(t *testing.T, msg smsg.StreamMessage) string {
 	return string(msgbyte)
 }
 
-func SpawnTerminal(t *testing.T, streamOutputChan chan smsg.StreamMessage) *ShellPlugin {
+func SpawnTerminal(t *testing.T, streamOutputChan chan smsg.StreamMessage) *UnixShell {
 	subLogger := testutils.MockLogger().GetPluginLogger(string("unittest shell"))
 	testshelluser := testutils.GetRunAsUser(t)
 	var tmb tomb.Tomb
@@ -71,7 +71,7 @@ func SpawnTerminal(t *testing.T, streamOutputChan chan smsg.StreamMessage) *Shel
 	return plugin
 }
 
-func SendResize(t *testing.T, plugin *ShellPlugin, rows uint32, cols uint32) {
+func SendResize(t *testing.T, plugin *UnixShell, rows uint32, cols uint32) {
 	action := "shell/resize"
 
 	resizePayload, _ := json.Marshal(bzshell.ShellResizeMessage{
@@ -88,7 +88,7 @@ func SendResize(t *testing.T, plugin *ShellPlugin, rows uint32, cols uint32) {
 	assert.NotEmpty(t, respstr)
 }
 
-func SendReplay(t *testing.T, plugin *ShellPlugin) []byte {
+func SendReplay(t *testing.T, plugin *UnixShell) []byte {
 	action := "shell/replay"
 
 	replayPayload, _ := json.Marshal(bzshell.ShellReplayMessage{})
@@ -104,7 +104,7 @@ func SendReplay(t *testing.T, plugin *ShellPlugin) []byte {
 	return respbytes
 }
 
-func SendClose(t *testing.T, plugin *ShellPlugin) {
+func SendClose(t *testing.T, plugin *UnixShell) {
 	action := "shell/close"
 
 	closePayload, _ := json.Marshal(bzshell.ShellCloseMessage{})
@@ -118,7 +118,7 @@ func SendClose(t *testing.T, plugin *ShellPlugin) {
 	assert.NotEmpty(t, respstr)
 }
 
-func SendToStdIn(t *testing.T, plugin *ShellPlugin, stdinstr string) {
+func SendToStdIn(t *testing.T, plugin *UnixShell, stdinstr string) {
 	action := "shell/input"
 
 	inputPayload, _ := json.Marshal(bzshell.ShellInputMessage{
