@@ -10,7 +10,6 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin"
 	plgn "bastionzero.com/bctl/v1/bctl/agent/plugin"
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
@@ -22,16 +21,6 @@ import (
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-)
-
-// Plugins this datachannel accepts
-type PluginName string
-
-const (
-	Kube  PluginName = "kube"
-	Db    PluginName = "db"
-	Web   PluginName = "web"
-	Shell PluginName = "shell"
 )
 
 type IKeysplitting interface {
@@ -46,7 +35,7 @@ type DataChannel struct {
 	tmb       tomb.Tomb
 	id        string
 
-	plugin       plugin.IPlugin
+	plugin       plgn.IPlugin
 	keysplitting IKeysplitting
 
 	// incoming and outgoing message channels
@@ -195,7 +184,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 
 				// Start plugin based on action
 				actionPrefix := parsedAction[0]
-				if err := d.startPlugin(PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
+				if err := d.startPlugin(plgn.PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
 					d.sendError(rrr.ComponentStartupError, err)
 					return
 				}
@@ -229,7 +218,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	}
 }
 
-func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload []byte) error {
+func (d *DataChannel) startPlugin(pluginName plgn.PluginName, action string, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	// create channel and listener and pass it to the new plugin
@@ -252,13 +241,13 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 	var err error
 
 	switch pluginName {
-	case Kube:
+	case plgn.Kube:
 		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
-	case Db:
+	case plgn.Db:
 		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
-	case Web:
+	case plgn.Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
-	case Shell:
+	case plgn.Shell:
 		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")

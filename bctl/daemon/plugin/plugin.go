@@ -4,6 +4,16 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
+// Plugins this datachannel accepts
+type PluginName string
+
+const (
+	Kube  PluginName = "kube"
+	Db    PluginName = "db"
+	Web   PluginName = "web"
+	Shell PluginName = "shell"
+)
+
 type IPlugin interface {
 	ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error)
 	ReceiveStream(smessage smsg.StreamMessage)

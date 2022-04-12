@@ -11,7 +11,7 @@ import (
 	tomb "gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin"
+	plgn "bastionzero.com/bctl/v1/bctl/daemon/plugin"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	shellplugin "bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
@@ -34,16 +34,6 @@ const (
 	maxRetries = 3
 )
 
-// Plugins this datachannel accepts
-type PluginName string
-
-const (
-	Kube  PluginName = "kube"
-	Db    PluginName = "db"
-	Web   PluginName = "web"
-	Shell PluginName = "shell"
-)
-
 type OpenDataChannelPayload struct {
 	Syn    []byte `json:"syn"`
 	Action string `json:"action"`
@@ -61,7 +51,7 @@ type DataChannel struct {
 	websocket    *websocket.Websocket
 	id           string // DataChannel's ID
 	ready        bool
-	plugin       plugin.IPlugin
+	plugin       plgn.IPlugin
 	keysplitting IKeysplitting
 	handshook    bool // bool to indicate if we have received a valid syn ack (initally set to false)
 	attach       bool // bool to indicate if we are attaching to an existing data channel
@@ -233,8 +223,8 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 
 	// start plugin based on name
 	subLogger := d.logger.GetPluginLogger(pluginName)
-	switch PluginName(pluginName) {
-	case Kube:
+	switch plgn.PluginName(pluginName) {
+	case plgn.Kube:
 		// Deserialize the action params
 		var kubeParams bzkube.KubeActionParams
 		if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
@@ -247,7 +237,7 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		} else {
 			d.plugin = plugin
 		}
-	case Db:
+	case plgn.Db:
 		// Deserialize the action params
 		var dbParams bzdb.DbActionParams
 		if err := json.Unmarshal(actionParams, &dbParams); err != nil {
@@ -260,7 +250,7 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		} else {
 			d.plugin = plugin
 		}
-	case Web:
+	case plgn.Web:
 		// Deserialize the action params
 		var webParams bzweb.WebActionParams
 		if err := json.Unmarshal(actionParams, &webParams); err != nil {
@@ -273,7 +263,7 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		} else {
 			d.plugin = plugin
 		}
-	case Shell:
+	case plgn.Shell:
 		// Deserialize the action params
 		var shellParams bzshell.ShellActionParams
 		if err := json.Unmarshal(actionParams, &shellParams); err != nil {
