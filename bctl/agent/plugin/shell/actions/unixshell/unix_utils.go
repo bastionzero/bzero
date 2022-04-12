@@ -195,11 +195,5 @@ func getUserCredentials(logger *logger.Logger, sessionUser string) (uint32, uint
 		}
 	}
 
-	// Make sure they are non-zero valid positive ids
-	// As user 'root' is by convention uid=0, gid=0 this disallows starting the terminal as root
-	if uid > 0 && gid > 0 {
-		return uint32(uid), uint32(gid), groupIds, nil
-	}
-
-	return 0, 0, nil, errors.New("invalid uid and gid")
+	return uint32(uid), uint32(gid), groupIds, nil
 }
