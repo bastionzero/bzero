@@ -51,7 +51,7 @@ func New(size int) *RingBuffer {
 }
 
 func (r *RingBuffer) sanitycheck() (err error) {
-	if r.start >= r.size {
+	if r.start > r.size {
 		return fmt.Errorf("Ringbuffer sanity check failed (start > size) start=%d, end=%d, size=%d", r.start, r.end, r.size)
 	}
 	if r.end > r.size {
