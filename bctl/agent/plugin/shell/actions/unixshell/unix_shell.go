@@ -55,16 +55,17 @@ import (
 //
 //		This should allow use to mock at the level of the UnixShell since none of the pty details are exposed
 type UnixShell struct {
-	tmb              *tomb.Tomb // datachannel's tomb
-	logger           *logger.Logger
-	stdin            *os.File
-	stdout           *os.File
-	execCmd          execcmd.IExecCmd
-	streamOutputChan chan smsg.StreamMessage
-	shellStarted     bool
-	runAsUser        string
-	stdoutbuff       *ringbuffer.RingBuffer
-	stdoutbuffMutex  sync.Mutex
+	tmb                  *tomb.Tomb // datachannel's tomb
+	logger               *logger.Logger
+	stdin                *os.File
+	stdout               *os.File
+	execCmd              execcmd.IExecCmd
+	streamOutputChan     chan smsg.StreamMessage
+	shellStarted         bool
+	runAsUser            string
+	stdoutbuff           *ringbuffer.RingBuffer
+	stdoutbuffMutex      sync.Mutex
+	streamSequenceNumber int
 }
 
 // New returns a new instance of the UnixShell
@@ -74,11 +75,12 @@ func New(
 	ch chan smsg.StreamMessage,
 	runAsUser string) (*UnixShell, error) {
 	var unixShell = UnixShell{
-		runAsUser:        runAsUser,
-		shellStarted:     false,
-		logger:           logger,
-		tmb:              parentTmb, // if datachannel dies, so should we
-		streamOutputChan: ch,
+		runAsUser:            runAsUser,
+		shellStarted:         false,
+		logger:               logger,
+		tmb:                  parentTmb, // if datachannel dies, so should we
+		streamOutputChan:     ch,
+		streamSequenceNumber: 1,
 	}
 
 	return &unixShell, nil
@@ -185,7 +187,7 @@ func (k *UnixShell) open() error {
 	// Catch that the tomb is dying and signal shell to close
 	go func() {
 		<-k.tmb.Dying()
-		k.logger.Errorf("shell plugin is terminating")
+		k.logger.Info("shell plugin is terminating")
 		if k.execCmd != nil {
 			if err := k.execCmd.Kill(); err != nil {
 				k.logger.Errorf("unable to terminate pty: %s", err)
@@ -264,22 +266,11 @@ func (k *UnixShell) writePump(logger *logger.Logger) int {
 	// Wait for all input commands to run.
 	time.Sleep(time.Second)
 
-	sequenceNumber := 1
-
 	for {
 		stdoutBytesLen, err := reader.Read(stdoutBytes)
 
 		if err != nil {
-			message := smsg.StreamMessage{
-				Type:           string(smsg.ShellQuit),
-				RequestId:      "shell", // not needed for shell because we aren't multiplexing sessions over a shared data channel
-				SequenceNumber: sequenceNumber,
-				Content:        "",
-				LogId:          "", // only used for kube plugin
-			}
-
-			k.streamOutputChan <- message
-			sequenceNumber++
+			k.sendStreamMessage(smsg.ShellQuit, "")
 
 			fmt.Println("WritePump failed when reading from stdout: \n", err)
 			logger.Errorf("Stacktrace:\n%s", debug.Stack())
@@ -292,18 +283,20 @@ func (k *UnixShell) writePump(logger *logger.Logger) int {
 
 		str := base64.StdEncoding.EncodeToString(stdoutBytes[:stdoutBytesLen])
 
-		message := smsg.StreamMessage{
-			Type:           string(smsg.ShellStdOut),
-			RequestId:      "shell", // not needed for shell because we aren't multiplexing sessions over a shared data channel
-			SequenceNumber: sequenceNumber,
-			Content:        str,
-			LogId:          "", // only used for kube plugin
-		}
-
-		k.streamOutputChan <- message
-		sequenceNumber++
+		k.sendStreamMessage(smsg.ShellStdOut, str)
 
 		// Wait for stdout to process more data
 		time.Sleep(time.Millisecond)
 	}
+}
+
+func (k *UnixShell) sendStreamMessage(streamType smsg.StreamType, content string) {
+	message := smsg.StreamMessage{
+		Type:           string(streamType),
+		SequenceNumber: k.streamSequenceNumber,
+		Content:        content,
+	}
+
+	k.streamOutputChan <- message
+	k.streamSequenceNumber++
 }
