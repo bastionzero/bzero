@@ -72,7 +72,9 @@ func (r *RingBuffer) sanitycheck() (err error) {
 }
 
 func (r *RingBuffer) Read(p []byte) (n int, err error) {
-	r.sanitycheck()
+	if err := r.sanitycheck(); err != nil {
+		return 0, err
+	}
 
 	// There are two cases:
 	if r.full == false {
