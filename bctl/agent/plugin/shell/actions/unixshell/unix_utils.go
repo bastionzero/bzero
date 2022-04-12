@@ -56,7 +56,7 @@ func StartPty(
 	logger *logger.Logger,
 	runAsUser string,
 	commandstr string,
-	plugin *ShellPlugin) (err error) {
+	plugin *UnixShell) (err error) {
 
 	logger.Info("Starting pty")
 	//Start the command with a pty
