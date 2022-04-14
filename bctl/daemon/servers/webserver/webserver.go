@@ -145,8 +145,11 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 	}
 
 	// create our new datachannel
-	if dc, err := w.newDataChannel(string(action), w.websocket); err == nil {
-		dc.Feed(food)
+	if dc, err := w.newDataChannel(string(action), w.websocket); err != nil {
+		w.logger.Error(err)
+	} else if err := dc.Feed(food); err != nil {
+		http.Error(writer, "BastionZero failed to establish connection with target. Please log in again.", http.StatusInternalServerError)
+		w.logger.Error(err)
 	} else {
 		w.logger.Errorf("error starting datachannel: %s", err)
 	}

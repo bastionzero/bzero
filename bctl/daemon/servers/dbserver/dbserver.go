@@ -115,7 +115,9 @@ func StartDbServer(logger *logger.Logger,
 					Action: bzdb.Dial,
 					Conn:   conn,
 				}
-				dc.Feed(food)
+				if err := dc.Feed(food); err != nil {
+					logger.Error(err)
+				}
 			} else {
 				logger.Errorf("error starting datachannel: %s", err)
 			}

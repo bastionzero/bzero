@@ -263,11 +263,10 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 		Reader:  r,
 	}
 
-	// create new datachannel and feed it kubectl handlers
-	if datachannel, err := h.newDataChannel(string(action), h.websocket); err == nil {
-		datachannel.Feed(food)
-	} else {
-		h.logger.Errorf("failed to provision new datachannel: %s", err)
+	if datachannel, err := h.newDataChannel(string(action), h.websocket); err != nil {
+		h.logger.Error(err)
+	} else if err := datachannel.Feed(food); err != nil {
+		h.logger.Error(err)
 	}
 }
 

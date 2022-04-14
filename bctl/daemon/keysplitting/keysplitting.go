@@ -93,8 +93,12 @@ func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
 
 func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 	// only recover from this error message if it corresponds to a message we've actually sent
-	if pair := k.pipelineMap.GetPair(errMessage.HPointer); pair == nil {
+	if errMessage.HPointer == "" {
+		return fmt.Errorf("error message hpointer empty, not recovering")
+	} else if pair := k.pipelineMap.GetPair(errMessage.HPointer); pair == nil {
 		return fmt.Errorf("agent error is not on a message sent by this datachannel")
+	} else if k.lastAck == nil {
+		return fmt.Errorf("daemon cannot recover from an error on initial syn")
 	}
 
 	if syn, err := k.BuildSyn("", []byte{}); err != nil {

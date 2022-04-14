@@ -150,8 +150,7 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 	case am.Keysplitting:
 		var ksMessage ksmsg.KeysplittingMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
-			rerr := fmt.Errorf("malformed Keysplitting message: %s", err)
-			d.sendError(rrr.KeysplittingValidationError, rerr)
+			d.sendError(rrr.KeysplittingValidationError, fmt.Errorf("malformed Keysplitting message: %s", err))
 		} else {
 			d.handleKeysplittingMessage(&ksMessage)
 		}
