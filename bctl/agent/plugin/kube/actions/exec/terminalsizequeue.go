@@ -6,7 +6,7 @@ import (
 )
 
 type TerminalSizeQueue struct {
-	execResizeChannel chan exec.KubeExecResizeActionPayload // pretty sure this needs to be buffered
+	execResizeChannel chan exec.KubeExecResizeActionPayload
 	RequestId         string
 }
 
