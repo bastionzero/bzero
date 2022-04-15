@@ -1,11 +1,8 @@
 package portforward
 
 import (
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -77,12 +74,12 @@ func New(logger *logger.Logger,
 	}, nil
 }
 
-func (a *PortForwardAction) Closed() bool {
-	return a.closed
+func (p *PortForwardAction) Closed() bool {
+	return p.closed
 }
 
-func (a *PortForwardAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	a.logger.Infof("PortForward Plugin received message with action: %s", action)
+func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	p.logger.Infof("PortForward Plugin received message with action: %s", action)
 	switch portforward.PortForwardSubAction(action) {
 
 	// Start portforward message required before anything else
@@ -90,46 +87,46 @@ func (a *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		var startPortForwardRequest portforward.KubePortForwardStartActionPayload
 		if err := json.Unmarshal(actionPayload, &startPortForwardRequest); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal start portforward message: %s", err)
-			a.logger.Error(rerr)
+			p.logger.Error(rerr)
 			return "", []byte{}, rerr
 		}
 
-		return a.startPortForward(startPortForwardRequest)
+		return p.startPortForward(startPortForwardRequest)
 	case portforward.DataInPortForward, portforward.ErrorInPortForward:
 		var dataInputAction portforward.KubePortForwardActionPayload
 		if err := json.Unmarshal(actionPayload, &dataInputAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling datain: %s", err)
-			a.logger.Error(rerr)
+			p.logger.Error(rerr)
 			return "", []byte{}, rerr
 		}
 
-		if err := kubeutils.MatchRequestId(dataInputAction.RequestId, a.requestId); err != nil {
-			a.logger.Error(err)
+		if err := kubeutils.MatchRequestId(dataInputAction.RequestId, p.requestId); err != nil {
+			p.logger.Error(err)
 			return "", []byte{}, err
 		}
 
 		// See if we already have a session for this portforwardRequestId, else create it
-		if oldRequest, ok := a.getRequestMap(dataInputAction.PortForwardRequestId); ok {
+		if oldRequest, ok := p.getRequestMap(dataInputAction.PortForwardRequestId); ok {
 			oldRequest.portforwardDataInChannel <- dataInputAction.Data
 		} else {
 			// Create a new action and update our map
-			subLogger := a.logger.GetActionLogger("kube/portforward/agent/request")
-			subLogger.AddRequestId(a.requestId)
+			subLogger := p.logger.GetActionLogger("kube/portforward/agent/request")
+			subLogger.AddRequestId(p.requestId)
 			newRequest := &PortForwardRequest{
 				logger:                    subLogger,
-				streamOutputChan:          a.streamOutputChan,
-				streamMessageVersion:      a.streamMessageVersion,
+				streamOutputChan:          p.streamOutputChan,
+				streamMessageVersion:      p.streamMessageVersion,
 				portforwardDataInChannel:  make(chan []byte),
 				portforwardErrorInChannel: make(chan []byte),
-				tmb:                       a.tmb,
+				tmb:                       p.tmb,
 				doneChan:                  make(chan bool),
 			}
-			if err := newRequest.openPortForwardStream(dataInputAction.PortForwardRequestId, a.DataHeaders, a.ErrorHeaders, a.targetUser, a.logId, a.requestId, a.Endpoint, dataInputAction.PodPort, a.targetGroups, a.streamCh); err != nil {
+			if err := newRequest.openPortForwardStream(dataInputAction.PortForwardRequestId, p.DataHeaders, p.ErrorHeaders, p.targetUser, p.logId, p.requestId, p.Endpoint, dataInputAction.PodPort, p.targetGroups, p.streamCh); err != nil {
 				rerr := fmt.Errorf("error opening stream for new portforward request: %s", err)
-				a.logger.Error(rerr)
+				p.logger.Error(rerr)
 				return "", []byte{}, rerr
 			}
-			a.updateRequestMap(newRequest, dataInputAction.PortForwardRequestId)
+			p.updateRequestMap(newRequest, dataInputAction.PortForwardRequestId)
 			newRequest.portforwardDataInChannel <- dataInputAction.Data
 		}
 
@@ -138,23 +135,23 @@ func (a *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		var stopRequestAction portforward.KubePortForwardStopRequestActionPayload
 		if err := json.Unmarshal(actionPayload, &stopRequestAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stop request: %s", err)
-			a.logger.Error(rerr)
+			p.logger.Error(rerr)
 			return "", []byte{}, rerr
 		}
 
 		// If we haven't recvied a start message, just leave
-		if err := kubeutils.MatchRequestId(stopRequestAction.RequestId, a.requestId); err != nil {
-			a.logger.Error(err)
+		if err := kubeutils.MatchRequestId(stopRequestAction.RequestId, p.requestId); err != nil {
+			p.logger.Error(err)
 			return string(portforward.StopPortForwardRequest), []byte{}, nil
 		}
 
 		// Alert on the done channel
-		if portForwardRequest, ok := a.getRequestMap(stopRequestAction.PortForwardRequestId); ok {
+		if portForwardRequest, ok := p.getRequestMap(stopRequestAction.PortForwardRequestId); ok {
 			portForwardRequest.doneChan <- true
 		}
 
 		// Else update our requestMap
-		a.deleteRequestMap(stopRequestAction.PortForwardRequestId)
+		p.deleteRequestMap(stopRequestAction.PortForwardRequestId)
 
 		return string(portforward.StopPortForwardRequest), []byte{}, nil
 	case portforward.StopPortForward:
@@ -162,113 +159,113 @@ func (a *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		var stopAction portforward.KubePortForwardStopActionPayload
 		if err := json.Unmarshal(actionPayload, &stopAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stop request: %s", err)
-			a.logger.Error(rerr)
+			p.logger.Error(rerr)
 			return "", []byte{}, rerr
 		}
-		a.logger.Infof("Stopping port forward action for requestId: %s", a.requestId)
+		p.logger.Infof("Stopping port forward action for requestId: %s", p.requestId)
 
-		if err := kubeutils.MatchRequestId(stopAction.RequestId, a.requestId); err != nil {
-			a.logger.Error(err)
+		if err := kubeutils.MatchRequestId(stopAction.RequestId, p.requestId); err != nil {
+			p.logger.Error(err)
 			return string(portforward.StopPortForward), []byte{}, nil
 		}
 
 		// Alert on our done channel
-		a.doneChan <- true
+		p.doneChan <- true
 
 		// Stop the streamch
-		if a.streamCh != nil {
-			a.streamCh.Close()
+		if p.streamCh != nil {
+			p.streamCh.Close()
 		}
 
 		// Set ourselves to closed so this object will get dereferenced
-		a.closed = true
+		p.closed = true
 
 		return string(portforward.StopPortForward), []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled portforward action: %v", action)
-		a.logger.Error(rerr)
+		p.logger.Error(rerr)
 		return "", []byte{}, rerr
 	}
 }
 
-func (a *PortForwardAction) startPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) (string, []byte, error) {
+func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) (string, []byte, error) {
 	// Update our object to keep track of the pod and url information
-	a.DataHeaders = startPortForwardRequest.DataHeaders
-	a.ErrorHeaders = startPortForwardRequest.ErrorHeaders
-	a.Endpoint = startPortForwardRequest.Endpoint
-	a.logId = startPortForwardRequest.LogId
-	a.doneChan = make(chan bool, 1)
+	p.DataHeaders = startPortForwardRequest.DataHeaders
+	p.ErrorHeaders = startPortForwardRequest.ErrorHeaders
+	p.Endpoint = startPortForwardRequest.Endpoint
+	p.logId = startPortForwardRequest.LogId
+	p.doneChan = make(chan bool, 1)
 
 	// keep track of who we're talking to
-	a.requestId = startPortForwardRequest.RequestId
-	a.logger.Infof("Setting request id: %s", a.requestId)
-	a.streamMessageVersion = startPortForwardRequest.StreamMessageVersion
-	a.logger.Infof("Setting stream message version: %s", a.streamMessageVersion)
+	p.requestId = startPortForwardRequest.RequestId
+	p.logger.Infof("Setting request id: %s", p.requestId)
+	p.streamMessageVersion = startPortForwardRequest.StreamMessageVersion
+	p.logger.Infof("Setting stream message version: %s", p.streamMessageVersion)
 
 	// Now make our stream chan
 	// Create the in-cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		rerr := fmt.Errorf("error creating in-custer config: %s", err)
-		a.logger.Error(rerr)
+		p.logger.Error(rerr)
 		return "", []byte{}, err
 	}
 
 	// Always ensure that our targetUser is set
-	if a.targetUser == "" {
+	if p.targetUser == "" {
 		rerr := fmt.Errorf("target user field is not set")
-		a.logger.Error(rerr)
+		p.logger.Error(rerr)
 		return "", []byte{}, err
 	}
 
 	// Add our impersonation information
 	config.Impersonate = rest.ImpersonationConfig{
-		UserName: a.targetUser,
-		Groups:   a.targetGroups,
+		UserName: p.targetUser,
+		Groups:   p.targetGroups,
 	}
-	config.BearerToken = a.serviceAccountToken
+	config.BearerToken = p.serviceAccountToken
 
 	// Start building our spdy stream
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
 		rerr := fmt.Errorf("error creating spdy RoundTripper: %s", err)
-		a.logger.Error(rerr)
+		p.logger.Error(rerr)
 		return "", []byte{}, err
 	}
 
 	hostIP := strings.TrimLeft(config.Host, "htps:/")
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "https", Path: a.Endpoint, Host: hostIP})
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "https", Path: p.Endpoint, Host: hostIP})
 
 	var readyMessageErr string
 	streamCh, protocolSelected, err := dialer.Dial(kubeutilsdaemon.PortForwardProtocolV1Name)
 	if err != nil {
 		rerr := fmt.Errorf("error dialing portforward spdy stream: %s", err)
-		a.logger.Error(rerr)
+		p.logger.Error(rerr)
 		readyMessageErr = err.Error()
 	} else {
-		a.logger.Infof("Dial successful. Selected protocol: %s", protocolSelected)
+		p.logger.Infof("Dial successful. Selected protocol: %s", protocolSelected)
 	}
 
-	switch a.streamMessageVersion {
+	switch p.streamMessageVersion {
 	// prior to 202204
 	case "":
-		a.sendReadyMessage(smsg.ReadyPortForward, readyMessageErr)
+		p.sendReadyMessage(smsg.ReadyPortForward, readyMessageErr)
 	default:
-		a.sendReadyMessage(smsg.Ready, readyMessageErr)
+		p.sendReadyMessage(smsg.Ready, readyMessageErr)
 	}
 
 	// Save the streamCh to use later
-	a.streamCh = streamCh
+	p.streamCh = streamCh
 
 	return string(portforward.StartPortForward), []byte{}, nil
 }
 
-func (a *PortForwardAction) sendReadyMessage(streamType smsg.StreamType, errorMessage string) {
-	a.streamOutputChan <- smsg.StreamMessage{
-		SchemaVersion:  a.streamMessageVersion,
+func (p *PortForwardAction) sendReadyMessage(streamType smsg.StreamType, errorMessage string) {
+	p.streamOutputChan <- smsg.StreamMessage{
+		SchemaVersion:  p.streamMessageVersion,
 		SequenceNumber: 0,
-		RequestId:      a.requestId,
-		LogId:          a.logId,
+		RequestId:      p.requestId,
+		LogId:          p.logId,
 		Action:         string(kubeaction.PortForward),
 		Type:           streamType,
 		Content:        errorMessage,
@@ -276,238 +273,21 @@ func (a *PortForwardAction) sendReadyMessage(streamType smsg.StreamType, errorMe
 }
 
 // Helper function so we avoid writing to this map at the same time
-func (a *PortForwardAction) updateRequestMap(newPortForwardRequest *PortForwardRequest, key string) {
-	a.requestMapLock.Lock()
-	a.requestMap[key] = newPortForwardRequest
-	a.requestMapLock.Unlock()
+func (p *PortForwardAction) updateRequestMap(newPortForwardRequest *PortForwardRequest, key string) {
+	p.requestMapLock.Lock()
+	p.requestMap[key] = newPortForwardRequest
+	p.requestMapLock.Unlock()
 }
 
-func (a *PortForwardAction) deleteRequestMap(key string) {
-	a.requestMapLock.Lock()
-	delete(a.requestMap, key)
-	a.requestMapLock.Unlock()
+func (p *PortForwardAction) deleteRequestMap(key string) {
+	p.requestMapLock.Lock()
+	delete(p.requestMap, key)
+	p.requestMapLock.Unlock()
 }
 
-func (a *PortForwardAction) getRequestMap(key string) (*PortForwardRequest, bool) {
-	a.requestMapLock.Lock()
-	defer a.requestMapLock.Unlock()
-	act, ok := a.requestMap[key]
+func (p *PortForwardAction) getRequestMap(key string) (*PortForwardRequest, bool) {
+	p.requestMapLock.Lock()
+	defer p.requestMapLock.Unlock()
+	act, ok := p.requestMap[key]
 	return act, ok
-}
-
-type PortForwardRequest struct {
-	tmb    *tomb.Tomb
-	logger *logger.Logger
-
-	// To send data/error to our portforward sessions
-	portforwardDataInChannel  chan []byte
-	portforwardErrorInChannel chan []byte
-
-	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan     chan smsg.StreamMessage
-	streamMessageVersion smsg.SchemaVersion
-
-	// Done channel so the go routines can communicate with eachother
-	doneChan chan bool
-}
-
-func (r *PortForwardRequest) openPortForwardStream(portforwardRequestId string, dataHeaders map[string]string, errorHeaders map[string]string, targetUser, logId, requestId, endpoint string, podPort int64, targetGroups []string, streamCh httpstream.Connection) error {
-	r.logger.Infof("Starting port forward connection for: %s on port: %d. PortforwardRequestId: %ss", endpoint, podPort, portforwardRequestId)
-
-	// Update our error headers to include the podPort
-	errorHeaders[kubeutilsdaemon.PortHeader] = fmt.Sprintf("%d", podPort)
-	errorHeaders[kubeutilsdaemon.PortForwardRequestIDHeader] = portforwardRequestId
-
-	// Create our two streams with the provided headers
-	// We purposely share the header object for data and error stream
-	headers := http.Header{}
-	for name, value := range errorHeaders {
-		headers.Add(name, value)
-	}
-	// Create our http.Header
-	errorStream, err := streamCh.CreateStream(headers)
-	if err != nil {
-		rerr := fmt.Errorf("error creating error stream: %s", err)
-		r.logger.Error(rerr)
-		return rerr
-	}
-
-	for name, value := range dataHeaders {
-		// Set so we override any error headers that were set
-		headers.Set(name, value)
-	}
-	// Create our http.Header
-	dataStream, err := streamCh.CreateStream(headers)
-	if err != nil {
-		rerr := fmt.Errorf("error creating data stream: %s", err)
-		r.logger.Error(rerr)
-		return rerr
-	}
-
-	// We need to set up two go routines for our data/error-in channel (i.e. coming from the user)
-	go func() {
-		for {
-			select {
-			case <-r.tmb.Dying():
-				return
-			case dataInMessage := <-r.portforwardDataInChannel:
-				// Make this request locally, and then return that info to the user
-				if _, err := io.Copy(dataStream, bytes.NewReader(dataInMessage)); err != nil {
-					r.logger.Error(fmt.Errorf("error writing to data stream: %s", err))
-					r.doneChan <- true
-					dataStream.Close()
-					return
-				}
-			}
-		}
-	}()
-
-	// For our error-in
-	go func() {
-		for {
-			select {
-			case <-r.tmb.Dying():
-				return
-			case errorInMessage := <-r.portforwardErrorInChannel:
-				// Make this request locally, and then return that info to the user
-				if _, err := io.Copy(errorStream, bytes.NewReader(errorInMessage)); err != nil {
-					r.logger.Error(fmt.Errorf("error writing to error stream: %s", err))
-
-					// Do not alert on anything
-					return
-				}
-			}
-		}
-	}()
-
-	// Set up a go routine to listen for to our dataStream and send to the client
-	go func() {
-		defer dataStream.Close()
-
-		// Keep track of seq number
-		dataSeqNumber := 0
-
-		for {
-			select {
-			case <-r.tmb.Dying():
-				return
-			default:
-				r.forwardStream(smsg.Data, dataStream, dataSeqNumber, portforwardRequestId, requestId, logId)
-				dataSeqNumber += 1
-			}
-		}
-	}()
-
-	// Setup a go routine for the error stream as well
-	go func() {
-		defer errorStream.Close()
-
-		// Keep track of seq number
-		errorSeqNumber := 0
-
-		for {
-			select {
-			case <-r.tmb.Dying():
-				return
-			default:
-				r.forwardStream(smsg.Error, errorStream, errorSeqNumber, portforwardRequestId, requestId, logId)
-				errorSeqNumber += 1
-			}
-		}
-	}()
-
-	// If we get a message on the done channel, set our bool to closed
-	go func() {
-		defer errorStream.Close()
-		defer dataStream.Close()
-		for {
-			select {
-			case <-r.tmb.Dying():
-				return
-			case <-r.doneChan:
-				return
-			}
-		}
-	}()
-
-	return nil
-}
-
-// NOTE: we don't need to use TypeV2 here because Portforward is broken on previous versions of bzero
-// thus, anyone using it at all is using the new version
-func (r *PortForwardRequest) forwardStream(
-	streamType smsg.StreamType,
-	stream httpstream.Stream,
-	sequenceNumber int,
-	portforwardRequestId string,
-	requestId string,
-	logId string,
-) {
-	buf := make([]byte, portforward.DataStreamBufferSize)
-	n, err := stream.Read(buf)
-	if err != nil {
-		if err != io.EOF {
-			rerr := fmt.Errorf("error reading data from data stream: %s", err)
-			r.logger.Error(rerr)
-		} else if streamType == smsg.Data {
-			content, err := r.wrapStreamMessageContent([]byte{}, portforwardRequestId)
-			if err != nil {
-				r.logger.Error(err)
-
-				// Alert on our done channel
-				r.doneChan <- true
-			}
-
-			// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
-			r.sendStreamMessage(sequenceNumber, requestId, logId, streamType, false, content)
-		}
-		r.doneChan <- true
-		return
-	}
-
-	// Send this data back to the bastion
-	content, err := r.wrapStreamMessageContent(buf[:n], portforwardRequestId)
-	if err != nil {
-		r.logger.Error(err)
-
-		// Alert on our done channel
-		r.doneChan <- true
-	}
-	// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
-	r.sendStreamMessage(sequenceNumber, requestId, logId, streamType, true, content)
-}
-
-func (r *PortForwardRequest) wrapStreamMessageContent(content []byte, portforwardRequestId string) (string, error) {
-	streamMessageToSend := portforward.KubePortForwardStreamMessageContent{
-		PortForwardRequestId: portforwardRequestId,
-		Content:              content,
-	}
-	streamMessageToSendBytes, err := json.Marshal(streamMessageToSend)
-	if err != nil {
-		rerr := fmt.Errorf("error marsheling stream message: %s", err)
-
-		return "", rerr
-	}
-
-	return base64.StdEncoding.EncodeToString(streamMessageToSendBytes), nil
-}
-
-func (r *PortForwardRequest) sendStreamMessage(
-	sequenceNumber int,
-	requestId string,
-	logId string,
-	streamType smsg.StreamType,
-	more bool,
-	content string,
-) {
-	r.streamOutputChan <- smsg.StreamMessage{
-		SchemaVersion:  r.streamMessageVersion,
-		SequenceNumber: sequenceNumber,
-		RequestId:      requestId,
-		LogId:          logId,
-		Action:         string(kubeaction.PortForward),
-		Type:           streamType,
-		More:           more,
-		Content:        content,
-	}
 }
