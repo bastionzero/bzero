@@ -10,7 +10,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	dbaction "bastionzero.com/bctl/v1/bzerolib/plugin/db"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/db/actions/dial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
@@ -201,7 +201,7 @@ func (d *Dial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType,
 	d.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  d.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		Action:         string(dbaction.Dial),
+		Action:         string(db.Dial),
 		Type:           streamType,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(toSendBytes),

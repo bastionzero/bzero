@@ -4,5 +4,5 @@ type StreamSubAction string
 
 const (
 	StreamStart StreamSubAction = "kube/stream/start"
-	StreamStop  StreamSubAction = "kube/stream/datain"
+	StreamStop  StreamSubAction = "kube/stream/stop"
 )
