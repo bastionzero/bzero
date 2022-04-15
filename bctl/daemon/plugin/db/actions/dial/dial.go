@@ -82,7 +82,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 						return
 
 						// again, might have gotten an old or new message depending on what we asked for
-					} else if streamMessage.Type == smsg.DbStreamEnd || streamMessage.Type == smsg.Stream {
+					} else if streamMessage.Type == smsg.DbStream || streamMessage.Type == smsg.Stream {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
