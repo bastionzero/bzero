@@ -50,7 +50,7 @@ func New(logger *logger.Logger, requestId string, outputChan chan plugin.ActionW
 	return action
 }
 
-func (w *WebWebsocketAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
+func (w *WebWebsocketAction) Start(writer http.ResponseWriter, request *http.Request) error {
 	// this action ends at the end of this function, in order to signal that to the parent plugin,
 	// we close the output channel which will close the go routine listening on it
 	defer close(w.doneChan)
@@ -88,7 +88,8 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 	defer conn.Close()
 
 	// Setup a go routine to stream data from the agent back to daemon
-	go func() {
+	w.tmb.Go(func() error {
+		defer conn.Close()
 		for {
 			incomingMessage := <-w.streamInputChan
 			// may be getting an old-fashioned or newfangled message, depending on what we asked for
@@ -106,7 +107,7 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 				w.logger.Errorf("unhandled stream type: %s", incomingMessage.Type)
 			}
 		}
-	}()
+	})
 
 	// Continuosly read
 	for {

@@ -23,7 +23,7 @@ type BZCertMetadata struct {
 type Keysplitting struct {
 	hPointer         string
 	expectedHPointer string
-	bzCert           BZCertMetadata // only for agent
+	bzCert           BZCertMetadata // only for one client
 	publickey        string
 	privatekey       string
 	idpProvider      string
@@ -58,6 +58,7 @@ func New(config IKeysplittingConfig) (*Keysplitting, error) {
 }
 
 func (k *Keysplitting) GetHpointer() string {
+	// hpointer is only used when building errors
 	return k.hPointer
 }
 
@@ -125,44 +126,20 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	default:
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}
+
+	k.hPointer = ksMessage.Hash()
 	return nil
 }
 
 func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
-	var responseMessage ksmsg.KeysplittingMessage
-
-	switch ksMessage.Type {
-	case ksmsg.Syn:
-		synPayload := ksMessage.KeysplittingPayload.(ksmsg.SynPayload)
-		if synAckPayload, hash, err := synPayload.BuildResponsePayload(actionPayload, k.publickey); err != nil {
-			return ksmsg.KeysplittingMessage{}, err
-		} else {
-			k.hPointer = hash
-			responseMessage = ksmsg.KeysplittingMessage{
-				Type:                ksmsg.SynAck,
-				KeysplittingPayload: synAckPayload,
-			}
-		}
-	case ksmsg.Data:
-		dataPayload := ksMessage.KeysplittingPayload.(ksmsg.DataPayload)
-		if dataAckPayload, hash, err := dataPayload.BuildResponsePayload(actionPayload, k.publickey); err != nil {
-			return ksmsg.KeysplittingMessage{}, err
-		} else {
-			k.hPointer = hash
-			responseMessage = ksmsg.KeysplittingMessage{
-				Type:                ksmsg.DataAck,
-				KeysplittingPayload: dataAckPayload,
-			}
-		}
-	}
-
-	hashBytes, _ := util.HashPayload(responseMessage.KeysplittingPayload)
-	k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
-
-	// Sign it and send it
-	if err := responseMessage.Sign(k.privatekey); err != nil {
-		return responseMessage, fmt.Errorf("could not sign payload: %v", err.Error())
+	if responseMessage, _, err := ksMessage.BuildUnsignedAck(actionPayload, k.publickey); err != nil {
+		return responseMessage, err
+	} else if err := responseMessage.Sign(k.privatekey); err != nil {
+		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
+	} else if hashBytes, ok := util.HashPayload(responseMessage.KeysplittingPayload); !ok {
+		return responseMessage, fmt.Errorf("could not hash payload")
 	} else {
+		k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
 		return responseMessage, nil
 	}
 }

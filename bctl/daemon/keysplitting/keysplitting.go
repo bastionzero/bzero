@@ -170,7 +170,6 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			}
 			k.outOfOrderAcks[hpointer] = ksMessage
 		} else {
-			k.logger.Infof("SETTING LAST ACK TO %s", ksMessage.Type)
 			k.lastAck = ksMessage
 			k.pipelineMap.Delete(hpointer)
 			k.processOutOfOrderAcks()
@@ -208,6 +207,10 @@ func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
 func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	var ack *ksmsg.KeysplittingMessage
 
+	if action == "" {
+		return fmt.Errorf("can't build keysplitting message with empty action")
+	}
+
 	// get the ack we're going to be building our new message off of
 	if pair := k.pipelineMap.Newest(); pair == nil {
 
@@ -220,7 +223,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	} else {
 
 		// otherwise, we're going to need to predict the ack we're building off of
-		ksMessage := pair.Value.(*ksmsg.KeysplittingMessage)
+		ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
 		if newAck, _, err := ksMessage.BuildUnsignedAck([]byte{}, k.agentPubKey); err != nil {
 			return fmt.Errorf("failed to predict ack: %s", err)
 		} else {

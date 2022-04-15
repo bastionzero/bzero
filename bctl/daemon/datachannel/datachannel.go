@@ -28,7 +28,8 @@ const (
 	// amount of time we're willing to wait for our first keysplitting message
 	handshakeTimeout = 20 * time.Second
 
-	// maximum amount of time we want to keep this datachannel alive
+	// maximum amount of time we want to keep this datachannel alive after
+	// neither receiving nor sending anything
 	datachannelLifetime = 7 * 24 * time.Hour
 )
 
@@ -119,6 +120,8 @@ func New(logger *logger.Logger,
 		inputChan:   make(chan am.AgentMessage, 25),
 		ksInputChan: make(chan am.AgentMessage, 25),
 		ignoreMrZAP: false,
+
+		errorRecoveryAttempt: 0,
 
 		// onDeck:      bzplugin.ActionWrapper{},
 		// lastMessage: bzplugin.ActionWrapper{},
@@ -238,8 +241,10 @@ func New(logger *logger.Logger,
 		}
 	})
 
-	dc.sendKeysplitting()
-	dc.processPluginOutput()
+	go dc.sendKeysplitting()
+	go dc.zapPluginOutput()
+
+	dc.logger.Info("CREATED DATACHANNEL")
 
 	return dc, &dc.tmb, nil
 }
@@ -286,7 +291,7 @@ func (d *DataChannel) sendKeysplitting() error {
 	}
 }
 
-func (d *DataChannel) processPluginOutput() error {
+func (d *DataChannel) zapPluginOutput() error {
 	for {
 		select {
 		case <-d.tmb.Dying():
@@ -348,12 +353,13 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 	// start plugin based on name
 	// pluginName := parsePluginName(action)
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
+
 	switch pluginName {
 	// case Kube:
 	// 	// Deserialize the action params
 	// 	var kubeParams bzkube.KubeActionParams
 	// 	if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
-	// 		return fmt.Errorf("error deserializing actions params")
+	// 		return fmt.Errorf("error deserializing kube params")
 	// 	} else if d.plugin, err = kube.New(&d.tmb, subLogger, kubeParams); err != nil {
 	// 		return fmt.Errorf("could not start kube daemon plugin: %s", err)
 	// 	}
@@ -361,16 +367,16 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 		// Deserialize the action params
 		var dbParams bzdb.DbActionParams
 		if err := json.Unmarshal(actionParams, &dbParams); err != nil {
-			return fmt.Errorf("error deserializing actions params")
+			return fmt.Errorf("error deserializing db params")
 		} else if d.plugin, err = db.New(&d.tmb, subLogger, dbParams); err != nil {
 			return fmt.Errorf("could not start db daemon plugin: %s", err)
 		}
-	case bzplugin.Kube:
+	case bzplugin.Web:
 		// Deserialize the action params
-		var kubeParams bzkube.KubeActionParams
-		if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
-			return fmt.Errorf("error deserializing actions params")
-		} else if d.plugin, err = web.New(&d.tmb, subLogger, webParams); err != nil {
+		var webParams bzweb.WebActionParams
+		if err := json.Unmarshal(actionParams, &webParams); err != nil {
+			return fmt.Errorf("error deserializing web params")
+		} else if d.plugin, err = web.New(subLogger, webParams); err != nil {
 			return fmt.Errorf("could not start web daemon plugin: %s", err)
 		}
 	// case bzplugin.Shell:
@@ -387,9 +393,10 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 	// 		d.plugin = plugin
 	// 	}
 	default:
-		return fmt.Errorf("unrecognized plugin passed to datachannel: %s", pluginName)
+		return fmt.Errorf("unrecognized plugin: %s", pluginName)
 	}
 
+	d.logger.Infof("Started %v plugin", pluginName)
 	return nil
 }
 
@@ -404,6 +411,7 @@ func parsePluginName(action string) bzplugin.PluginName {
 }
 
 func (d *DataChannel) Feed(data interface{}) error {
+	d.logger.Info("TRYING TO EAT SOMETHING")
 	if d.tmb.Err() != tomb.ErrStillAlive {
 		return fmt.Errorf("could not feed plugin because datachannel is dead")
 	}

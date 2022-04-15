@@ -12,8 +12,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-
-	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -21,7 +19,6 @@ const (
 )
 
 type WebDialAction struct {
-	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	requestId string
@@ -32,6 +29,9 @@ type WebDialAction struct {
 
 	// done channel for letting the plugin know we're done
 	doneChan chan struct{}
+
+	// channel for telling the action to stop
+	stopChan chan struct{}
 
 	// keep track of our expected streams
 	expectedSequenceNumber int
@@ -62,11 +62,12 @@ func (w *WebDialAction) Done() <-chan struct{} {
 }
 
 func (w *WebDialAction) Stop() {
-	w.tmb.Kill(fmt.Errorf("i was told to stop")) // kills all datachannel, plugin, and action goroutines
-	w.tmb.Wait()
+	w.logger.Info("Stopping")
+	close(w.stopChan)
+	<-w.doneChan
 }
 
-func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
+func (w *WebDialAction) Start(writer http.ResponseWriter, request *http.Request) error {
 	// Build the action payload to start the web action dial
 	payload := bzwebdial.WebDialActionPayload{
 		RequestId:            w.requestId,
@@ -103,7 +104,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	// Listen to stream messages coming from bastion, and forward to our local connection
 	for {
 		select {
-		case <-w.tmb.Dying():
+		case <-w.stopChan:
 			return nil
 		case <-request.Context().Done():
 			// only send one interrupt message to the agent
@@ -231,6 +232,5 @@ func (w *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) 
 }
 
 func (w *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {
-	w.logger.Debugf("web dial action received %v stream", smessage.Type)
 	w.streamInputChan <- smessage
 }

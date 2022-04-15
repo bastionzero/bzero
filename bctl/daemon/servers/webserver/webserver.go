@@ -145,14 +145,14 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 	}
 
 	// create our new datachannel
+	w.logger.Info("CREATING NEW DATACHANNEL")
 	if dc, err := w.newDataChannel(string(action), w.websocket); err != nil {
-		w.logger.Error(err)
+		w.logger.Errorf("error starting datachannel: %s", err)
 	} else if err := dc.Feed(food); err != nil {
 		http.Error(writer, "BastionZero failed to establish connection with target. Please log in again.", http.StatusInternalServerError)
 		w.logger.Error(err)
-	} else {
-		w.logger.Errorf("error starting datachannel: %s", err)
 	}
+	w.logger.Info("TRIED TO FEED")
 }
 
 // for creating new websockets
@@ -180,17 +180,12 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 		RemotePort: w.targetPort,
 		RemoteHost: w.targetHost,
 	}
-
-	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
-	if marshalErr != nil {
-		w.logger.Error(fmt.Errorf("error marshalling action params for web"))
-		return nil, marshalErr
-	}
-
 	action = "web/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, w.refreshTokenCommand, w.configPath, action, actionParamsMarshalled, w.agentPubKey, attach); err != nil {
-		w.logger.Error(err)
-		return datachannel, err
+
+	if actionParamsMarshalled, err := json.Marshal(actionParams); err != nil {
+		return nil, fmt.Errorf("error marshalling action params for web")
+	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, w.refreshTokenCommand, w.configPath, action, actionParamsMarshalled, w.agentPubKey, attach); err != nil {
+		return nil, err
 	} else {
 
 		// create a function to listen to the datachannel dying and then laugh
@@ -211,7 +206,6 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 						MessageType: string(am.CloseDataChannel),
 					}
 					w.websocket.Send(cdMessage)
-
 					return
 				}
 			}

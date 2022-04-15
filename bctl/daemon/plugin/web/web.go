@@ -18,18 +18,17 @@ import (
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IWebDaemonAction interface {
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(tmb *tomb.Tomb, Writer http.ResponseWriter, Request *http.Request) error
+	Start(Writer http.ResponseWriter, Request *http.Request) error
 	Done() <-chan struct{}
 	Stop()
 }
 
 type WebDaemonPlugin struct {
-	tmb    *tomb.Tomb
+	tmb    tomb.Tomb
 	logger *logger.Logger
 
-	// Input and output channels
-	streamInputChan chan smsg.StreamMessage
-	outputQueue     chan plugin.ActionWrapper
+	// keysplitting output
+	outputQueue chan plugin.ActionWrapper
 
 	// Channel for letting the datachannel know we're done
 	doneChan chan struct{}
@@ -44,15 +43,11 @@ type WebDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(parentTmb *tomb.Tomb,
-	logger *logger.Logger,
-	actionParams bzweb.WebActionParams) (*WebDaemonPlugin, error) {
+func New(logger *logger.Logger, actionParams bzweb.WebActionParams) (*WebDaemonPlugin, error) {
 	plugin := WebDaemonPlugin{
-		tmb:    parentTmb,
 		logger: logger,
 
-		streamInputChan: make(chan smsg.StreamMessage, 25),
-		outputQueue:     make(chan plugin.ActionWrapper),
+		outputQueue: make(chan plugin.ActionWrapper, 1),
 
 		doneChan: make(chan struct{}),
 
@@ -61,19 +56,6 @@ func New(parentTmb *tomb.Tomb,
 
 		sequenceNumber: 0,
 	}
-
-	// listener for processing any incoming stream messages, since they are not treated as part of
-	// the keysplitting synchronous chain
-	go func() {
-		for {
-			select {
-			case <-plugin.tmb.Dying():
-				return
-			case streamMessage := <-plugin.streamInputChan:
-				plugin.processStream(streamMessage)
-			}
-		}
-	}()
 
 	return &plugin, nil
 }
@@ -87,29 +69,24 @@ func (w *WebDaemonPlugin) Done() <-chan struct{} {
 }
 
 func (w *WebDaemonPlugin) Stop() {
-	if w.action == nil {
-		return
-	} else {
+	if w.action != nil {
+		w.tmb.Kill(fmt.Errorf("we were told to stop"))
 		w.action.Stop()
 	}
 }
 
 func (w *WebDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
-	w.logger.Debugf("Web dial action received %v stream", smessage.Type)
-	w.streamInputChan <- smessage
-}
-
-func (w *WebDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
+	// w.logger.Debugf("Web received %v", smessage.Type)
 	if w.action != nil {
 		w.action.ReceiveStream(smessage)
-		return nil
 	} else {
-		return fmt.Errorf("web plugin received stream message before an action was created. Ignoring")
+		w.logger.Errorf("web plugin received stream message before an action was created. Ignoring")
 	}
 }
 
 func (w *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) error {
-	w.logger.Debugf("Received a keysplitting message with action: %s", action)
+	w.logger.Debugf("Received %s keysplitting message", action)
+
 	// the only keysplitting message that we would receive is the ack for our web action interrupt
 	// we don't do anything with it on the daemon side, so we receive it here and it will get logged
 	// but no particular action will be taken
@@ -153,7 +130,7 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 	w.logger.Infof("Web plugin created a %s action", string(webFood.Action))
 
 	// send local tcp connection to action
-	if err := w.action.Start(w.tmb, webFood.Writer, webFood.Request); err != nil {
+	if err := w.action.Start(webFood.Writer, webFood.Request); err != nil {
 		w.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
 	}
 

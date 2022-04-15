@@ -41,6 +41,15 @@ type KeysplittingMessage struct {
 	Signature           string                  `json:"signature"`
 }
 
+func (k *KeysplittingMessage) Hash() string {
+	// grab the hash of the keysplitting message
+	if _, hash, err := k.BuildUnsignedAck([]byte{}, ""); err != nil {
+		return ""
+	} else {
+		return hash
+	}
+}
+
 func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (KeysplittingMessage, string, error) {
 	switch msg := k.KeysplittingPayload.(type) {
 	case SynPayload:

@@ -23,7 +23,7 @@ const (
 
 type DialAction struct {
 	logger    *logger.Logger
-	tmb       *tomb.Tomb
+	tmb       tomb.Tomb
 	requestId string
 
 	// input and output channels relative to this plugin

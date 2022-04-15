@@ -128,6 +128,7 @@ func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMe
 
 func (d *DataChannel) sendError(errType rrr.ErrorType, err error) {
 	d.logger.Error(err)
+
 	errMsg := rrr.ErrorMessage{
 		Type:     string(errType),
 		Message:  err.Error(),
