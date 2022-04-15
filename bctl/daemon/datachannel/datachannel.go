@@ -42,8 +42,10 @@ type IKeysplitting interface {
 	BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error)
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
 	Recover(errorMessage rrr.ErrorMessage) error
+	Recovering() bool
 	Inbox(action string, actionPayload []byte) error
 	Outbox() <-chan *ksmsg.KeysplittingMessage
+	Release()
 }
 
 type IPlugin interface {
@@ -135,7 +137,6 @@ func New(logger *logger.Logger,
 		// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
 		logger.Info("Sending request to agent to open a new datachannel")
 		if err := dc.openDataChannel(action, actionParams); err != nil {
-			logger.Error(err)
 			return nil, &tomb.Tomb{}, err
 		}
 	} else {
@@ -150,86 +151,34 @@ func New(logger *logger.Logger,
 
 	// start our plugin
 	if err := dc.startPlugin(pluginName, actionParams); err != nil {
-		logger.Error(err)
 		return nil, &tomb.Tomb{}, err
 	}
 
 	dc.tmb.Go(func() error {
 		defer websocket.Unsubscribe(id) // causes decoupling from websocket
+		defer dc.logger.Infof("closing datachannel and its subsidiaries: %s", dc.tmb.Err())
+		defer dc.logger.Info("DONE WITH MAIN GO ROUTINE")
 
 		dc.tmb.Go(dc.processIncomingKeysplitting)
-		// dc.tmb.Go(dc.sendKeysplitting)
-		// dc.tmb.Go(dc.processPluginOutput)
-		// dc.tmb.Go(func() error {
-		// 	// wait initial syn/ack is received or timeout
-		// 	select {
-		// 	case <-dc.tmb.Dying():
-		// 		dc.logger.Infof("WE KNOW THE DATACHANNEL'S DYING")
-		// 		return nil
-		// 	case ksMessage := <-dc.ksInputChan:
-		// 		if err := dc.handleKeysplitting(ksMessage); err != nil {
-		// 			dc.logger.Error(err)
-		// 		}
-		// 	case <-time.After(handshakeTimeout):
-		// 		return fmt.Errorf("handshake timed out")
-		// 	}
-
-		// 	for {
-		// 		select {
-		// 		case <-dc.tmb.Dying():
-		// 			return nil
-		// 		case ksMessage := <-dc.ksInputChan:
-		// 			if err := dc.handleKeysplitting(ksMessage); err != nil {
-		// 				dc.logger.Error(err)
-		// 			}
-		// 		}
-		// 	}
-		// })
-
-		// dc.tmb.Go(func() error {
-		// 	for {
-		// 		select {
-		// 		case <-dc.tmb.Dying():
-		// 			dc.logger.Info("KEYSPLITTING OUTBOX THREAD DONE")
-		// 			return nil
-		// 		case ksMessage := <-dc.keysplitting.Outbox():
-		// 			dc.logger.Infof("WE'RE SENDING SOME OUTPUT")
-		// 			if ksMessage.Type == ksmsg.Syn {
-		// 				dc.sendks = true
-		// 			}
-		// 			if dc.sendks {
-		// 				dc.send(am.Keysplitting, ksMessage)
-		// 			}
-		// 		}
-		// 	}
-		// })
-
-		// dc.tmb.Go(func() error {
-		// 	for {
-		// 		select {
-		// 		case <-dc.tmb.Dying():
-		// 			dc.logger.Info("PLUGIN OUTBOX THREAD DONE")
-		// 			return nil
-		// 		case wrapper := <-dc.plugin.Outbox():
-		// 			dc.logger.Infof("PLUGIN OUTPUT HEADED FOR KEYSPLITTING")
-		// 			// Build and send response
-		// 			if err := dc.keysplitting.Inbox(wrapper.Action, wrapper.ActionPayload); err != nil {
-		// 				dc.logger.Errorf("could not build response message: %s", err)
-		// 			}
-		// 		}
-		// 	}
-		// })
 
 		for {
 			select {
 			case <-parentTmb.Dying(): // daemon is dying
 				return fmt.Errorf("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
-				dc.logger.Infof("Killing datachannel and its subsidiaries because %s", dc.tmb.Err())
 				dc.plugin.Stop()
 				return nil
 			case <-dc.plugin.Done():
-				return fmt.Errorf("datachannel's sole action is closed")
+
+				// this is my dumb way of waiting for all incoming messages to process before dying
+				select {
+				case agentMessage := <-dc.inputChan: // receive messages
+					if err := dc.processInput(agentMessage); err != nil {
+						dc.logger.Error(err)
+					}
+				case <-time.After(2 * time.Second):
+					return fmt.Errorf("datachannel's sole plugin is closed")
+				}
 			case agentMessage := <-dc.inputChan: // receive messages
 				if err := dc.processInput(agentMessage); err != nil {
 					dc.logger.Error(err)
@@ -241,15 +190,42 @@ func New(logger *logger.Logger,
 		}
 	})
 
+	// go dc.processIncomingKeysplitting()
 	go dc.sendKeysplitting()
 	go dc.zapPluginOutput()
-
-	dc.logger.Info("CREATED DATACHANNEL")
 
 	return dc, &dc.tmb, nil
 }
 
+// func (d *DataChannel) processIncomingKeysplitting() {
+// 	defer d.logger.Info("DONE WITH PROCESS INCOMING KEYSPLITTING")
+// 	// wait initial syn/ack is received or timeout
+// 	select {
+// 	case <-d.tmb.Dying():
+// 		return
+// 	case ksMessage := <-d.ksInputChan:
+// 		if err := d.handleKeysplitting(ksMessage); err != nil {
+// 			d.logger.Error(err)
+// 		}
+// 	case <-time.After(handshakeTimeout):
+// 		d.Close(fmt.Errorf("handshake timed out"))
+// 		return
+// 	}
+
+// 	for {
+// 		select {
+// 		case <-d.tmb.Dying():
+// 			return
+// 		case ksMessage := <-d.ksInputChan:
+// 			if err := d.handleKeysplitting(ksMessage); err != nil {
+// 				d.logger.Error(err)
+// 			}
+// 		}
+// 	}
+// }
+
 func (d *DataChannel) processIncomingKeysplitting() error {
+	defer d.logger.Info("DONE WITH PROCESS INCOMING KEYSPLITTING")
 	// wait initial syn/ack is received or timeout
 	select {
 	case <-d.tmb.Dying():
@@ -275,23 +251,28 @@ func (d *DataChannel) processIncomingKeysplitting() error {
 }
 
 func (d *DataChannel) sendKeysplitting() error {
+	defer d.logger.Info("DONE WITH SEND KEYSPLITTING")
 	for {
 		select {
 		case <-d.tmb.Dying():
+			d.keysplitting.Release()
 			return nil
 		case ksMessage := <-d.keysplitting.Outbox():
 			d.logger.Infof("WE'RE SENDING SOME OUTPUT")
 			if ksMessage.Type == ksmsg.Syn {
+				// d.handshook = false
 				d.ignoreMrZAP = false
 			}
 			if !d.ignoreMrZAP {
 				d.send(am.Keysplitting, ksMessage)
 			}
 		}
+		// time.Sleep(1 * time.Second)
 	}
 }
 
 func (d *DataChannel) zapPluginOutput() error {
+	defer d.logger.Info("DONE WITH ZAP PLUGIN OUTPUT")
 	for {
 		select {
 		case <-d.tmb.Dying():
@@ -368,7 +349,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 		var dbParams bzdb.DbActionParams
 		if err := json.Unmarshal(actionParams, &dbParams); err != nil {
 			return fmt.Errorf("error deserializing db params")
-		} else if d.plugin, err = db.New(&d.tmb, subLogger, dbParams); err != nil {
+		} else if d.plugin, err = db.New(subLogger, dbParams); err != nil {
 			return fmt.Errorf("could not start db daemon plugin: %s", err)
 		}
 	case bzplugin.Web:
@@ -439,10 +420,12 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 
 		// starts a ticket to check if the datachannel is ready
 		readyCheckTicker := time.NewTicker(10 * time.Millisecond)
-		notificationTicker := time.NewTicker(2 * time.Second)
+		notificationTicker := time.NewTicker(5 * time.Second)
 	CheckReadyLoop:
 		for {
 			select {
+			case <-d.tmb.Dying():
+				return nil
 			case <-readyCheckTicker.C:
 				if d.handshook {
 					d.logger.Info("DataChannel ready, sending skittles")
@@ -451,7 +434,6 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 			case <-notificationTicker.C:
 				d.logger.Info("Still waiting...")
 			}
-
 		}
 	}
 
@@ -501,7 +483,7 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) error {
 		if err := d.handleError(agentMessage); err != nil {
 			// if we can't recover then shut everything down
 			d.logger.Error(err)
-			d.Close(err)
+			d.tmb.Kill(err)
 		}
 	case am.Keysplitting:
 		d.ksInputChan <- agentMessage
@@ -519,17 +501,22 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 		return fmt.Errorf("malformed Error message")
 	}
 
-	if d.ignoreMrZAP {
+	// if d.ignoreMrZAP || !d.handshook {
+	if d.keysplitting.Recovering() {
 		// if we're already recovering, then ignore the error
+		d.logger.Debugf("ignoring error message because we're already in recovery")
 		return nil
 	} else if d.errorRecoveryAttempt >= maxErrorRecoveryTries {
 		return fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
+	} else if !d.handshook {
+		return fmt.Errorf("daemon cannot recover from an error on the initial syn")
 	} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError {
-		// stop processing keysplitting messages until we start recovery (with a syn)
+		// stop processing keysplitting messages until we start recovery with a syn
 		d.ignoreMrZAP = true
 
 		if err := d.keysplitting.Recover(errMessage); err != nil {
-			return err
+			d.logger.Debugf("ignoring error because %s", err)
+			return nil
 		} else {
 			d.errorRecoveryAttempt++
 			d.logger.Infof("Attempting to recover from error, attempt #%d", d.errorRecoveryAttempt)
@@ -594,7 +581,6 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 		return fmt.Errorf("invalid keysplitting message: %s", err)
 	}
 
-	// TODO: could these types be abstracted into an ack interface so we can handle them both with the same code?
 	switch ksMessage.KeysplittingPayload.(type) {
 	case ksmsg.SynAckPayload:
 		// d.handshook = true
@@ -613,36 +599,37 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 
 		// If we're here, it means that the previous data message that caused the error was accepted
 		// d.retry = 0
+
+		// Send message to plugin's input message handler
+		if d.plugin != nil {
+			if err := d.plugin.ReceiveKeysplitting(ksMessage.GetAction(), ksMessage.GetActionPayload()); err != nil {
+				return err
+			}
+
+			// sometimes when we kill the datachannel from the action, there is a final empty payload that sneaks out because
+			// the process dies but that last messages are processed
+			// if action == "" {
+			// 	return nil
+			// }
+
+			// We need to know the last message for invisible response to keysplitting validation errors
+			// d.setLastMessage(bzplugin.ActionWrapper{
+			// 	Action:        action,
+			// 	ActionPayload: returnPayload,
+			// })
+
+			// return d.sendKeysplitting(&ksMessage, action, returnPayload)
+
+			// } else {
+			// 	return err
+			// }
+		} else {
+			return fmt.Errorf("cannot send message to non-existent plugin")
+		}
 	default:
 		return fmt.Errorf("unhandled Keysplitting type")
 	}
 
-	// Send message to plugin's input message handler
-	if d.plugin != nil {
-		if err := d.plugin.ReceiveKeysplitting(ksMessage.GetAction(), ksMessage.GetActionPayload()); err != nil {
-			return err
-		}
-
-		// sometimes when we kill the datachannel from the action, there is a final empty payload that sneaks out because
-		// the process dies but that last messages are processed
-		// if action == "" {
-		// 	return nil
-		// }
-
-		// We need to know the last message for invisible response to keysplitting validation errors
-		// d.setLastMessage(bzplugin.ActionWrapper{
-		// 	Action:        action,
-		// 	ActionPayload: returnPayload,
-		// })
-
-		// return d.sendKeysplitting(&ksMessage, action, returnPayload)
-
-		// } else {
-		// 	return err
-		// }
-	} else {
-		return fmt.Errorf("cannot send message to non-existent plugin")
-	}
 	return nil
 }
 

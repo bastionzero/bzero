@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
@@ -36,6 +37,7 @@ const (
 // }
 
 type KeysplittingMessage struct {
+	Timestamp           int64                   `json:"timestamp"`
 	Type                KeysplittingPayloadType `json:"type"`
 	KeysplittingPayload interface{}             `json:"keysplittingPayload"`
 	Signature           string                  `json:"signature"`
@@ -43,60 +45,64 @@ type KeysplittingMessage struct {
 
 func (k *KeysplittingMessage) Hash() string {
 	// grab the hash of the keysplitting message
-	if _, hash, err := k.BuildUnsignedAck([]byte{}, ""); err != nil {
+	if hashBytes, ok := util.HashPayload(k.KeysplittingPayload); !ok {
 		return ""
 	} else {
-		return hash
+		return base64.StdEncoding.EncodeToString(hashBytes)
 	}
 }
 
-func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (KeysplittingMessage, string, error) {
+func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (KeysplittingMessage, error) {
 	switch msg := k.KeysplittingPayload.(type) {
 	case SynPayload:
-		if synAckPayload, hash, err := msg.BuildResponsePayload(payload, pubKey); err != nil {
-			return KeysplittingMessage{}, "", err
+		if synAckPayload, err := msg.BuildResponsePayload(payload, pubKey); err != nil {
+			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
+				Timestamp:           time.Now().Unix(),
 				Type:                SynAck,
 				KeysplittingPayload: synAckPayload,
-			}, hash, nil
+			}, nil
 		}
 	case DataPayload:
-		if dataAckPayload, hash, err := msg.BuildResponsePayload(payload, pubKey); err != nil {
-			return KeysplittingMessage{}, "", err
+		if dataAckPayload, err := msg.BuildResponsePayload(payload, pubKey); err != nil {
+			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
+				Timestamp:           time.Now().Unix(),
 				Type:                DataAck,
 				KeysplittingPayload: dataAckPayload,
-			}, hash, nil
+			}, nil
 		}
 	default:
-		return KeysplittingMessage{}, "", fmt.Errorf("can't build ack for message type: %T", k.KeysplittingPayload)
+		return KeysplittingMessage{}, fmt.Errorf("can't build ack for message type: %T", k.KeysplittingPayload)
 	}
 }
 
-func (k *KeysplittingMessage) BuildUnsignedResponse(action string, actionPayload []byte, bzcertHash string) (KeysplittingMessage, string, error) {
+func (k *KeysplittingMessage) BuildUnsignedResponse(action string, actionPayload []byte, bzcertHash string) (KeysplittingMessage, error) {
 	switch msg := k.KeysplittingPayload.(type) {
 	case SynAckPayload:
-		if dataPayload, hash, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash); err != nil {
-			return KeysplittingMessage{}, "", err
+		if dataPayload, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash); err != nil {
+			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
+				Timestamp:           time.Now().Unix(),
 				Type:                Data,
 				KeysplittingPayload: dataPayload,
-			}, hash, nil
+			}, nil
 		}
 	case DataAckPayload:
-		if dataPayload, hash, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash); err != nil {
-			return KeysplittingMessage{}, "", err
+		if dataPayload, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash); err != nil {
+			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
+				Timestamp:           time.Now().Unix(),
 				Type:                Data,
 				KeysplittingPayload: dataPayload,
-			}, hash, nil
+			}, nil
 		}
 	default:
-		return KeysplittingMessage{}, "", fmt.Errorf("can't build responses for message type: %T", k.KeysplittingPayload)
+		return KeysplittingMessage{}, fmt.Errorf("can't build responses for message type: %T", k.KeysplittingPayload)
 	}
 }
 

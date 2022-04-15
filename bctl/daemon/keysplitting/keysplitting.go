@@ -59,10 +59,14 @@ type Keysplitting struct {
 	pipelineMap   *orderedmap.OrderedMap
 	pipelineQueue chan *ksmsg.KeysplittingMessage
 	pipelineLock  sync.Mutex // no precalculation when syn's in flight
+	pipelineOpen  *sync.Cond
 
 	// not the last ack we've received but the last ack we've received *in order*
 	lastAck        *ksmsg.KeysplittingMessage
 	outOfOrderAcks map[string]*ksmsg.KeysplittingMessage
+
+	// bool variable for letting the datachannel know when to start processing incoming messages again
+	recovering bool
 }
 
 func New(
@@ -82,9 +86,19 @@ func New(
 		pipelineMap:            orderedmap.New(),
 		pipelineQueue:          make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
 		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
+		recovering:             false,
 	}
+	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
 
 	return keysplitter, nil
+}
+
+func (k *Keysplitting) Recovering() bool {
+	return k.recovering
+}
+
+func (k *Keysplitting) Release() {
+	k.pipelineOpen.Broadcast()
 }
 
 func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
@@ -94,13 +108,15 @@ func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
 func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 	// only recover from this error message if it corresponds to a message we've actually sent
 	if errMessage.HPointer == "" {
-		return fmt.Errorf("error message hpointer empty, not recovering")
+		return fmt.Errorf("error message hpointer empty")
 	} else if pair := k.pipelineMap.GetPair(errMessage.HPointer); pair == nil {
 		return fmt.Errorf("agent error is not on a message sent by this datachannel")
-	} else if k.lastAck == nil {
-		return fmt.Errorf("daemon cannot recover from an error on initial syn")
 	}
+	// } else if k.lastAck == nil {
+	// 	return fmt.Errorf("daemon cannot recover from an error on initial syn")
+	// }
 
+	k.recovering = true
 	if syn, err := k.BuildSyn("", []byte{}); err != nil {
 		return err
 	} else {
@@ -110,12 +126,16 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 }
 
 func (k *Keysplitting) resend(hpointer string) {
+	recoveryMap := *k.pipelineMap
+	k.pipelineMap = orderedmap.New()
+	k.logger.Infof("recoveryMap length: %d", (&recoveryMap).Len())
+
 	// figure out where we need to start resending from
-	if pair := k.pipelineMap.GetPair(hpointer); pair == nil {
+	if pair := (&recoveryMap).GetPair(hpointer); pair == nil {
 
 		// if the referenced message was acked, we won't have it in our map so we assume we
 		// have to resend everything
-		for lostPair := k.pipelineMap.Oldest(); lostPair != nil; lostPair.Next() {
+		for lostPair := (&recoveryMap).Oldest(); lostPair != nil; lostPair = lostPair.Next() {
 			ksMessage := lostPair.Value.(ksmsg.KeysplittingMessage)
 			k.pipeline(ksMessage.GetAction(), ksMessage.GetActionPayload())
 		}
@@ -124,15 +144,14 @@ func (k *Keysplitting) resend(hpointer string) {
 		// if the hpointer references a message that hasn't been acked, we assume the ack
 		// dropped and resend all messages starting with the one immediately AFTER the one
 		// referenced by the hpointer
-		for lostPair := pair.Next(); lostPair != nil; lostPair.Next() {
+		for lostPair := pair.Next(); lostPair != nil; lostPair = lostPair.Next() {
 			ksMessage := lostPair.Value.(ksmsg.KeysplittingMessage)
 			k.pipeline(ksMessage.GetAction(), ksMessage.GetActionPayload())
 		}
 	}
 
 	// empty out our pipeline map
-	k.pipelineMap = orderedmap.New()
-	k.pipelineLock.Unlock()
+	// k.pipelineMap = orderedmap.New()
 }
 
 func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
@@ -155,13 +174,28 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	// Check this messages is in response to one we've sent
 	if hpointer, err := ksMessage.GetHpointer(); err != nil {
 		return err
+	} else if ksMessage.Type == ksmsg.SynAck {
+		k.lastAck = ksMessage
+		msg := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
+		k.pipelineMap.Delete(hpointer)
+		// k.pipelineOpen.Broadcast()
+		k.resend(msg.Nonce)
+
+		k.recovering = false
+		// k.logger.Info("Syn/ACK: UNLOCKING")
+		k.pipelineLock.Unlock()
+		// k.logger.Info("SynAck: LOCK BROADCAST")
 	} else if _, ok := k.pipelineMap.Get(hpointer); ok {
+
+		// check if incoming message corresponds to our most recently sent data
 		if pair := k.pipelineMap.Oldest(); pair == nil {
 			return fmt.Errorf("where did this ack come from?! we're not waiting for a response to any messages")
 		} else if pair.Key != hpointer {
+			k.logger.Info("RECEIVED AN OUT OF ORDER ACK")
 			if len(k.outOfOrderAcks) > pipelineLimit {
 				// we're missing an ack sometime in the past, let's try to recover
 				if syn, err := k.BuildSyn("", []byte{}); err != nil {
+					k.recovering = true
 					return fmt.Errorf("could not recover from missing ack: %s", err)
 				} else {
 					k.pipelineQueue <- &syn
@@ -174,10 +208,17 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			k.pipelineMap.Delete(hpointer)
 			k.processOutOfOrderAcks()
 
-			if ksMessage.Type == ksmsg.SynAck {
-				msg := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
-				k.resend(msg.Nonce)
-			}
+			// let anyone waiting know that the pipeline's open to send another message
+			// if k.pipelineMap.Len() == pipelineLimit-1 {
+			// k.logger.Info("DataAck: LOCK BROADCAST")
+			k.pipelineOpen.Broadcast()
+			// k.pipelineOpen <- true
+			// }
+
+			// if ksMessage.Type == ksmsg.SynAck {
+			// 	msg := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload)
+			// 	k.resend(msg.Nonce)
+			// }
 		}
 	} else {
 		return fmt.Errorf("%T message did not correspond to a previously sent message", ksMessage.KeysplittingPayload)
@@ -187,7 +228,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 }
 
 func (k *Keysplitting) processOutOfOrderAcks() {
-	for pair := k.pipelineMap.Oldest(); pair != nil; pair.Next() {
+	for pair := k.pipelineMap.Oldest(); pair != nil; pair = pair.Next() {
 		if ack, ok := k.outOfOrderAcks[pair.Key.(string)]; !ok {
 			return
 		} else {
@@ -199,7 +240,11 @@ func (k *Keysplitting) processOutOfOrderAcks() {
 
 func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
 	k.pipelineLock.Lock()
-	defer k.pipelineLock.Unlock()
+	// k.logger.Infof("Inbox: LOCKING")
+	defer func() {
+		// k.logger.Infof("Inbox: UNLOCKING")
+		k.pipelineLock.Unlock()
+	}()
 
 	return k.pipeline(action, actionPayload)
 }
@@ -208,7 +253,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	var ack *ksmsg.KeysplittingMessage
 
 	if action == "" {
-		return fmt.Errorf("can't build keysplitting message with empty action")
+		return fmt.Errorf("i'm not allowed to build a keysplitting message with empty action")
 	}
 
 	// get the ack we're going to be building our new message off of
@@ -224,7 +269,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 
 		// otherwise, we're going to need to predict the ack we're building off of
 		ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
-		if newAck, _, err := ksMessage.BuildUnsignedAck([]byte{}, k.agentPubKey); err != nil {
+		if newAck, err := ksMessage.BuildUnsignedAck([]byte{}, k.agentPubKey); err != nil {
 			return fmt.Errorf("failed to predict ack: %s", err)
 		} else {
 			ack = &newAck
@@ -237,13 +282,15 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	} else if err := k.addToPipelineMap(newMessage); err != nil {
 		return err
 	} else {
+		// hash, _ := newMessage.GetHpointer()
+		// k.logger.Infof("Predicting new hpointer %s in data based off %+v", hash, ack)
 		k.pipelineQueue <- &newMessage
 		return nil
 	}
 }
 
 func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
-	if responseMessage, _, err := ksMessage.BuildUnsignedResponse(action, actionPayload, k.bzcertHash); err != nil {
+	if responseMessage, err := ksMessage.BuildUnsignedResponse(action, actionPayload, k.bzcertHash); err != nil {
 		return responseMessage, err
 	} else if err := responseMessage.Sign(k.clientSecretKey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
@@ -253,10 +300,20 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 }
 
 func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) error {
-	if hashBytes, ok := util.HashPayload(ksMessage.KeysplittingPayload); !ok {
+	// if hashBytes, ok := util.HashPayload(ksMessage.KeysplittingPayload); !ok {
+	if hash := ksMessage.Hash(); hash == "" {
 		return fmt.Errorf("failed to hash message")
 	} else {
-		hash := base64.StdEncoding.EncodeToString(hashBytes)
+		// we only want to pipeline up to the maximum allowed amount
+		// EXCEPT if it's a syn, then there's always room
+		if k.pipelineMap.Len() == pipelineLimit && ksMessage.Type != ksmsg.Syn && !k.recovering {
+			k.logger.Debug("Pipeline full, waiting to send next message")
+			// k.logger.Info("COND LOCK: WAITING")
+			k.pipelineOpen.Wait()
+			// k.logger.Debug("Pipeline open, sending message")
+			// <-k.pipelineOpen
+		}
+
 		k.pipelineMap.Set(hash, ksMessage)
 		k.logger.Infof("WE'VE ADDED A NEW %s MESSAGE TO OUR OUTPUT STUFF", ksMessage.Type)
 		return nil
@@ -266,6 +323,7 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.KeysplittingMessage, error) {
 	// lock our pipeline because nothing can be calculated until we get our synack
 	k.pipelineLock.Lock()
+	// k.logger.Info("Syn: LOCKING")
 
 	// Build the BZero Certificate then store hash for future messages
 	bzCert, err := k.buildBZCert()
@@ -281,7 +339,6 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 
 	// Build the keysplitting message
 	synPayload := ksmsg.SynPayload{
-		Timestamp:     time.Now().Unix(),
 		SchemaVersion: ksmsg.SchemaVersion,
 		Type:          string(ksmsg.Syn),
 		Action:        action,
@@ -292,6 +349,7 @@ func (k *Keysplitting) BuildSyn(action string, payload []byte) (ksmsg.Keysplitti
 	}
 
 	ksMessage := ksmsg.KeysplittingMessage{
+		Timestamp:           time.Now().Unix(),
 		Type:                ksmsg.Syn,
 		KeysplittingPayload: synPayload,
 	}
@@ -350,7 +408,7 @@ func (k *Keysplitting) loadZLIConfig() (*ZLIConfig, error) {
 	var config ZLIConfig
 
 	if configFile, err := os.Open(k.zliConfigPath); err != nil {
-		return nil, fmt.Errorf("could not open config file: %v", err.Error())
+		return nil, fmt.Errorf("could not open config file: %s", err)
 	} else if configFileBytes, err := ioutil.ReadAll(configFile); err != nil {
 		return nil, fmt.Errorf("failed to read config: %s", err)
 	} else if err := json.Unmarshal(configFileBytes, &config); err != nil {

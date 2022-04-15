@@ -18,7 +18,7 @@ import (
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IWebDaemonAction interface {
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(Writer http.ResponseWriter, Request *http.Request) error
+	Start(Writer http.ResponseWriter, Request *http.Request) error //TODO: should not be capitals
 	Done() <-chan struct{}
 	Stop()
 }
@@ -71,6 +71,8 @@ func (w *WebDaemonPlugin) Done() <-chan struct{} {
 func (w *WebDaemonPlugin) Stop() {
 	if w.action != nil {
 		w.tmb.Kill(fmt.Errorf("we were told to stop"))
+		w.tmb.Wait()
+
 		w.action.Stop()
 	}
 }
@@ -116,16 +118,15 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 		return rerr
 	}
 
-	go func() {
+	w.tmb.Go(func() error {
 		select {
 		case <-w.tmb.Dying():
-			return
+			return nil
 		case <-w.action.Done():
-			// if the action is done, then so are we
 			close(w.doneChan)
-			return
+			return fmt.Errorf("action closed so web plugin is closing")
 		}
-	}()
+	})
 
 	w.logger.Infof("Web plugin created a %s action", string(webFood.Action))
 

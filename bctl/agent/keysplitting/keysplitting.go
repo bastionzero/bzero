@@ -1,13 +1,12 @@
 package keysplitting
 
 import (
-	"encoding/base64"
 	"fmt"
 	"time"
 
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"github.com/Masterminds/semver"
 )
 
@@ -21,7 +20,8 @@ type BZCertMetadata struct {
 }
 
 type Keysplitting struct {
-	hPointer         string
+	logger *logger.Logger
+	// hPointer         string
 	expectedHPointer string
 	bzCert           BZCertMetadata // only for one client
 	publickey        string
@@ -40,14 +40,15 @@ type IKeysplittingConfig interface {
 	GetIdpOrgId() string
 }
 
-func New(config IKeysplittingConfig) (*Keysplitting, error) {
+func New(logger *logger.Logger, config IKeysplittingConfig) (*Keysplitting, error) {
 	shouldCheckTargetIdConstraint, err := semver.NewConstraint(fmt.Sprintf("> %v", schemaVersionTargetIdNotSet))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create check target id constraint: %w", err)
 	}
 
 	return &Keysplitting{
-		hPointer:            "",
+		logger: logger,
+		// hPointer:            "",
 		expectedHPointer:    "",
 		publickey:           config.GetPublicKey(),
 		privatekey:          config.GetPrivateKey(),
@@ -55,11 +56,6 @@ func New(config IKeysplittingConfig) (*Keysplitting, error) {
 		idpOrgId:            config.GetIdpOrgId(),
 		shouldCheckTargetId: shouldCheckTargetIdConstraint,
 	}, nil
-}
-
-func (k *Keysplitting) GetHpointer() string {
-	// hpointer is only used when building errors
-	return k.hPointer
 }
 
 func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
@@ -121,25 +117,32 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 		// Verify received hash pointer matches expected
 		if dataPayload.HPointer != k.expectedHPointer {
-			return fmt.Errorf("DATA's hash pointer did not match expected hash pointer")
+			return fmt.Errorf("DATA's hash pointer %s did not match expected hash pointer %s", dataPayload.HPointer, k.expectedHPointer)
 		}
 	default:
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}
 
-	k.hPointer = ksMessage.Hash()
 	return nil
 }
 
-func (k *Keysplitting) BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
-	if responseMessage, _, err := ksMessage.BuildUnsignedAck(actionPayload, k.publickey); err != nil {
+func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
+	if responseMessage, err := ksMessage.BuildUnsignedAck(actionPayload, k.publickey); err != nil {
 		return responseMessage, err
 	} else if err := responseMessage.Sign(k.privatekey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
-	} else if hashBytes, ok := util.HashPayload(responseMessage.KeysplittingPayload); !ok {
+	} else if hash := responseMessage.Hash(); hash == "" {
 		return responseMessage, fmt.Errorf("could not hash payload")
 	} else {
-		k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
+		// k.logger.Infof("Setting expected hpointer to %s based off %+v", hash, responseMessage.KeysplittingPayload)
+		k.expectedHPointer = hash
 		return responseMessage, nil
 	}
+
+	// else if hashBytes, ok := util.HashPayload(responseMessage.KeysplittingPayload); !ok {
+	// 	return responseMessage, fmt.Errorf("could not hash payload")
+	// } else {
+	// 	k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
+	// 	return responseMessage, nil
+	// }
 }

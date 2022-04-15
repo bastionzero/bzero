@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
 	plgn "bastionzero.com/bctl/v1/bctl/agent/plugin"
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
@@ -24,9 +25,8 @@ import (
 )
 
 type IKeysplitting interface {
-	GetHpointer() string
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
-	BuildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
+	BuildAck(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
 }
 
 type DataChannel struct {
@@ -47,7 +47,13 @@ func New(parentTmb *tomb.Tomb,
 	websocket websocket.IWebsocket,
 	id string,
 	syn []byte,
-	keysplitter IKeysplitting) (*DataChannel, error) {
+	ksConfig keysplitting.IKeysplittingConfig) (*DataChannel, error) {
+
+	// Init keysplitter
+	keysplitter, err := keysplitting.New(logger, ksConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init keysplitter: %w", err)
+	}
 
 	datachannel := &DataChannel{
 		websocket:    websocket,
@@ -116,23 +122,25 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 
 func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
 	// Build and send response
-	if respKSMessage, err := d.keysplitting.BuildResponse(keysplittingMessage, action, payload); err != nil {
+	if respKSMessage, err := d.keysplitting.BuildAck(keysplittingMessage, action, payload); err != nil {
 		rerr := fmt.Errorf("could not build response message: %s", err)
 		d.logger.Error(rerr)
 		return rerr
 	} else {
+		d.logger.Infof("SENDING %s!", keysplittingMessage.Signature)
 		d.send(am.Keysplitting, respKSMessage)
 		return nil
 	}
 }
 
-func (d *DataChannel) sendError(errType rrr.ErrorType, err error) {
+func (d *DataChannel) sendError(errType rrr.ErrorType, err error, hash string) {
 	d.logger.Error(err)
 
 	errMsg := rrr.ErrorMessage{
-		Type:     string(errType),
-		Message:  err.Error(),
-		HPointer: d.keysplitting.GetHpointer(),
+		Timestamp: time.Now().Unix(),
+		Type:      string(errType),
+		Message:   err.Error(),
+		HPointer:  hash,
 	}
 	d.send(am.Error, errMsg)
 }
@@ -151,20 +159,20 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 	case am.Keysplitting:
 		var ksMessage ksmsg.KeysplittingMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
-			d.sendError(rrr.KeysplittingValidationError, fmt.Errorf("malformed Keysplitting message: %s", err))
+			d.sendError(rrr.ComponentProcessingError, fmt.Errorf("malformed Keysplitting message: %s", err), "")
 		} else {
 			d.handleKeysplittingMessage(&ksMessage)
 		}
 	default:
 		rerr := fmt.Errorf("unhandled message type: %v", agentMessage.MessageType)
-		d.sendError(rrr.ComponentProcessingError, rerr)
+		d.sendError(rrr.ComponentProcessingError, rerr, "")
 	}
 }
 
 func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.KeysplittingMessage) {
 	if err := d.keysplitting.Validate(keysplittingMessage); err != nil {
 		rerr := fmt.Errorf("invalid keysplitting message: %s", err)
-		d.sendError(rrr.KeysplittingValidationError, rerr)
+		d.sendError(rrr.KeysplittingValidationError, rerr, keysplittingMessage.Hash())
 		return
 	}
 
@@ -172,33 +180,50 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	case ksmsg.Syn:
 		synPayload := keysplittingMessage.KeysplittingPayload.(ksmsg.SynPayload)
 
-		// Grab user's action
-		if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
-			rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
-			d.sendError(rrr.ComponentProcessingError, rerr)
-			return
-		} else {
-
-			// Don't start plugin if there's already one started
-			if d.plugin == nil {
-
+		if d.plugin == nil {
+			// Grab user's action
+			if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
+				rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
+				d.sendError(rrr.ComponentProcessingError, rerr, keysplittingMessage.Hash())
+				return
+			} else {
 				// Start plugin based on action
 				actionPrefix := parsedAction[0]
 				if err := d.startPlugin(bzplugin.PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
-					d.sendError(rrr.ComponentStartupError, err)
+					d.sendError(rrr.ComponentStartupError, err, keysplittingMessage.Hash())
 					return
 				}
 			}
 
+			// Grab user's action
+			// if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
+			// 	rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
+			// 	d.sendError(rrr.ComponentProcessingError, rerr, keysplittingMessage.Hash())
+			// 	return
+			// } else {
+
+			// 	// Don't start plugin if there's already one started
+			// 	if d.plugin == nil {
+
+			// 		// Start plugin based on action
+			// 		actionPrefix := parsedAction[0]
+			// 		if err := d.startPlugin(PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
+			// 			d.sendError(rrr.ComponentStartupError, err, keysplittingMessage.Hash())
+			// 			return
+			// 		}
+			// 	}
+
 			// return a SYN/ACK
-			d.sendKeysplitting(keysplittingMessage, "", []byte{}) // empty payload
 		}
+		d.logger.Info("GOOD TO GO LETS SEND A RESPONSE")
+
+		d.sendKeysplitting(keysplittingMessage, "", []byte{}) // empty payload
 	case ksmsg.Data:
 		dataPayload := keysplittingMessage.KeysplittingPayload.(ksmsg.DataPayload)
 
 		if d.plugin == nil { // Can't process data message if no plugin created
 			rerr := fmt.Errorf("plugin does not exist")
-			d.sendError(rrr.ComponentProcessingError, rerr)
+			d.sendError(rrr.ComponentProcessingError, rerr, keysplittingMessage.Hash())
 			return
 		}
 
@@ -210,11 +235,11 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 			d.sendKeysplitting(keysplittingMessage, dataPayload.Action, returnPayload)
 		} else {
 			rerr := fmt.Errorf("plugin error processing keysplitting message: %s", err)
-			d.sendError(rrr.ComponentProcessingError, rerr)
+			d.sendError(rrr.ComponentProcessingError, rerr, keysplittingMessage.Hash())
 		}
 	default:
 		rerr := fmt.Errorf("invalid Keysplitting Payload")
-		d.sendError(rrr.ComponentProcessingError, rerr)
+		d.sendError(rrr.ComponentProcessingError, rerr, keysplittingMessage.Hash())
 	}
 }
 

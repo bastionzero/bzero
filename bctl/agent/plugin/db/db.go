@@ -1,7 +1,6 @@
 package db
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -77,17 +76,18 @@ func New(parentTmb *tomb.Tomb,
 func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	d.logger.Debugf("DB plugin received message with %s action", action)
 
-	var rerr error
-	if safePayload, err := cleanPayload(actionPayload); err != nil {
-		rerr = err
-	} else if action, payload, err := d.action.Receive(action, safePayload); err != nil {
-		rerr = err
+	// if safePayload, err := cleanPayload(actionPayload); err != nil {
+	// 	d.logger.Error(err)
+	// 	return "", []byte{}, err
+	// } else
+	if action, payload, err := d.action.Receive(action, actionPayload); err != nil {
+		return "", []byte{}, err
 	} else {
 		return action, payload, err
 	}
 
-	d.logger.Error(rerr)
-	return "", []byte{}, rerr
+	// d.logger.Error(rerr)
+	// return "", []byte{}, rerr
 }
 
 func parseAction(action string) (db.DbAction, error) {
@@ -98,18 +98,18 @@ func parseAction(action string) (db.DbAction, error) {
 	return db.DbAction(parsedAction[1]), nil
 }
 
-func cleanPayload(payload []byte) ([]byte, error) {
-	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
-	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
-	// so that we can murder its family
-	if len(payload) > 0 {
-		payload = payload[1 : len(payload)-1]
-	}
+// func cleanPayload(payload []byte) ([]byte, error) {
+// 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
+// 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
+// 	// so that we can murder its family
+// 	if len(payload) > 0 {
+// 		payload = payload[1 : len(payload)-1]
+// 	}
 
-	// Json unmarshalling encodes bytes in base64
-	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
-		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
-	} else {
-		return payloadSafe, nil
-	}
-}
+// 	// Json unmarshalling encodes bytes in base64
+// 	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
+// 		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
+// 	} else {
+// 		return payloadSafe, nil
+// 	}
+// }

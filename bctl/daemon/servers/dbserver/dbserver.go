@@ -154,7 +154,6 @@ func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 
 	action = "db/" + action
 	if dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, d.refreshTokenCommand, d.configPath, action, actionParamsMarshalled, d.agentPubKey, attach); err != nil {
-		d.logger.Error(err)
 		return nil, err
 	} else {
 

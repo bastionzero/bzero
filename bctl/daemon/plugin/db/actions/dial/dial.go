@@ -36,14 +36,13 @@ type DialAction struct {
 	closed bool
 }
 
-func New(logger *logger.Logger,
-	requestId string) *DialAction {
+func New(logger *logger.Logger, requestId string, outputQueue chan plugin.ActionWrapper) *DialAction {
 
 	dial := &DialAction{
 		logger:    logger,
 		requestId: requestId,
 
-		outputChan:      make(chan plugin.ActionWrapper, 10),
+		outputChan:      outputQueue,
 		streamInputChan: make(chan smsg.StreamMessage, 30),
 		doneChan:        make(chan struct{}),
 	}
@@ -172,6 +171,7 @@ func (d *DialAction) Stop() {
 }
 
 func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interface{}) {
+	d.logger.Info("TRYING TO SEND OUTPUT MESSAGE")
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	d.outputChan <- plugin.ActionWrapper{

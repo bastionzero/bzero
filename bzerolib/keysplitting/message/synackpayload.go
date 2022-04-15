@@ -2,7 +2,6 @@ package message
 
 import (
 	"encoding/base64"
-	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
@@ -10,7 +9,6 @@ import (
 // Repetition in Keysplitting messages is requires to maintain flat
 // structure which is important for hashing
 type SynAckPayload struct {
-	Timestamp             int64  `json:"timestamp"` // Unix time
 	SchemaVersion         string `json:"schemaVersion"`
 	Type                  string `json:"type"`
 	Action                string `json:"action"`
@@ -22,12 +20,11 @@ type SynAckPayload struct {
 	HPointer        string `json:"hPointer"`
 }
 
-func (s SynAckPayload) BuildResponsePayload(action string, actionPayload []byte, bzCertHash string) (DataPayload, string, error) {
+func (s SynAckPayload) BuildResponsePayload(action string, actionPayload []byte, bzCertHash string) (DataPayload, error) {
 	hashBytes, _ := util.HashPayload(s)
 	hash := base64.StdEncoding.EncodeToString(hashBytes)
 
 	return DataPayload{
-		Timestamp:     time.Now().Unix(),
 		SchemaVersion: SchemaVersion,
 		Type:          string(Data),
 		Action:        action,
@@ -35,5 +32,5 @@ func (s SynAckPayload) BuildResponsePayload(action string, actionPayload []byte,
 		HPointer:      hash,
 		ActionPayload: actionPayload,
 		BZCertHash:    bzCertHash,
-	}, hash, nil
+	}, nil
 }

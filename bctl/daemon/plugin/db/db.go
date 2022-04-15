@@ -24,12 +24,11 @@ type IDbDaemonAction interface {
 }
 
 type DbDaemonPlugin struct {
-	tmb    *tomb.Tomb
+	tmb    tomb.Tomb
 	logger *logger.Logger
 
-	// Input and output channels
-	streamInputChan chan smsg.StreamMessage
-	outputQueue     chan plugin.ActionWrapper
+	// outbox
+	outputQueue chan plugin.ActionWrapper
 
 	// Channel for letting the datachannel know we're done
 	doneChan chan struct{}
@@ -40,38 +39,22 @@ type DbDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbActionParams) (*DbDaemonPlugin, error) {
+func New(logger *logger.Logger, actionParams bzdb.DbActionParams) (*DbDaemonPlugin, error) {
 	plugin := DbDaemonPlugin{
-		tmb:             parentTmb,
-		logger:          logger,
-		streamInputChan: make(chan smsg.StreamMessage, 25),
-		outputQueue:     make(chan plugin.ActionWrapper, 25),
-		doneChan:        make(chan struct{}),
-		sequenceNumber:  0,
+		logger:         logger,
+		outputQueue:    make(chan plugin.ActionWrapper, 5),
+		doneChan:       make(chan struct{}),
+		sequenceNumber: 0,
 	}
-
-	// listener for processing any incoming stream messages, since they are not treated as part of
-	// the keysplitting synchronous chain
-	go func() {
-		for {
-			select {
-			case <-plugin.tmb.Dying():
-				return
-			case streamMessage := <-plugin.streamInputChan:
-				if err := plugin.processStream(streamMessage); err != nil {
-					plugin.logger.Error(err)
-				}
-			}
-		}
-	}()
 
 	return &plugin, nil
 }
 
 func (d *DbDaemonPlugin) Stop() {
-	if d.action == nil {
-		return
-	} else {
+	if d.action != nil {
+		d.tmb.Kill(fmt.Errorf("we were told to stop"))
+		d.tmb.Wait()
+
 		d.action.Stop()
 	}
 }
@@ -86,20 +69,17 @@ func (d *DbDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
 
 func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 	d.logger.Debugf("db plugin received %v stream", smessage.Type)
-	d.streamInputChan <- smessage
-}
 
-func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 	if d.action != nil {
 		d.action.ReceiveStream(smessage)
-		return nil
 	} else {
-		return fmt.Errorf("db plugin received stream message before an action was created. Ignoring")
+		d.logger.Debugf("db plugin received stream message before an action was created. Ignoring")
 	}
 }
 
 func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) error {
 	d.logger.Debugf("Received a keysplitting message with action: %s", action)
+
 	// the only keysplitting message that we would receive is the ack from the agent after stopping the dial action
 	// we don't do anything with it on the daemon side, so we receive it here and it will get logged
 	// but no particular action will be taken
@@ -113,31 +93,27 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 		return fmt.Errorf("db food did not match nutrition label: %+v", food)
 	}
 
-	// Always generate a requestId, each new db command is its own request
 	requestId := uuid.New().String()
-
-	// Create action logger
 	actLogger := d.logger.GetActionLogger(string(dbFood.Action))
 
 	switch bzdb.DbAction(dbFood.Action) {
 	case bzdb.Dial:
-		d.action = dial.New(actLogger, requestId)
+		d.action = dial.New(actLogger, requestId, d.outputQueue)
 	default:
 		return fmt.Errorf("unrecognized db action: %v", string(dbFood.Action))
 	}
 
-	go func() {
+	d.tmb.Go(func() error {
 		select {
 		case <-d.tmb.Dying():
-			return
+			return nil
 		case <-d.action.Done():
-			// if the action is done, then so are we
 			close(d.doneChan)
-			return
+			return fmt.Errorf("action closed so db plugin is closing")
 		}
-	}()
+	})
 
-	d.logger.Infof("Created %s action", string(dbFood.Action))
+	d.logger.Infof("db plugin created %s action", string(dbFood.Action))
 
 	// send local tcp connection to action
 	if err := d.action.Start(dbFood.Conn); err != nil {
