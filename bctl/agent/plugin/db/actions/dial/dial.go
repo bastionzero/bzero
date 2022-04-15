@@ -197,13 +197,13 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 	return action, []byte{}, nil
 }
 
-func (d *Dial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, toSendBytes []byte) {
+func (d *Dial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
 	d.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  d.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		Action:         string(db.Dial),
 		Type:           streamType,
 		More:           more,
-		Content:        base64.StdEncoding.EncodeToString(toSendBytes),
+		Content:        base64.StdEncoding.EncodeToString(contentBytes),
 	}
 }

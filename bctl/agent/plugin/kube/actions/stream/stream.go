@@ -278,7 +278,7 @@ func (s *StreamAction) sendStreamMessage(
 	sequenceNumber int,
 	streamType smsg.StreamType,
 	more bool,
-	toSendBytes []byte,
+	contentBytes []byte,
 	logId string,
 ) {
 	s.streamOutputChan <- smsg.StreamMessage{
@@ -289,6 +289,6 @@ func (s *StreamAction) sendStreamMessage(
 		Action:         string(kubeaction.Stream),
 		Type:           streamType,
 		More:           more,
-		Content:        base64.StdEncoding.EncodeToString(toSendBytes),
+		Content:        base64.StdEncoding.EncodeToString(contentBytes),
 	}
 }

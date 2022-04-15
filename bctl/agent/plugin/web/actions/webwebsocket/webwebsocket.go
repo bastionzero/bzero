@@ -177,7 +177,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 				Message:     base64.StdEncoding.EncodeToString(message),
 				MessageType: mt,
 			}
-			toSendBytes, err := json.Marshal(toSend)
+			contentBytes, err := json.Marshal(toSend)
 			if err != nil {
 				w.logger.Infof("Json marshell error: %s", err)
 				return
@@ -185,9 +185,9 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 			switch w.streamMessageVersion {
 			// prior to 202204
 			case "":
-				w.sendStreamMessage(sequenceNumber, smsg.DataOut, true, toSendBytes)
+				w.sendStreamMessage(sequenceNumber, smsg.DataOut, true, contentBytes)
 			default:
-				w.sendStreamMessage(sequenceNumber, smsg.Data, true, toSendBytes)
+				w.sendStreamMessage(sequenceNumber, smsg.Data, true, contentBytes)
 			}
 			sequenceNumber += 1
 
@@ -200,13 +200,13 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 	return action, []byte{}, nil
 }
 
-func (w *WebWebsocket) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, toSendBytes []byte) {
+func (w *WebWebsocket) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
 	w.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  w.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
 		Action:         string(webaction.Websocket),
 		Type:           streamType,
 		More:           more,
-		Content:        base64.StdEncoding.EncodeToString(toSendBytes),
+		Content:        base64.StdEncoding.EncodeToString(contentBytes),
 	}
 }
