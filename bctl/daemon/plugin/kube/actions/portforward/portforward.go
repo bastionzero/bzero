@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 
@@ -85,8 +85,10 @@ func (p *PortForwardAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapp
 }
 
 func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
-	// If this is our ready message, send to our ready channel
-	if stream.Type == string(portforward.ReadyPortForward) {
+
+	// may be hearing about this via old or new language, depending on what we asked for
+	if stream.Type == smsg.ReadyPortForward || stream.Type == smsg.Ready {
+		// If this is our ready message, send to our ready channel
 		p.streamInputChan <- stream
 		return
 	}
@@ -126,12 +128,13 @@ func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, re
 
 	// Let Bastion know we want this stream
 	payload := portforward.KubePortForwardStartActionPayload{
-		RequestId:       p.requestId,
-		LogId:           p.logId,
-		ErrorHeaders:    errorHeaders,
-		DataHeaders:     dataHeaders,
-		Endpoint:        p.endpoint,
-		CommandBeingRun: p.commandBeingRun,
+		RequestId:            p.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+		LogId:                p.logId,
+		ErrorHeaders:         errorHeaders,
+		DataHeaders:          dataHeaders,
+		Endpoint:             p.endpoint,
+		CommandBeingRun:      p.commandBeingRun,
 	}
 	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{
@@ -142,37 +145,17 @@ func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, re
 	// Now wait for the ready message, incase we need to bubble up an error to the user
 readyMessageLoop:
 	for {
-		select {
-		case streamMessage := <-p.streamInputChan:
-			if streamMessage.Type == string(portforward.ReadyPortForward) {
-				// See if we have an error to bubble up to the user
-				if len(streamMessage.Content) != 0 {
-					// Bubble up the error to the user
-					// Ref: https://pkg.go.dev/golang.org/x/build/kubernetes/api#Status
-					toReturn := api.Status{
-						Message: streamMessage.Content,
-						Status:  api.StatusFailure,
-						Code:    http.StatusForbidden,
-						Reason:  "Forbidden",
-					}
-					toReturnMarshal, err := json.Marshal(toReturn)
-					if err != nil {
-						// Best effort bubble up
-						writer.WriteHeader(http.StatusInternalServerError)
-						writer.Write([]byte(err.Error()))
-					} else {
-						writer.WriteHeader(http.StatusForbidden)
-						writer.Header().Set("Content-Type", "application/json")
-						writer.Write(toReturnMarshal)
-					}
+		streamMessage := <-p.streamInputChan
+		// may be hearing about this via old or new language, depending on what we asked for
+		if streamMessage.Type == smsg.ReadyPortForward || streamMessage.Type == smsg.Ready {
+			// See if we have an error to bubble up to the user
+			if len(streamMessage.Content) != 0 {
+				bubbleUpError(writer, streamMessage.Content)
 
-					// Send close message
-					p.sendCloseMessage()
-
-					return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
-				}
-				break readyMessageLoop
+				p.sendCloseMessage()
+				return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
 			}
+			break readyMessageLoop
 		}
 	}
 
@@ -294,6 +277,9 @@ func (p *PortForwardAction) sendCloseMessage() {
 
 func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair, remotePort int64) error {
 	// Make a done channel
+	// there are 4 instances where you push true to the done channel.
+	// processErrorMessage and processDataMessage, the error on read, and PortForwardEnd could all theoretically happen at the same time (I think)
+	// So to remedy that I rounded up to 5.
 	doneChan := make(chan bool, 5)
 
 	// Make and update the stream channel for this requestId
@@ -410,8 +396,9 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 			// Return
 			return nil
 		case requestMapStruct := <-requestMapChannel:
-			switch requestMapStruct.streamMessage.Type {
-			case string(smsg.PortForwardData):
+			// contentBytes, _ := base64.StdEncoding.DecodeString(streamMessage.Content)
+
+			if requestMapStruct.streamMessage.Type == smsg.Data {
 				// Check our seqNumber
 				if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
 					processDataMessage(requestMapStruct.streamMessageContent.Content)
@@ -428,7 +415,12 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 					outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
 				}
 
-			case string(smsg.PortForwardError):
+				if !requestMapStruct.streamMessage.More {
+					// Alert on our done chan
+					doneChan <- true
+				}
+
+			} else if requestMapStruct.streamMessage.Type == smsg.Error {
 				if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
 					processErrorMessage(requestMapStruct.streamMessageContent.Content)
 				} else {
@@ -443,9 +435,9 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 					processErrorMessage(outOfOrderErrorContent)
 					outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
 				}
-			case string(smsg.PortForwardEnd):
-				// Alert on our done chan
-				doneChan <- true
+
+			} else {
+				p.logger.Errorf("unhandled stream type: %s", requestMapStruct.streamMessage.Type)
 			}
 		}
 	}
@@ -481,4 +473,25 @@ func (p *PortForwardAction) getRequestMap(key string) (chan RequestMapStruct, bo
 	p.requestMapLock.Lock()
 	act, ok := p.requestMap[key]
 	return act, ok
+}
+
+func bubbleUpError(writer http.ResponseWriter, content string) {
+	// Bubble up the error to the user
+	// Ref: https://pkg.go.dev/golang.org/x/build/kubernetes/api#Status
+	toReturn := api.Status{
+		Message: content,
+		Status:  api.StatusFailure,
+		Code:    http.StatusForbidden,
+		Reason:  "Forbidden",
+	}
+	toReturnMarshal, err := json.Marshal(toReturn)
+	if err != nil {
+		// Best effort bubble up
+		writer.WriteHeader(http.StatusInternalServerError)
+		writer.Write([]byte(err.Error()))
+	} else {
+		writer.WriteHeader(http.StatusForbidden)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Write(toReturnMarshal)
+	}
 }

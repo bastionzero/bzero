@@ -1,30 +1,48 @@
 package message
 
-// Agent Output Streaming Messages
+// YYYYMM-formatted string -- the earliest this schema was used
+type SchemaVersion string
 
+const (
+	CurrentSchema SchemaVersion = "202204" // if the agent and daemon are both up to date, they send/receive messages with this version
+)
+
+// Agent Output Streaming Messages
 type StreamMessage struct {
-	Type           string `json:"type"` // either stdout or stderr, see "StreamType"
-	LogId          string `json:"logId"`
-	RequestId      string `json:"requestId"`
-	SequenceNumber int    `json:"sequenceId"`
-	Content        string `json:"content"`
+	RequestId      string        `json:"requestId"`
+	SchemaVersion  SchemaVersion `json:"schemaVersion"` // new as of schemaVersion 202204
+	SequenceNumber int           `json:"sequenceId"`
+	Action         string        `json:"action"` // new as of schemaVersion 202204: a plugin's action, e.g. "Web/Stream"
+	Type           StreamType    `json:"type"`   // a plugin action's subaction, e.g. "Data"
+	More           bool          `json:"more"`   // new as of schemaVersion 202204: flagging this as false indicates no more content is coming
+	LogId          string        `json:"logId"`  // only used by Kube commands
+	Content        string        `json:"content"`
 }
 
 // Type restriction on our different kinds of agent
-// output streams.  StdIn will come in the form of a
+// output streams. StdIn will come in the form of a
 // Keysplitting DataMessage
 type StreamType string
 
 const (
-	StdErr StreamType = "kube/exec/stderr"
-	StdOut StreamType = "kube/exec/stdout"
-	StdIn  StreamType = "kube/exec/stdin"
+	StdErr StreamType = "stderr"
+	StdOut StreamType = "stdout"
 
-	LogOut StreamType = "kube/log/stdout"
+	Data  StreamType = "data"
+	Error StreamType = "error"
 
-	PortForwardData  StreamType = "kube/portforward/data"
-	PortForwardError StreamType = "kube/portforward/error"
-	PortForwardEnd   StreamType = "kube/portforward/end"
+	Start  StreamType = "start"
+	Stop   StreamType = "stop"
+	Stream StreamType = "stream"
+
+	Ready StreamType = "ready"
+)
+
+// old-fashioned messages we can stop sending once daemons older than 4.5.0 are extinct in the wild
+const (
+	ReadyPortForward StreamType = "kube/portforward/ready"
+	DataPortForward  StreamType = "kube/portforward/data"
+	ErrorPortForward StreamType = "kube/portforward/error"
 
 	DbStream    StreamType = "db/stream"
 	DbStreamEnd StreamType = "db/stream/end"
@@ -32,6 +50,9 @@ const (
 	WebError     StreamType = "web/error"
 	WebStream    StreamType = "web/stream"
 	WebStreamEnd StreamType = "web/stream/end"
+
+	DataOut   StreamType = "web/websocket/dataout"
+	AgentStop StreamType = "web/websocket/agentstop"
 
 	StreamData  StreamType = "kube/stream/stdout"
 	StreamStart StreamType = "kube/stream/start"
