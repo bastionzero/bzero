@@ -237,7 +237,6 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 			case <-d.tmb.Dying():
 				return
 			case streamMessage := <-streamOutputChan:
-				// FIXME: check correct token
 				d.logger.Infof("Sending %s/%s/%t stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
 				d.send(am.Stream, streamMessage)
 			}

@@ -136,7 +136,7 @@ func (k *KubeDaemonPlugin) Feed(food interface{}) error {
 	}
 
 	// Always generate a requestId, each new kube command is its own request
-	// FIXME: not for long...
+	// TODO: deprecated
 	requestId := uuid.New().String()
 
 	// Create action logger

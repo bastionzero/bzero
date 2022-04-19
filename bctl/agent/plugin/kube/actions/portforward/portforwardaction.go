@@ -97,8 +97,6 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 
 		// See if we already have a session for this portforwardRequestId, else create it
 		if p.request == nil {
-			// Create a new action and update our map
-			// FIXME: still need these two lines?
 			subLogger := p.logger.GetActionLogger("kube/portforward/agent/request")
 			subLogger.AddRequestId(p.requestId)
 			p.request = createPortForwardRequest(
