@@ -3,13 +3,19 @@ package restapi
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
-	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
+	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 )
+
+// wrap the client-creation code so that during testing we can inject a mock client
+var makeRequest = func(req *http.Request) (*http.Response, error) {
+	client := http.Client{}
+	return client.Do(req)
+}
 
 type RestApiAction struct {
 	serviceAccountToken string
@@ -54,8 +60,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 		return action, []byte{}, err
 	}
 
-	httpClient := &http.Client{}
-	res, err := httpClient.Do(req)
+	res, err := makeRequest(req)
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		r.logger.Error(rerr)
@@ -70,7 +75,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 	}
 
 	// Parse out the body
-	bodyBytes, err := ioutil.ReadAll(res.Body)
+	bodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return action, []byte{}, err
 	}

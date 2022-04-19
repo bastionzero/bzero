@@ -4,7 +4,7 @@ package spacescontroller
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -60,7 +60,7 @@ func (s *SpacesController) CreateNewSpace() *CreateSpaceResponse {
 	}
 
 	// Read all the bytes from the response
-	createSpaceResponseBytes, readAllErr := ioutil.ReadAll(httpCreateSpaceResponse.Body)
+	createSpaceResponseBytes, readAllErr := io.ReadAll(httpCreateSpaceResponse.Body)
 	if readAllErr != nil {
 		s.logger.Error(fmt.Errorf("error reading bytes from create connection response"))
 		panic(readAllErr)

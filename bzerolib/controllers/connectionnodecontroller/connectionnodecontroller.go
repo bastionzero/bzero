@@ -3,7 +3,7 @@ package connectionnodecontroller
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"strings"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
@@ -122,7 +122,7 @@ func (c *ConnectionNodeController) createConnection(request interface{}, connect
 	}
 
 	// Read all the bytes from the response
-	createConnectionResponseBytes, readAllErr := ioutil.ReadAll(httpCreateConnectionResponse.Body)
+	createConnectionResponseBytes, readAllErr := io.ReadAll(httpCreateConnectionResponse.Body)
 	if readAllErr != nil {
 		return ConnectionDetailsResponse{}, fmt.Errorf("error reading bytes from create connection response")
 	}
@@ -160,7 +160,7 @@ func (c *ConnectionNodeController) createCnConnection(connectionId string) (Conn
 	}
 
 	// Unmarshal the bytes
-	getAuthDetailsResponseBytes, readAllErr := ioutil.ReadAll(httpGetAuthDetailsResponse.Body)
+	getAuthDetailsResponseBytes, readAllErr := io.ReadAll(httpGetAuthDetailsResponse.Body)
 	if readAllErr != nil {
 		return response, fmt.Errorf("error reading bytes from get auth details response")
 	}

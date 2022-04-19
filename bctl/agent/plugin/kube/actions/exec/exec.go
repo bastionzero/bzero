@@ -9,14 +9,20 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
-	kubedaemonutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	bzexec "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
+	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	stdin "bastionzero.com/bctl/v1/bzerolib/stream/stdreader"
-	stdout "bastionzero.com/bctl/v1/bzerolib/stream/stdwriter"
 )
+
+var getExecutor = func(config *rest.Config, method string, url *url.URL) (remotecommand.Executor, error) {
+	return remotecommand.NewSPDYExecutor(config, method, url)
+}
+
+var getConfig = func() (*rest.Config, error) {
+	return rest.InClusterConfig()
+}
 
 type ExecAction struct {
 	logger *logger.Logger
@@ -87,13 +93,9 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			return "", []byte{}, rerr
 		}
 
-		if err := e.validateRequestId(execInputAction.RequestId); err != nil {
-			return "", []byte{}, err
-		}
-
 		// Always feed in the exec stdin a chunk at a time (i.e. break up the byte array into chunks)
-		for i := 0; i < len(execInputAction.Stdin); i += kubedaemonutils.ExecChunkSize {
-			end := i + kubedaemonutils.ExecChunkSize
+		for i := 0; i < len(execInputAction.Stdin); i += kubeutils.ExecChunkSize {
+			end := i + kubeutils.ExecChunkSize
 			if end > len(execInputAction.Stdin) {
 				end = len(execInputAction.Stdin)
 			}
@@ -109,10 +111,6 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			return "", []byte{}, rerr
 		}
 
-		if err := e.validateRequestId(execResizeAction.RequestId); err != nil {
-			return "", []byte{}, err
-		}
-
 		e.execResizeChannel <- execResizeAction
 		return string(bzexec.ExecResize), []byte{}, nil
 	case bzexec.ExecStop:
@@ -123,10 +121,6 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			return "", []byte{}, rerr
 		}
 
-		if err := e.validateRequestId(execStopAction.RequestId); err != nil {
-			return "", []byte{}, err
-		}
-
 		e.closed = true
 		return string(bzexec.ExecStop), []byte{}, nil
 	default:
@@ -134,15 +128,6 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 		e.logger.Error(rerr)
 		return "", []byte{}, rerr
 	}
-}
-
-func (e *ExecAction) validateRequestId(requestId string) error {
-	if requestId != e.requestId {
-		rerr := fmt.Errorf("invalid request ID passed")
-		e.logger.Error(rerr)
-		return rerr
-	}
-	return nil
 }
 
 func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayload) (string, []byte, error) {
@@ -155,7 +140,7 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 
 	// Now open up our local exec session
 	// Create the in-cluster config
-	config, err := rest.InClusterConfig()
+	config, err := getConfig()
 	if err != nil {
 		rerr := fmt.Errorf("error creating in-custer config: %s", err)
 		e.logger.Error(rerr)
@@ -185,15 +170,15 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	}
 
 	// Turn it into a SPDY executor
-	exec, err := remotecommand.NewSPDYExecutor(config, "POST", kubeExecApiUrlParsed)
+	exec, err := getExecutor(config, "POST", kubeExecApiUrlParsed)
 	if err != nil {
 		return string(bzexec.ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}
 
 	// NOTE: don't need to version this because Type is not read on the other end
-	stderrWriter := stdout.NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdErr, e.logId)
-	stdoutWriter := stdout.NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdOut, e.logId)
-	stdinReader := stdin.NewStdReader(string(bzexec.StdIn), startExecRequest.RequestId, e.execStdinChannel)
+	stderrWriter := NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdErr, e.logId)
+	stdoutWriter := NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdOut, e.logId)
+	stdinReader := NewStdReader(string(bzexec.StdIn), startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
 
 	// This function listens for a closed datachannel.  If the datachannel is closed, it doesn't necessarily mean
