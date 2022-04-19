@@ -276,7 +276,7 @@ func (u *UnixShell) setSize(cols, rows uint32) (err error) {
 func (u *UnixShell) writePump(logger *logger.Logger) int {
 	defer func() {
 		if err := recover(); err != nil {
-			logger.Errorf("WritePump thread crashed with message: \n", err)
+			logger.Errorf("WritePump thread crashed with message: %s", err)
 			logger.Errorf("Stacktrace:\n%s", debug.Stack())
 		}
 	}()
@@ -302,7 +302,7 @@ func (u *UnixShell) writePump(logger *logger.Logger) int {
 			if err != nil {
 				u.sendStreamMessage(smsg.ShellQuit, "")
 
-				logger.Errorf("WritePump failed when reading from stdout: \n", err)
+				logger.Errorf("WritePump failed when reading from stdout: %s", err)
 				return config.ErrorExitCode
 			}
 
