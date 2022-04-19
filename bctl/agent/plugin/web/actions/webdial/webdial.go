@@ -9,10 +9,11 @@ import (
 	"net/http"
 	"net/url"
 
-	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
-	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
+	webaction "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
@@ -28,7 +29,8 @@ type WebDial struct {
 	requestId string
 
 	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan chan smsg.StreamMessage
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
 
 	interruptChan chan bool
 
@@ -64,11 +66,11 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 	var rerr error
 	switch bzwebdial.WebDialSubAction(action) {
 	case bzwebdial.WebDialStart:
-		var start bzwebdial.WebDialActionPayload
-		if err := json.Unmarshal(actionPayload, &start); err != nil {
+		var webDialActionRequest bzwebdial.WebDialActionPayload
+		if err := json.Unmarshal(actionPayload, &webDialActionRequest); err != nil {
 			rerr = fmt.Errorf("malformed web dial action payload: %s", actionPayload)
 		} else {
-			w.requestId = start.RequestId
+			w.start(webDialActionRequest)
 			return action, []byte{}, nil
 		}
 	case bzwebdial.WebDialInput:
@@ -87,6 +89,14 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 
 	w.logger.Error(rerr)
 	return "", []byte{}, rerr
+}
+
+func (w *WebDial) start(webDialActionRequest bzwebdial.WebDialActionPayload) {
+	// keep track of who we're talking to
+	w.requestId = webDialActionRequest.RequestId
+	w.logger.Infof("Setting request id: %s", w.requestId)
+	w.streamMessageVersion = webDialActionRequest.StreamMessageVersion
+	w.logger.Infof("Setting stream message version: %s", w.streamMessageVersion)
 }
 
 func (w *WebDial) handleRequest(requestPayload bzwebdial.WebInputActionPayload) error {
@@ -125,7 +135,13 @@ func (w *WebDial) handleNewHttpRequest(requestPayload bzwebdial.WebInputActionPa
 				Content:    []byte{},
 			}
 
-			w.sendStreamMessage(responsePayload, 0, smsg.WebError)
+			switch w.streamMessageVersion {
+			// prior to 202204
+			case "":
+				w.sendStreamMessage(0, smsg.WebError, false, responsePayload)
+			default:
+				w.sendStreamMessage(0, smsg.Error, false, responsePayload)
+			}
 			return rerr
 		} else {
 			go w.listenAndProcessStreamMessages(response)
@@ -146,7 +162,7 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 
 	sequenceNumber := 0
 	buf := make([]byte, chunkSize)
-	var responsePayload bzwebdial.WebOutputActionPayload
+	var responsePayload *bzwebdial.WebOutputActionPayload
 
 	for {
 		select {
@@ -166,37 +182,51 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 				w.logger.Errorf("error reading response body: %s", err)
 
 				// Do not quit, just return the user the api request info
-				responsePayload = bzwebdial.WebOutputActionPayload{
+				responsePayload = &bzwebdial.WebOutputActionPayload{
 					StatusCode: http.StatusBadGateway,
 					RequestId:  w.requestId,
 					Headers:    map[string][]string{},
 					Content:    buf[:numBytes],
 				}
 
-				w.sendStreamMessage(&responsePayload, sequenceNumber, smsg.WebError)
+				switch w.streamMessageVersion {
+				// prior to 202204
+				case "":
+					w.sendStreamMessage(sequenceNumber, smsg.WebError, false, responsePayload)
+				default:
+					w.sendStreamMessage(sequenceNumber, smsg.Error, false, responsePayload)
+				}
 			}
 
 			w.logger.Tracef("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
 
 			// Now we need to send that data back to the client
-			responsePayload = bzwebdial.WebOutputActionPayload{
+			responsePayload = &bzwebdial.WebOutputActionPayload{
 				StatusCode: response.StatusCode,
 				RequestId:  w.requestId,
 				Headers:    header,
 				Content:    buf[:numBytes],
 			}
 
-			// if we got an io.EOF, this is the final message so let the daemon know
-			streamMessage := smsg.WebStream
-			if err == io.EOF {
-				streamMessage = smsg.WebStreamEnd
-			}
-
-			w.sendStreamMessage(&responsePayload, sequenceNumber, streamMessage)
-
 			// we get io.EOFs on whichever read call processes the final byte
 			if err == io.EOF {
+				// this is the final message so let the daemon know
+				switch w.streamMessageVersion {
+				// prior to 202204
+				case "":
+					w.sendStreamMessage(sequenceNumber, smsg.WebStreamEnd, false, responsePayload)
+				default:
+					w.sendStreamMessage(sequenceNumber, smsg.Stream, false, responsePayload)
+				}
 				return
+			} else {
+				switch w.streamMessageVersion {
+				// prior to 202204
+				case "":
+					w.sendStreamMessage(sequenceNumber, smsg.WebStream, true, responsePayload)
+				default:
+					w.sendStreamMessage(sequenceNumber, smsg.Stream, true, responsePayload)
+				}
 			}
 
 			sequenceNumber += 1
@@ -204,17 +234,16 @@ func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
 	}
 }
 
-func (w *WebDial) sendStreamMessage(payload *bzwebdial.WebOutputActionPayload, sequenceNumber int, streamType smsg.StreamType) {
+func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, payload *bzwebdial.WebOutputActionPayload) {
 	responsePayloadBytes, _ := json.Marshal(payload)
-	str := base64.StdEncoding.EncodeToString(responsePayloadBytes)
-	message := smsg.StreamMessage{
-		Type:           string(streamType),
-		RequestId:      w.requestId,
+	w.streamOutputChan <- smsg.StreamMessage{
+		SchemaVersion:  w.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		Content:        str,
-		LogId:          "", // No log id for web messages
+		Action:         string(webaction.Dial),
+		Type:           streamType,
+		More:           more,
+		Content:        base64.StdEncoding.EncodeToString(responsePayloadBytes),
 	}
-	w.streamOutputChan <- message
 }
 
 func (w *WebDial) buildHttpRequest(endpoint string, body []byte, method string, headers map[string][]string) (*http.Request, error) {

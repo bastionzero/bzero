@@ -14,6 +14,8 @@ import (
 
 	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	kubeaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
@@ -23,8 +25,9 @@ type StreamAction struct {
 	tmb    *tomb.Tomb
 	closed bool
 
-	streamOutputChan chan smsg.StreamMessage
-	doneChan         chan bool
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
+	doneChan             chan bool
 
 	requestId           string
 	serviceAccountToken string
@@ -58,22 +61,20 @@ func (s *StreamAction) Closed() bool {
 }
 
 func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	switch smsg.StreamType(action) {
+	switch stream.StreamSubAction(action) {
 
 	// Start exec message required before anything else
-	case smsg.StreamStart:
-		var streamActionRequest KubeStreamActionPayload
+	case stream.StreamStart:
+		var streamActionRequest stream.KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
 			s.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 
-		s.requestId = streamActionRequest.RequestId
-
 		return s.StartStream(streamActionRequest, action)
-	case smsg.StreamStop:
-		var streamActionRequest KubeStreamActionPayload
+	case stream.StreamStop:
+		var streamActionRequest stream.KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
 			s.logger.Error(rerr)
@@ -98,7 +99,13 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 	}
 }
 
-func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, action string) (string, []byte, error) {
+func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPayload, action string) (string, []byte, error) {
+	// keep track of who we're talking to
+	s.requestId = streamActionRequest.RequestId
+	s.logger.Infof("Setting request id: %s", s.requestId)
+	s.streamMessageVersion = streamActionRequest.StreamMessageVersion
+	s.logger.Infof("Setting stream message version: %s", s.streamMessageVersion)
+
 	// Build our request
 	s.logger.Infof("Making request for %s", streamActionRequest.Endpoint)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -123,21 +130,18 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 	for name, value := range res.Header {
 		headers[name] = value
 	}
-	kubeWatchHeadersPayload := KubeStreamHeadersPayload{
+	kubeWatchHeadersPayload := stream.KubeStreamHeadersPayload{
 		Headers: headers,
 	}
 	kubeWatchHeadersPayloadBytes, _ := json.Marshal(kubeWatchHeadersPayload)
-	content := base64.StdEncoding.EncodeToString(kubeWatchHeadersPayloadBytes[:])
-
 	// Stream the response back
-	message := smsg.StreamMessage{
-		Type:           string(smsg.StreamData),
-		RequestId:      streamActionRequest.RequestId,
-		LogId:          streamActionRequest.LogId,
-		SequenceNumber: 0,
-		Content:        content,
+	switch s.streamMessageVersion {
+	// prior to 202204
+	case "":
+		s.sendStreamMessage(0, smsg.StreamData, true, kubeWatchHeadersPayloadBytes[:], streamActionRequest.LogId)
+	default:
+		s.sendStreamMessage(0, smsg.Data, true, kubeWatchHeadersPayloadBytes[:], streamActionRequest.LogId)
 	}
-	s.streamOutputChan <- message
 
 	// Create our bufio object
 	buf := make([]byte, 1024)
@@ -181,28 +185,24 @@ func (s *StreamAction) StartStream(streamActionRequest KubeStreamActionPayload, 
 					}
 
 					// Let the daemon know the stream has ended
-					message := smsg.StreamMessage{
-						Type:           string(smsg.StreamEnd),
-						RequestId:      streamActionRequest.RequestId,
-						LogId:          streamActionRequest.LogId,
-						SequenceNumber: sequenceNumber,
-						Content:        "",
+					switch s.streamMessageVersion {
+					// prior to 202204
+					case "":
+						s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, false, []byte{}, streamActionRequest.LogId)
+					default:
+						s.sendStreamMessage(sequenceNumber, smsg.Stream, false, []byte{}, streamActionRequest.LogId)
 					}
-					s.streamOutputChan <- message
 					return
 				}
 
 				// Stream the response back
-				content := base64.StdEncoding.EncodeToString(buf[:numBytes])
-				message := smsg.StreamMessage{
-					Type:           string(smsg.StreamData),
-					RequestId:      streamActionRequest.RequestId,
-					LogId:          streamActionRequest.LogId,
-					SequenceNumber: sequenceNumber,
-					Content:        content,
+				switch s.streamMessageVersion {
+				// prior to 202204
+				case "":
+					s.sendStreamMessage(sequenceNumber, smsg.StreamData, true, buf[:numBytes], streamActionRequest.LogId)
+				default:
+					s.sendStreamMessage(sequenceNumber, smsg.Data, true, buf[:numBytes], streamActionRequest.LogId)
 				}
-
-				s.streamOutputChan <- message
 				sequenceNumber += 1
 			}
 		}
@@ -234,7 +234,7 @@ func (s *StreamAction) buildHttpRequest(endpoint, body, method string, headers m
 
 // Helper function to try and see if there are any logs we can stream to the user
 // This is trigger in the case where the pod is terminated or crashing
-func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest KubeStreamActionPayload, sequenceNumber int) {
+func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest stream.KubeStreamActionPayload, sequenceNumber int) {
 	// Remove the follow query param
 	q := url.Query()
 	q.Del("follow")
@@ -247,15 +247,13 @@ func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest Kub
 			// Parse out the body
 			if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
 				// Stream the context back to the user
-				content := base64.StdEncoding.EncodeToString(bodyBytes)
-				message := smsg.StreamMessage{
-					Type:           string(smsg.StreamData),
-					RequestId:      streamActionRequest.RequestId,
-					LogId:          streamActionRequest.LogId,
-					SequenceNumber: sequenceNumber,
-					Content:        content,
+				switch s.streamMessageVersion {
+				// prior to 202204
+				case "":
+					s.sendStreamMessage(sequenceNumber, smsg.StreamData, true, bodyBytes, streamActionRequest.LogId)
+				default:
+					s.sendStreamMessage(sequenceNumber, smsg.Data, true, bodyBytes, streamActionRequest.LogId)
 				}
-				s.streamOutputChan <- message
 			} else {
 				s.logger.Errorf("error reading body of http request: %s", err)
 			}
@@ -274,4 +272,23 @@ func convertToUrlObject(inURL string) (*url.URL, error) {
 		return nil, err
 	}
 	return u, nil
+}
+
+func (s *StreamAction) sendStreamMessage(
+	sequenceNumber int,
+	streamType smsg.StreamType,
+	more bool,
+	contentBytes []byte,
+	logId string,
+) {
+	s.streamOutputChan <- smsg.StreamMessage{
+		SchemaVersion:  s.streamMessageVersion,
+		SequenceNumber: sequenceNumber,
+		RequestId:      s.requestId,
+		LogId:          logId,
+		Action:         string(kubeaction.Stream),
+		Type:           streamType,
+		More:           more,
+		Content:        base64.StdEncoding.EncodeToString(contentBytes),
+	}
 }

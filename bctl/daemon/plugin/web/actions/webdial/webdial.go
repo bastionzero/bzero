@@ -56,7 +56,8 @@ func New(logger *logger.Logger,
 func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
 	// Build the action payload to start the web action dial
 	payload := bzwebdial.WebDialActionPayload{
-		RequestId: w.requestId,
+		RequestId:            w.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
 	}
 
 	// Send payload to plugin output queue
@@ -120,10 +121,9 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				continue
 			}
 
-			switch smsg.StreamType(data.Type) {
-			case smsg.WebStream, smsg.WebStreamEnd:
+			// may have gotten an old-fashioned or newfangled message type, depending on what we asked for
+			if data.Type == smsg.WebStream || data.Type == smsg.WebStreamEnd || data.Type == smsg.Stream {
 				w.streamMessages[data.SequenceNumber] = data
-
 				// process the incoming stream messages *in order*
 				for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
 					var response bzwebdial.WebOutputActionPayload
@@ -134,28 +134,25 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						w.logger.Error(rerr)
 						return rerr
 					} else {
-
 						// we only write this header once
 						// ref: https://stackoverflow.com/questions/57828645/how-to-handle-superfluous-response-writeheader-call-in-order-to-return-500
 						if !headerSet {
-
 							// extract and build our writer headers
 							for name, values := range response.Headers {
 								for _, value := range values {
 									writer.Header().Add(name, value)
 								}
 							}
-
 							writer.WriteHeader(response.StatusCode)
 							headerSet = true
 						}
-
 						// write response to user
 						w.logger.Tracef("Writing chunk #%d of size %d", w.expectedSequenceNumber, len(response.Content))
 						writer.Write(response.Content)
 
 						// if this is our last stream message, then we can return
-						if smsg.StreamType(nextMessage.Type) == smsg.WebStreamEnd {
+						// again, might be hearing about this via old language or new
+						if nextMessage.Type == smsg.WebStreamEnd || (nextMessage.Type == smsg.Stream && !nextMessage.More) {
 							return nil
 						}
 
@@ -163,7 +160,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						w.expectedSequenceNumber += 1
 					}
 				}
-			default:
+			} else {
 				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}

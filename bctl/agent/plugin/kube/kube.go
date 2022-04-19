@@ -26,15 +26,6 @@ type IKubeAction interface {
 	Closed() bool
 }
 
-type KubeAction string
-
-const (
-	Exec        KubeAction = "exec"
-	RestApi     KubeAction = "restapi"
-	Stream      KubeAction = "stream"
-	PortForward KubeAction = "portforward"
-)
-
 type JustRequestId struct {
 	RequestId string `json:"requestId"`
 }
@@ -136,16 +127,16 @@ func (k *KubePlugin) Receive(action string, actionPayload []byte) (string, []byt
 		var a IKubeAction
 		var err error
 
-		switch KubeAction(kubeAction) {
-		case RestApi:
+		switch bzkube.KubeAction(kubeAction) {
+		case bzkube.RestApi:
 			a, err = restapi.New(subLogger, k.serviceAccountToken, k.kubeHost, k.targetGroups, k.targetUser)
-		case Exec:
+		case bzkube.Exec:
 			a, err = exec.New(subLogger, k.tmb, k.serviceAccountToken, k.kubeHost, k.targetGroups, k.targetUser, k.streamOutputChan)
 			k.updateActionsMap(a, rid) // save action for later input
-		case Stream:
+		case bzkube.Stream:
 			a, err = stream.New(subLogger, k.tmb, k.serviceAccountToken, k.kubeHost, k.targetGroups, k.targetUser, k.streamOutputChan)
 			k.updateActionsMap(a, rid) // save action for later input
-		case PortForward:
+		case bzkube.PortForward:
 			a, err = portforward.New(subLogger, k.tmb, k.serviceAccountToken, k.kubeHost, k.targetGroups, k.targetUser, k.streamOutputChan)
 			k.updateActionsMap(a, rid) // save action for later input
 		default:

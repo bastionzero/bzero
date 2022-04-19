@@ -294,13 +294,13 @@ func (u *UnixShell) writePump(logger *logger.Logger) int {
 		case exitCode := <-u.execCmdDone:
 			// Handle pty exit by sending shell quit stream message
 			u.logger.Infof("Pty exited with code %d", exitCode)
-			u.sendStreamMessage(smsg.ShellQuit, "")
+			u.sendStreamMessage(smsg.Stop, "")
 			return exitCode
 		default:
 			stdoutBytesLen, err := reader.Read(stdoutBytes)
 
 			if err != nil {
-				u.sendStreamMessage(smsg.ShellQuit, "")
+				u.sendStreamMessage(smsg.Stop, "")
 
 				logger.Errorf("WritePump failed when reading from stdout: %s", err)
 				return config.ErrorExitCode
@@ -312,7 +312,7 @@ func (u *UnixShell) writePump(logger *logger.Logger) int {
 
 			str := base64.StdEncoding.EncodeToString(stdoutBytes[:stdoutBytesLen])
 
-			u.sendStreamMessage(smsg.ShellStdOut, str)
+			u.sendStreamMessage(smsg.StdOut, str)
 
 			// Wait for stdout to process more data
 			time.Sleep(time.Millisecond)
@@ -322,7 +322,7 @@ func (u *UnixShell) writePump(logger *logger.Logger) int {
 
 func (u *UnixShell) sendStreamMessage(streamType smsg.StreamType, content string) {
 	message := smsg.StreamMessage{
-		Type:           string(streamType),
+		Type:           streamType,
 		SequenceNumber: u.streamSequenceNumber,
 		Content:        content,
 	}

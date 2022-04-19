@@ -8,11 +8,7 @@ import (
 
 	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-)
-
-const (
-	RestResponse = "kube/restapi/response"
-	RestRequest  = "kube/restapi/request"
+	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
 )
 
 type RestApiAction struct {
@@ -44,7 +40,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 		r.closed = true
 	}()
 
-	var apiRequest KubeRestApiActionPayload
+	var apiRequest kuberest.KubeRestApiActionPayload
 	if err := json.Unmarshal(actionPayload, &apiRequest); err != nil {
 		rerr := fmt.Errorf("malformed Keysplitting Action payload %v", actionPayload)
 		r.logger.Error(rerr)
@@ -80,7 +76,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 	}
 
 	// Now we need to send that data back to the client
-	responsePayload := KubeRestApiActionResponsePayload{
+	responsePayload := kuberest.KubeRestApiActionResponsePayload{
 		StatusCode: res.StatusCode,
 		RequestId:  apiRequest.RequestId,
 		Headers:    header,
@@ -88,7 +84,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 	}
 	responsePayloadBytes, _ := json.Marshal(responsePayload)
 
-	return RestResponse, responsePayloadBytes, nil
+	return kuberest.RestResponse, responsePayloadBytes, nil
 }
 
 func (r *RestApiAction) buildHttpRequest(endpoint, body, method string, headers map[string][]string) (*http.Request, error) {

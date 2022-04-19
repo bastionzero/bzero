@@ -116,7 +116,7 @@ func (s *UnixShell) handleStreamMessages() {
 		case streamMessage := <-s.streamInputChan:
 			// process the incoming stream messages
 			switch smsg.StreamType(streamMessage.Type) {
-			case smsg.ShellStdOut:
+			case smsg.StdOut:
 				if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 					s.logger.Errorf("Error decoding ShellStdOut stream content: %s", err)
 				} else {
@@ -124,7 +124,7 @@ func (s *UnixShell) handleStreamMessages() {
 						s.logger.Errorf("Error writing to Stdout: %s", err)
 					}
 				}
-			case smsg.ShellQuit:
+			case smsg.Stop:
 				s.tmb.Kill(fmt.Errorf("Received shell quit stream message."))
 				return
 			default:
