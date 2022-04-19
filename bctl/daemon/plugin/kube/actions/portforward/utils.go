@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
+	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 )
 

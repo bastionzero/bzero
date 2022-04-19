@@ -425,7 +425,6 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 			return d.sendKeysplitting(&ksMessage, next.Action, next.ActionPayload)
 		}
 	case ksmsg.DataAck:
-
 		// If we had something on deck, then this was the ack for it and we can remove it
 		d.setOnDeck(bzplugin.ActionWrapper{})
 

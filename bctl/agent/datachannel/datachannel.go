@@ -237,7 +237,8 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 			case <-d.tmb.Dying():
 				return
 			case streamMessage := <-streamOutputChan:
-				d.logger.Infof("Sending %s/%s/%v stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
+				// FIXME: check correct token
+				d.logger.Infof("Sending %s/%s/%t stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
 				d.send(am.Stream, streamMessage)
 			}
 		}
@@ -249,10 +250,10 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 	var err error
 
 	switch pluginName {
-	case Kube:
-		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
 	case Db:
 		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+	case Kube:
+		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:

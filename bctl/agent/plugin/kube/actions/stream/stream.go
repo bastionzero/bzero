@@ -7,18 +7,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
 
-	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	kubeaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
+	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
+
+// wrap the client-creation code so that during testing we can inject a mock client
+var makeRequest = func(req *http.Request) (*http.Response, error) {
+	client := http.Client{}
+	return client.Do(req)
+}
 
 type StreamAction struct {
 	logger *logger.Logger
@@ -72,19 +77,13 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 			return action, []byte{}, rerr
 		}
 
-		return s.StartStream(streamActionRequest, action)
+		return s.startStream(streamActionRequest, action)
 	case stream.StreamStop:
 		var streamActionRequest stream.KubeStreamActionPayload
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
 			s.logger.Error(rerr)
 			return action, []byte{}, rerr
-		}
-
-		// check requestid matches
-		if err := kubeutils.MatchRequestId(streamActionRequest.RequestId, s.requestId); err != nil {
-			s.logger.Error(err)
-			return "", []byte{}, err
 		}
 
 		s.logger.Info("Stopping Stream Action")
@@ -99,7 +98,7 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 	}
 }
 
-func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPayload, action string) (string, []byte, error) {
+func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPayload, action string) (string, []byte, error) {
 	// keep track of who we're talking to
 	s.requestId = streamActionRequest.RequestId
 	s.logger.Infof("Setting request id: %s", s.requestId)
@@ -111,15 +110,16 @@ func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPa
 	ctx, cancel := context.WithCancel(context.Background())
 	req, err := s.buildHttpRequest(streamActionRequest.Endpoint, streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers)
 	if err != nil {
+		defer cancel()
 		s.logger.Error(err)
 		return action, []byte{}, err
 	}
 
 	// Make the request and wait for the body to close
 	req = req.WithContext(ctx)
-	httpClient := &http.Client{}
-	res, err := httpClient.Do(req)
+	res, err := makeRequest(req)
 	if err != nil {
+		defer cancel()
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		s.logger.Error(rerr)
 		return action, []byte{}, rerr
@@ -157,7 +157,7 @@ func (s *StreamAction) StartStream(streamActionRequest stream.KubeStreamActionPa
 				return
 			default:
 				// Read into the buffer
-				numBytes, err := io.ReadFull(br, buf)
+				numBytes, err := br.Read(buf)
 
 				if err != nil {
 					switch err {
@@ -242,10 +242,9 @@ func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest str
 
 	// Build our http request
 	if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, url.String(), streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
-		httpClient := &http.Client{}
-		if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
+		if noFollowRes, err := makeRequest(noFollowReq); err == nil {
 			// Parse out the body
-			if bodyBytes, err := ioutil.ReadAll(noFollowRes.Body); err == nil {
+			if bodyBytes, err := io.ReadAll(noFollowRes.Body); err == nil {
 				// Stream the context back to the user
 				switch s.streamMessageVersion {
 				// prior to 202204

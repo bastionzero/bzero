@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -53,7 +52,7 @@ func BuildEndpoint(base string, toAdd string) (string, error) {
 
 // Helper function to extract the body of a http request
 func GetBodyBytes(body io.ReadCloser) ([]byte, error) {
-	bodyInBytes, err := ioutil.ReadAll(body)
+	bodyInBytes, err := io.ReadAll(body)
 	if err != nil {
 		rerr := fmt.Errorf("error building body: %s", err)
 		return nil, rerr

@@ -66,15 +66,15 @@ func New(parentTmb *tomb.Tomb,
 		case bzweb.Websocket:
 			plugin.action, rerr = webwebsocket.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
 		default:
-			rerr = fmt.Errorf("unhandled web action")
+			rerr = fmt.Errorf("unhandled Web action")
 		}
 	}
 
 	if rerr != nil {
-		plugin.logger.Errorf("failed to start plugin action %s: %s", action, rerr)
+		plugin.logger.Errorf("failed to start Web plugin with action %s: %s", action, rerr)
 		return nil, rerr
 	} else {
-		plugin.logger.Infof("Web plugin started %v action", action)
+		plugin.logger.Infof("Web plugin started with %v action", action)
 		return plugin, nil
 	}
 }
