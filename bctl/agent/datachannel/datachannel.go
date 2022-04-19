@@ -237,7 +237,7 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 			case <-d.tmb.Dying():
 				return
 			case streamMessage := <-streamOutputChan:
-				d.logger.Infof("Sending %s stream message", streamMessage.Type)
+				d.logger.Infof("Sending %s/%s/%v stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
 				d.send(am.Stream, streamMessage)
 			}
 		}

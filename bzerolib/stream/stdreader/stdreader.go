@@ -3,8 +3,6 @@ package stdreader
 import (
 	"bytes"
 	"io"
-
-	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
 var (
@@ -13,13 +11,13 @@ var (
 
 // Stdin
 type StdReader struct {
-	StreamType   smsg.StreamType
+	StreamType   string
 	RequestId    string
 	stdinChannel chan []byte
 	doneChannel  chan bool
 }
 
-func NewStdReader(streamType smsg.StreamType, requestId string, stdinChannel chan []byte) *StdReader {
+func NewStdReader(streamType string, requestId string, stdinChannel chan []byte) *StdReader {
 	stdin := &StdReader{
 		StreamType:   streamType,
 		RequestId:    requestId,

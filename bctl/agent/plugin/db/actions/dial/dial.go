@@ -10,6 +10,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/db/actions/dial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
@@ -24,7 +25,8 @@ type Dial struct {
 	closed bool
 
 	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan chan smsg.StreamMessage
+	streamOutputChan     chan smsg.StreamMessage
+	streamMessageVersion smsg.SchemaVersion
 
 	requestId     string
 	remoteAddress *net.TCPAddr
@@ -119,9 +121,11 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 }
 
 func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (string, []byte, error) {
-	// Set our requestId
+	// keep track of who we're talking to
 	d.requestId = dialActionRequest.RequestId
 	d.logger.Infof("Setting request id: %s", d.requestId)
+	d.streamMessageVersion = dialActionRequest.StreamMessageVersion
+	d.logger.Infof("Setting stream message version: %s", d.streamMessageVersion)
 
 	// For each start, call the dial the TCP address
 	if remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress); err != nil {
@@ -163,8 +167,13 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 				}
 
 				// Let our daemon know that we have got the error and we need to close the connection
-				content := base64.StdEncoding.EncodeToString(buff[:n])
-				d.sendStreamMessage(smsg.DbStreamEnd, sequenceNumber, content)
+				switch d.streamMessageVersion {
+				// prior to 202204
+				case "":
+					d.sendStreamMessage(sequenceNumber, smsg.DbStreamEnd, false, buff[:n])
+				default:
+					d.sendStreamMessage(sequenceNumber, smsg.Stream, false, buff[:n])
+				}
 
 				return
 			}
@@ -172,8 +181,13 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 			d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
 
 			// Now send this to daemon
-			content := base64.StdEncoding.EncodeToString(buff[:n])
-			d.sendStreamMessage(smsg.DbStream, sequenceNumber, content)
+			switch d.streamMessageVersion {
+			// prior to 202204
+			case "":
+				d.sendStreamMessage(sequenceNumber, smsg.DbStream, true, buff[:n])
+			default:
+				d.sendStreamMessage(sequenceNumber, smsg.Stream, true, buff[:n])
+			}
 
 			sequenceNumber += 1
 		}
@@ -183,13 +197,13 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 	return action, []byte{}, nil
 }
 
-func (d *Dial) sendStreamMessage(streamType smsg.StreamType, sequenceNumber int, content string) {
-	message := smsg.StreamMessage{
-		Type:           string(streamType),
-		RequestId:      d.requestId,
+func (d *Dial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
+	d.streamOutputChan <- smsg.StreamMessage{
+		SchemaVersion:  d.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		Content:        content,
-		LogId:          "", // No log id for db messages
+		Action:         string(db.Dial),
+		Type:           streamType,
+		More:           more,
+		Content:        base64.StdEncoding.EncodeToString(contentBytes),
 	}
-	d.streamOutputChan <- message
 }

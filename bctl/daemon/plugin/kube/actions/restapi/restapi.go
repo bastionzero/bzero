@@ -7,10 +7,10 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	kuberest "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/restapi"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 

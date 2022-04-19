@@ -1,5 +1,9 @@
 package portforward
 
+import (
+	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+)
+
 const (
 	DataStreamBufferSize  = 1024 * 1024
 	ErrorStreamBufferSize = 1024 * 1024
@@ -7,12 +11,13 @@ const (
 
 // Portforward payload for the "kube/portforward/start" action
 type KubePortForwardStartActionPayload struct {
-	RequestId       string            `json:"requestId"`
-	LogId           string            `json:"logId"`
-	Endpoint        string            `json:"endpoint"`
-	DataHeaders     map[string]string `json:"dataHeaders"`
-	ErrorHeaders    map[string]string `json:"errorHeaders"`
-	CommandBeingRun string            `json:"commandBeingRun"`
+	RequestId            string             `json:"requestId"`
+	StreamMessageVersion smsg.SchemaVersion `json:"streamMessageVersion"` // informs Agent what SchemaVersion to use
+	LogId                string             `json:"logId"`
+	Endpoint             string             `json:"endpoint"`
+	DataHeaders          map[string]string  `json:"dataHeaders"`
+	ErrorHeaders         map[string]string  `json:"errorHeaders"`
+	CommandBeingRun      string             `json:"commandBeingRun"`
 }
 
 // Portforward payload for the "kube/portforward/datain" action

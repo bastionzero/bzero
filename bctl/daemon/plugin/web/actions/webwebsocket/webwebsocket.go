@@ -6,11 +6,10 @@ import (
 	"log"
 	"net/http"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
-	bzwebwebsocket "bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webwebsocket"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"github.com/gorilla/websocket"
 
@@ -56,16 +55,17 @@ func (s *WebWebsocketAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, r
 
 	// Let the agent know to open up a websocket
 	payload := webwebsocket.WebWebsocketStartActionPayload{
-		RequestId: s.requestId,
-		Headers:   headers,
-		Endpoint:  request.URL.String(),
-		Method:    request.Method,
+		RequestId:            s.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+		Headers:              headers,
+		Endpoint:             request.URL.String(),
+		Method:               request.Method,
 	}
 
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        string(bzwebwebsocket.Start),
+		Action:        string(webwebsocket.Start),
 		ActionPayload: payloadBytes,
 	}
 
@@ -85,43 +85,20 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 	// Setup a go routine to stream data from the agent back to daemon
 	go func() {
 		for {
-			select {
-			case incomingMessage := <-s.streamInputChan:
-				switch incomingMessage.Type {
-				case string(webwebsocket.DataOut):
-					// Stream data to the local connection
-					// Undo the base 64 encoding
-					incomingContent, base64Err := base64.StdEncoding.DecodeString(incomingMessage.Content)
-					if base64Err != nil {
-						s.logger.Errorf("error decoding stream message: %v", base64Err)
-						return
-					}
-
-					// Unmarshell the stream message
-					var streamDataOut webwebsocket.WebWebsocketStreamDataOut
-					if err := json.Unmarshal(incomingContent, &streamDataOut); err != nil {
-						s.logger.Errorf("error unmarshalling stream message: %s", err)
-						return
-					}
-
-					// Unmarshel the websocket message
-					websocketMessage, base64Err := base64.StdEncoding.DecodeString(streamDataOut.Message)
-					if base64Err != nil {
-						s.logger.Errorf("error decoding stream message: %s", base64Err)
-						return
-					}
-
-					// Send the message to the user!
-					err = conn.WriteMessage(streamDataOut.MessageType, websocketMessage)
-					if err != nil {
-						s.logger.Errorf("error writing to websocket: %s", err)
-					}
-				case string(webwebsocket.AgentStop):
-					// End the local connection
-					s.logger.Infof("Received close message from agent, closing websocket")
-					conn.Close()
+			incomingMessage := <-s.streamInputChan
+			// may be getting an old-fashioned or newfangled message, depending on what we asked for
+			if incomingMessage.Type == smsg.DataOut || incomingMessage.Type == smsg.Data {
+				if writeErr := s.writeOutData(conn, incomingMessage.Content); writeErr != nil {
 					return
 				}
+			}
+			if incomingMessage.Type == smsg.AgentStop || incomingMessage.Type == smsg.Stop {
+				// End the local connection
+				s.logger.Infof("Received close message from agent, closing websocket")
+				conn.Close()
+				return
+			} else {
+				s.logger.Errorf("unhandled stream type: %s", incomingMessage.Type)
 			}
 		}
 	}()
@@ -142,7 +119,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 
 			// Let the agent know to close the websocket
 			s.outputChan <- plugin.ActionWrapper{
-				Action:        string(bzwebwebsocket.DaemonStop),
+				Action:        string(webwebsocket.DaemonStop),
 				ActionPayload: payloadBytes,
 			}
 			break
@@ -161,7 +138,7 @@ func (s *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 		// Send payload to plugin output queue
 		payloadBytes, _ := json.Marshal(payload)
 		s.outputChan <- plugin.ActionWrapper{
-			Action:        string(bzwebwebsocket.DataIn),
+			Action:        string(webwebsocket.DataIn),
 			ActionPayload: payloadBytes,
 		}
 	}
@@ -175,4 +152,35 @@ func (s *WebWebsocketAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrap
 func (s *WebWebsocketAction) ReceiveStream(smessage smsg.StreamMessage) {
 	s.logger.Debugf("web websocket action received %v stream", smessage.Type)
 	s.streamInputChan <- smessage
+}
+
+func (s *WebWebsocketAction) writeOutData(conn *websocket.Conn, content string) error {
+	// Stream data to the local connection
+	// Undo the base 64 encoding
+	incomingContent, base64Err := base64.StdEncoding.DecodeString(content)
+	if base64Err != nil {
+		s.logger.Errorf("error decoding stream message: %v", base64Err)
+		return base64Err
+	}
+
+	// Unmarshell the stream message
+	var streamDataOut webwebsocket.WebWebsocketStreamDataOut
+	if err := json.Unmarshal(incomingContent, &streamDataOut); err != nil {
+		s.logger.Errorf("error unmarshalling stream message: %s", err)
+		return err
+	}
+
+	// Unmarshel the websocket message
+	websocketMessage, base64Err := base64.StdEncoding.DecodeString(streamDataOut.Message)
+	if base64Err != nil {
+		s.logger.Errorf("error decoding stream message: %s", base64Err)
+		return base64Err
+	}
+
+	// Send the message to the user!
+	err := conn.WriteMessage(streamDataOut.MessageType, websocketMessage)
+	if err != nil {
+		s.logger.Errorf("error writing to websocket: %s", err)
+	}
+	return nil
 }

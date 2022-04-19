@@ -74,14 +74,17 @@ func New(parentTmb *tomb.Tomb,
 func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	d.logger.Debugf("DB plugin received message with %s action", action)
 
+	var rerr error
 	if safePayload, err := cleanPayload(actionPayload); err != nil {
-		d.logger.Error(err)
-		return "", []byte{}, err
+		rerr = err
 	} else if action, payload, err := d.action.Receive(action, safePayload); err != nil {
-		return "", []byte{}, err
+		rerr = err
 	} else {
 		return action, payload, err
 	}
+
+	d.logger.Error(rerr)
+	return "", []byte{}, rerr
 }
 
 func parseAction(action string) (db.DbAction, error) {

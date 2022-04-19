@@ -7,11 +7,11 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	kubestream "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/stream"
 	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -84,20 +84,21 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	}
 
 	// Build the action payload
-	payload := kubestream.KubeStreamActionPayload{
-		Endpoint:        request.URL.String(),
-		Headers:         headers,
-		Method:          request.Method,
-		Body:            string(bodyInBytes), // fix this
-		RequestId:       s.requestId,
-		LogId:           s.logId,
-		CommandBeingRun: s.commandBeingRun,
+	payload := stream.KubeStreamActionPayload{
+		Endpoint:             request.URL.String(),
+		Headers:              headers,
+		Method:               request.Method,
+		Body:                 string(bodyInBytes), // TODO: fix this
+		RequestId:            s.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+		LogId:                s.logId,
+		CommandBeingRun:      s.commandBeingRun,
 	}
 
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
-		Action:        string(smsg.StreamStart),
+		Action:        string(stream.StreamStart),
 		ActionPayload: payloadBytes,
 	}
 
@@ -114,7 +115,7 @@ outOfOrderMessageHandler:
 			contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
 
 			// Attempt to decode contentBytes
-			var kubestreamHeadersPayload kubestream.KubeStreamHeadersPayload
+			var kubestreamHeadersPayload stream.KubeStreamHeadersPayload
 			if err := json.Unmarshal(contentBytes, &kubestreamHeadersPayload); err != nil {
 				// If we see an error this must be an early message
 				s.outOfOrderMessages[watchData.SequenceNumber] = watchData
@@ -143,7 +144,7 @@ outOfOrderMessageHandler:
 			s.logger.Infof("Watch request %v was cancelled", s.requestId)
 
 			// Build the action payload
-			payload := kubestream.KubeStreamActionPayload{
+			payload := stream.KubeStreamActionPayload{
 				Endpoint:  request.URL.String(),
 				Headers:   headers,
 				Method:    request.Method,
@@ -154,16 +155,20 @@ outOfOrderMessageHandler:
 
 			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
-				Action:        string(smsg.StreamStop),
+				Action:        string(stream.StreamStop),
 				ActionPayload: payloadBytes,
 			}
 
 			return nil
 
 		case watchData := <-s.streamInputChan:
-			// Determin if this is an end or data messages
-			switch watchData.Type {
-			case string(smsg.StreamData):
+			// may have received an old-fashioned or newfangled message, depending on what we asked for
+			if watchData.Type == smsg.StreamData || watchData.Type == smsg.StreamEnd || watchData.Type == smsg.Data {
+				if watchData.Type == smsg.StreamEnd || (watchData.Type == smsg.Data && !watchData.More) {
+					// End the stream
+					s.logger.Infof("Stream has been ended from the agent, closing request")
+					return nil
+				}
 				// Then stream the response to kubectl
 				if watchData.SequenceNumber == s.expectedSequenceNumber {
 					// If the incoming data is equal to the current expected seqNumber, show the user
@@ -181,13 +186,10 @@ outOfOrderMessageHandler:
 				} else {
 					s.outOfOrderMessages[watchData.SequenceNumber] = watchData
 				}
-			case string(smsg.StreamEnd):
-				// End the stream
-				s.logger.Infof("Stream has been ended from the agent, closing request")
-				return nil
-			default:
-				s.logger.Errorf("unhandled stream message: %s", watchData.Type)
+			} else {
+				s.logger.Errorf("unhandled stream type: %s", watchData.Type)
 			}
+
 		}
 	}
 }

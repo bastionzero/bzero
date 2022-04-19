@@ -300,7 +300,7 @@ func getAction(req *http.Request) bzkube.KubeAction {
 
 	// Persistent, yet not interactive commands that serve continual output but only listen for a single, request-cancelling input
 	case isPortForwardRequest(req):
-		return bzkube.Stream
+		return bzkube.PortForward
 	case isStreamRequest(req):
 		return bzkube.Stream
 
