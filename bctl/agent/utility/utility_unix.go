@@ -29,29 +29,16 @@ import (
 )
 
 var ShellPluginCommandName = "sh"
-var ShellPluginBashCommandName = "/bin/bash"
 var ShellPluginCommandArgs = []string{"-c"}
-
-var DefaultRunAsUser = "bzuser"
-
-const (
-	sudoersFile     = "/etc/sudoers.d/ssm-agent-users"
-	sudoersFileMode = 0440
-	fs_ioc_getflags = uintptr(0x80086601)
-	fs_ioc_setflags = uintptr(0x40086602)
-	FS_APPEND_FL    = 0x00000020 /* writes to file may only append */
-	FS_RESET_FL     = 0x00000000 /* reset file property */
-)
 
 // DoesUserExist checks if given user already exists
 func DoesUserExist(username string) (bool, error) {
-
 	shellCmdArgs := append(ShellPluginCommandArgs, fmt.Sprintf("id %s", username))
 	cmd := exec.Command(ShellPluginCommandName, shellCmdArgs...)
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			// The program has exited with an exit code != 0
-			return false, fmt.Errorf("encountered an error while checking for %s: %v", DefaultRunAsUser, exitErr.Error())
+			return false, fmt.Errorf("encountered an error while checking for %s: %v", username, exitErr.Error())
 		}
 		return false, nil
 	}
