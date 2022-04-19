@@ -449,24 +449,3 @@ func bubbleUpError(writer http.ResponseWriter, content string) {
 		writer.Write(toReturnMarshal)
 	}
 }
-
-func bubbleUpError(writer http.ResponseWriter, content string) {
-	// Bubble up the error to the user
-	// Ref: https://pkg.go.dev/golang.org/x/build/kubernetes/api#Status
-	toReturn := api.Status{
-		Message: content,
-		Status:  api.StatusFailure,
-		Code:    http.StatusForbidden,
-		Reason:  "Forbidden",
-	}
-	toReturnMarshal, err := json.Marshal(toReturn)
-	if err != nil {
-		// Best effort bubble up
-		writer.WriteHeader(http.StatusInternalServerError)
-		writer.Write([]byte(err.Error()))
-	} else {
-		writer.WriteHeader(http.StatusForbidden)
-		writer.Header().Set("Content-Type", "application/json")
-		writer.Write(toReturnMarshal)
-	}
-}
