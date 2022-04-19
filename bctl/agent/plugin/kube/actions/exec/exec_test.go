@@ -54,7 +54,7 @@ func (m MockExecutor) Stream(options remotecommand.StreamOptions) error {
 		}
 	}()
 
-	args := m.Called()
+	args := m.Called(options)
 	return args.Error(0)
 }
 
@@ -95,6 +95,7 @@ func TestExec(t *testing.T) {
 	testString := "echo hi"
 
 	mockExec := MockExecutor{}
+	// FIXME: need some bigass replicas to fit in here
 	mockExec.On("Stream").Return(nil)
 	setGetExecutor(mockExec)
 	setGetConfig()

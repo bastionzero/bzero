@@ -41,7 +41,7 @@ func buildActionPayload(assert *assert.Assertions, requestId string) []byte {
 	payload := portforward.KubePortForwardActionPayload{
 		RequestId:            requestId,
 		LogId:                "lid",
-		Data:                 []byte("Test data"),
+		Data:                 []byte("test data"),
 		PortForwardRequestId: "", // TODO: could make this better
 		PodPort:              5000,
 	}
@@ -61,7 +61,7 @@ func (m MockStream) Close() error {
 	return args.Error(0)
 }
 func (m MockStream) Read(p []byte) (n int, err error) {
-	args := m.Called()
+	args := m.Called(p)
 
 	// use test string
 	copy(p, []byte(m.myStreamData))
@@ -69,7 +69,7 @@ func (m MockStream) Read(p []byte) (n int, err error) {
 	return args.Int(0), args.Error(1)
 }
 func (m MockStream) Write(p []byte) (n int, err error) {
-	args := m.Called()
+	args := m.Called(p)
 	return args.Int(0), args.Error(1)
 }
 func (m MockStream) Reset() error {
@@ -138,8 +138,8 @@ func TestPortforward(t *testing.T) {
 	testData := "test data"
 
 	mockStream := MockStream{myStreamData: testData}
-	mockStream.On("Read").Return(9, nil)
-	mockStream.On("Write").Return(9, nil)
+	mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
+	mockStream.On("Write", []byte(testData)).Return(6, nil)
 	mockStream.On("Close").Return(nil)
 
 	mockStreamConnection := new(MockStreamConnection)

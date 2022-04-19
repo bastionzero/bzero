@@ -86,6 +86,7 @@ func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 	case <-tmb.Dying():
 		return nil
 	case rsp := <-r.inputChan:
+		//r.logger.Errorf("look at me!")
 		// unmarshall response in rest api payload object
 		var apiResponse kuberest.KubeRestApiActionResponsePayload
 		if err := json.Unmarshal(rsp.ActionPayload, &apiResponse); err != nil {
@@ -102,6 +103,8 @@ func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 				}
 			}
 		}
+
+		r.logger.Errorf("got %+v", apiResponse.Content)
 
 		// write response to user
 		writer.Write(apiResponse.Content)
