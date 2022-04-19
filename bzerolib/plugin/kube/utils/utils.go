@@ -9,6 +9,14 @@ import (
 	"strings"
 )
 
+func MatchRequestId(requestIdPassed string, requestIdSaved string) error {
+	if requestIdPassed != requestIdSaved {
+		rerr := fmt.Errorf("invalid request ID passed: %s", requestIdPassed)
+		return rerr
+	}
+	return nil
+}
+
 func WriteToHttpRequest(contentBytes []byte, writer http.ResponseWriter) error {
 	src := bytes.NewReader(contentBytes)
 	_, err := io.Copy(writer, src)
