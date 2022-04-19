@@ -73,13 +73,11 @@ func StartShellServer(
 		return err
 	}
 
-	// create our new datachannel in its own go routine so that we can accept other tcp connections
-	go func() {
-		if _, err := shellServer.newDataChannel(string(shell.UnixShell), shellServer.websocket); err == nil {
-		} else {
-			logger.Errorf("error starting datachannel: %s", err)
-		}
-	}()
+	// create our new datachannel
+	if _, err := shellServer.newDataChannel(string(shell.UnixShell), shellServer.websocket); err == nil {
+	} else {
+		logger.Errorf("error starting datachannel: %s", err)
+	}
 
 	return nil
 }
