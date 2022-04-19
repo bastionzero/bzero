@@ -102,7 +102,6 @@ func (k *UnixShell) Receive(action string, actionPayload []byte) (string, []byte
 		if err := k.open(); err != nil {
 			errorString := fmt.Errorf("unable to start shell: %s", err)
 			k.logger.Error(errorString)
-			time.Sleep(2 * time.Second)
 			return "", []byte{}, errorString
 		}
 	case bzshell.ShellClose:
