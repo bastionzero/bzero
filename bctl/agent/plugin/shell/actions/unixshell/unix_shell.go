@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -60,6 +61,7 @@ type UnixShell struct {
 	stdin                *os.File
 	stdout               *os.File
 	execCmd              execcmd.IExecCmd
+	execCmdDone          chan int // exit code
 	streamOutputChan     chan smsg.StreamMessage
 	shellStarted         bool
 	runAsUser            string
@@ -81,6 +83,7 @@ func New(
 		tmb:                  parentTmb, // if datachannel dies, so should we
 		streamOutputChan:     ch,
 		streamSequenceNumber: 1,
+		execCmdDone:          make(chan int, 1),
 	}
 
 	return &unixShell, nil
@@ -200,6 +203,27 @@ func (k *UnixShell) open() error {
 		return err
 	}
 
+	// Start a go routine to wait for the pty cmd to exit and close the
+	// execCmdDone channel
+	go func() {
+		if err := k.execCmd.Wait(); err != nil {
+			k.logger.Errorf("pty command exited with err: %s", err)
+			if exitError, ok := err.(*exec.ExitError); ok {
+				exitCode := exitError.ExitCode()
+				k.logger.Errorf("pty cmd exited with non-zero exit code %d err: %s", exitCode, err)
+				k.execCmdDone <- exitCode
+			} else {
+				k.logger.Errorf("pty command exited with unknown exit code")
+				k.execCmdDone <- -1
+			}
+		} else {
+			k.execCmdDone <- 0
+		}
+
+		k.execCmd = nil
+		close(k.execCmdDone)
+	}()
+
 	// Start to read from shell and write to datachannel
 	k.logger.Debugf("Start separate go routine to read from pty stdout and write to data channel")
 	done := make(chan int, 1)
@@ -226,8 +250,8 @@ func (k *UnixShell) shellInput(shellInput bzshell.ShellInputMessage) error {
 	if !k.Ready() {
 		// This is to handle scenario when cli/console starts sending size data but pty has not been started yet
 		// Since packets are rejected, cli/console will resend these packets until pty starts successfully in separate thread
-		k.logger.Tracef("Pty unavailable. Reject incoming message packet")
-		return errors.New("message handler is not ready, rejecting incoming packet")
+		k.logger.Debug("Unix shell action is not ready. Rejecting incoming message packet")
+		return errors.New("unix shell input handler is not ready, rejecting incoming packet")
 	}
 
 	k.logger.Tracef("Input message received: ")
@@ -253,7 +277,7 @@ func (k *UnixShell) setSize(cols, rows uint32) (err error) {
 func (k *UnixShell) writePump(logger *logger.Logger) int {
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Println("WritePump thread crashed with message: \n", err)
+			logger.Errorf("WritePump thread crashed with message: \n", err)
 			logger.Errorf("Stacktrace:\n%s", debug.Stack())
 		}
 	}()
@@ -267,26 +291,33 @@ func (k *UnixShell) writePump(logger *logger.Logger) int {
 	time.Sleep(time.Second)
 
 	for {
-		stdoutBytesLen, err := reader.Read(stdoutBytes)
-
-		if err != nil {
+		select {
+		case exitCode := <-k.execCmdDone:
+			// Handle pty exit by sending shell quit stream message
+			k.logger.Infof("Pty exited with code %d", exitCode)
 			k.sendStreamMessage(smsg.ShellQuit, "")
+			return exitCode
+		default:
+			stdoutBytesLen, err := reader.Read(stdoutBytes)
 
-			fmt.Println("WritePump failed when reading from stdout: \n", err)
-			logger.Errorf("Stacktrace:\n%s", debug.Stack())
-			return config.ErrorExitCode
+			if err != nil {
+				k.sendStreamMessage(smsg.ShellQuit, "")
+
+				logger.Errorf("WritePump failed when reading from stdout: \n", err)
+				return config.ErrorExitCode
+			}
+
+			k.stdoutbuffMutex.Lock()
+			k.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
+			k.stdoutbuffMutex.Unlock()
+
+			str := base64.StdEncoding.EncodeToString(stdoutBytes[:stdoutBytesLen])
+
+			k.sendStreamMessage(smsg.ShellStdOut, str)
+
+			// Wait for stdout to process more data
+			time.Sleep(time.Millisecond)
 		}
-
-		k.stdoutbuffMutex.Lock()
-		k.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
-		k.stdoutbuffMutex.Unlock()
-
-		str := base64.StdEncoding.EncodeToString(stdoutBytes[:stdoutBytesLen])
-
-		k.sendStreamMessage(smsg.ShellStdOut, str)
-
-		// Wait for stdout to process more data
-		time.Sleep(time.Millisecond)
 	}
 }
 
