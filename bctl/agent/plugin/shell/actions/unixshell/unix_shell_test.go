@@ -29,10 +29,6 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
-const (
-	ShCommandPrompt = "$" // Tests assume shell plugin command is "sh"
-)
-
 func StreamMessageToString(t *testing.T, msg smsg.StreamMessage) string {
 	msgbyte, err := base64.StdEncoding.DecodeString(string(msg.Content))
 	if err != nil {
@@ -41,12 +37,11 @@ func StreamMessageToString(t *testing.T, msg smsg.StreamMessage) string {
 	return string(msgbyte)
 }
 
-func SpawnTerminal(t *testing.T, streamOutputChan chan smsg.StreamMessage) *UnixShell {
+func SpawnTerminal(t *testing.T, runAsUser string, streamOutputChan chan smsg.StreamMessage) *UnixShell {
 	subLogger := testutils.MockLogger().GetPluginLogger(string("unittest shell"))
-	testshelluser := testutils.GetRunAsUser(t)
 	var tmb tomb.Tomb
 
-	plugin, err := New(&tmb, subLogger, streamOutputChan, testshelluser)
+	plugin, err := New(&tmb, subLogger, streamOutputChan, runAsUser)
 	if err != nil {
 		t.Errorf("Shell plugin new failed: %v", err.Error())
 	}
@@ -150,14 +145,17 @@ func ReadOutputOrTimeout(t *testing.T, ch chan smsg.StreamMessage) (string, erro
 func TestInputOutput(t *testing.T) {
 	streamOutputChan := make(chan smsg.StreamMessage, 20)
 
-	plugin := SpawnTerminal(t, streamOutputChan)
+	testshelluser := testutils.GetRunAsUser(t)
+	plugin := SpawnTerminal(t, testshelluser, streamOutputChan)
 	assert.NotNil(t, plugin)
 
 	outstr, err := ReadOutputOrTimeout(t, streamOutputChan)
 	assert.Nil(t, err)
 
 	t.Logf("Terminal says: %v", outstr)
-	assert.Contains(t, outstr, ShCommandPrompt)
+	commandPrompt := testutils.GetCommandPrompt(t, testshelluser)
+
+	assert.Contains(t, outstr, commandPrompt)
 
 	lscmd := "ls -l\n"
 	SendToStdIn(t, plugin, lscmd)
@@ -175,7 +173,8 @@ func TestShelllReplay(t *testing.T) {
 
 	streamOutputChan := make(chan smsg.StreamMessage, 20)
 
-	plugin := SpawnTerminal(t, streamOutputChan)
+	testshelluser := testutils.GetRunAsUser(t)
+	plugin := SpawnTerminal(t, testshelluser, streamOutputChan)
 	outstr, err := ReadOutputOrTimeout(t, streamOutputChan)
 	assert.Nil(t, err)
 
@@ -200,12 +199,14 @@ func TestResize(t *testing.T) {
 
 	streamOutputChan := make(chan smsg.StreamMessage, 20)
 
-	plugin := SpawnTerminal(t, streamOutputChan)
+	testshelluser := testutils.GetRunAsUser(t)
+	plugin := SpawnTerminal(t, testshelluser, streamOutputChan)
 	assert.NotNil(t, plugin)
 	outstr, err := ReadOutputOrTimeout(t, streamOutputChan)
 	assert.Nil(t, err)
 
-	assert.Contains(t, outstr, ShCommandPrompt)
+	commandPrompt := testutils.GetCommandPrompt(t, testshelluser)
+	assert.Contains(t, outstr, commandPrompt)
 
 	rows := uint32(23)
 	cols := uint32(5)
@@ -216,12 +217,14 @@ func TestResize(t *testing.T) {
 func TestClose(t *testing.T) {
 	streamOutputChan := make(chan smsg.StreamMessage, 20)
 
-	plugin := SpawnTerminal(t, streamOutputChan)
+	testshelluser := testutils.GetRunAsUser(t)
+	plugin := SpawnTerminal(t, testshelluser, streamOutputChan)
 	assert.NotNil(t, plugin)
 	outstr, err := ReadOutputOrTimeout(t, streamOutputChan)
 	assert.Nil(t, err)
 
-	assert.Contains(t, outstr, ShCommandPrompt)
+	commandPrompt := testutils.GetCommandPrompt(t, testshelluser)
+	assert.Contains(t, outstr, commandPrompt)
 
 	SendClose(t, plugin)
 

@@ -29,3 +29,29 @@ func GetRunAsUser(t *testing.T) string {
 	}
 	return username
 }
+
+func GetCommandPrompt(t *testing.T, user string) string {
+	shell, err := utility.TryGetDefaultShellForUser(user)
+	if err != nil {
+		t.Logf("Could not resolve default shell for user %s: %v. Defaulting to sh", user, err)
+		shell = "sh"
+	}
+
+	switch shell {
+	case "sh", "bash", "ksh":
+		if user == "root" {
+			return "#"
+		} else {
+			return "$"
+		}
+	case "csh", "zsh":
+		if user == "root" {
+			return "#"
+		} else {
+			return "%"
+		}
+	}
+
+	t.Errorf("Unhandled shell %s", shell)
+	return ""
+}

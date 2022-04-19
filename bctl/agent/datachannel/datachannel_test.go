@@ -155,7 +155,7 @@ func CreateAgentMessage(dataBytes []byte) am.AgentMessage {
 	return agentMsg
 }
 
-func TestShelllDatachannel(t *testing.T) {
+func TestShellDatachannel(t *testing.T) {
 
 	assert.Contains(t, string("abce"), "ab")
 
@@ -203,7 +203,7 @@ func TestShelllDatachannel(t *testing.T) {
 
 }
 
-func TestShelllSimpleDeserialization(t *testing.T) {
+func TestShellSimpleDeserialization(t *testing.T) {
 	actionPayloadSafe, _ := json.Marshal(
 		bzshell.ShellInputMessage{Data: []byte("e")})
 

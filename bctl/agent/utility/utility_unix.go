@@ -24,6 +24,8 @@ package utility
 import (
 	"fmt"
 	"os/exec"
+	"path"
+	"strings"
 )
 
 var ShellPluginCommandName = "sh"
@@ -70,5 +72,21 @@ func WhoAmI() (string, error) {
 		return "", nil
 	}
 
-	return string(stdout), nil
+	return strings.TrimSpace(string(stdout)), nil
+}
+
+// Get the default shell for the user based on configuration in /etc/passwd
+// file.
+// https://unix.stackexchange.com/a/352320
+func TryGetDefaultShellForUser(user string) (string, error) {
+	defaultShellCmd := exec.Command("sh", "-c", fmt.Sprintf("getent passwd %s | awk -F: '{print $NF}'", user))
+	if out, err := defaultShellCmd.Output(); err == nil {
+		shellCmdPath := strings.TrimSpace(string(out))
+		// Use just the shell command and not full path because exec.Command()
+		// will find the correct path to use by searching for the command in $PATH
+		defaultShell := path.Base(shellCmdPath) // /bin/bash -> bash
+		return defaultShell, nil
+	} else {
+		return "", fmt.Errorf("Failed to get default shell for user %s: %s.", user, err)
+	}
 }

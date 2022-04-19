@@ -59,14 +59,36 @@ func StartPty(
 	plugin *UnixShell) (err error) {
 
 	logger.Info("Starting pty")
-	//Start the command with a pty
+
+	// Check if runAsUser is valid and exists
+	if strings.TrimSpace(runAsUser) == "" {
+		return errors.New("please set the RunAs default user")
+	}
+
+	if userExists, _ := utility.DoesUserExist(runAsUser); !userExists {
+		// if user does not exist, fail the session
+		return fmt.Errorf("failed to start pty since RunAs user %s does not exist", runAsUser)
+	}
+
+	// Attempt to get default shell to use for the runAsUser. If this method
+	// fails fallback to just using sh as the default shell
+	var defaultShell string
+	logger.Debugf("Trying to get default shell to use for user %s", runAsUser)
+	if defaultShell, err = utility.TryGetDefaultShellForUser(runAsUser); err != nil {
+		logger.Errorf("Failed getting default shell for user %s: %s", runAsUser, err)
+		defaultShell = "sh"
+	}
+
+	logger.Debugf("Using default shell %s", defaultShell)
+
+	// Start the command with a pty
 	var cmd *exec.Cmd
 
 	if strings.TrimSpace(commandstr) == "" {
-		cmd = exec.Command("sh")
+		cmd = exec.Command(defaultShell)
 	} else {
 		commandArgs := append(utility.ShellPluginCommandArgs, commandstr)
-		cmd = exec.Command("sh", commandArgs...)
+		cmd = exec.Command(defaultShell, commandArgs...)
 	}
 
 	//TERM is set as linux by pty which has an issue where vi editor screen does not get cleared.
@@ -80,22 +102,8 @@ func StartPty(
 		cmd.Env = append(cmd.Env, langEnvVariable)
 	}
 
-	var sessionUser string
-
-	if strings.TrimSpace(runAsUser) == "" {
-		return errors.New("please set the RunAs default user")
-	}
-
-	// Check if user exists
-	if userExists, _ := utility.DoesUserExist(runAsUser); !userExists {
-		// if user does not exist, fail the session
-		return fmt.Errorf("failed to start pty since RunAs user %s does not exist", runAsUser)
-	}
-
-	sessionUser = runAsUser
-
 	// Get the uid and gid of the runas user.
-	uid, gid, groups, err := getUserCredentials(logger, sessionUser)
+	uid, gid, groups, err := getUserCredentials(logger, runAsUser)
 	if err != nil {
 		return err
 	}
@@ -104,8 +112,11 @@ func StartPty(
 	cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uid, Gid: gid, Groups: groups, NoSetGroups: true}
 
 	// Setting home environment variable for RunAs user
-	runAsUserHomeEnvVariable := homeEnvVariable + sessionUser
+	runAsUserHomeEnvVariable := homeEnvVariable + runAsUser
 	cmd.Env = append(cmd.Env, runAsUserHomeEnvVariable)
+
+	// Setting cwd of the command to be the user's home directory
+	cmd.Dir = fmt.Sprintf("/home/%s", runAsUser)
 
 	ptyFile, err = pty.Start(cmd)
 
@@ -116,7 +127,7 @@ func StartPty(
 
 	plugin.stdin = ptyFile
 	plugin.stdout = ptyFile
-	plugin.runAsUser = sessionUser
+	plugin.runAsUser = runAsUser
 	plugin.execCmd = execcmd.NewExecCmd(cmd)
 
 	return nil
