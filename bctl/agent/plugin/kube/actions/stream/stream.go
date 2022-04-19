@@ -111,8 +111,8 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 
 	// Make the request and wait for the body to close
 	req = req.WithContext(ctx)
-	client := http.Client{}
-	res, err := client.Do(req)
+	httpClient := &http.Client{}
+	res, err := httpClient.Do(req)
 	if err != nil {
 		defer cancel()
 		rerr := fmt.Errorf("bad response to API request: %s", err)
@@ -237,8 +237,8 @@ func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest str
 
 	// Build our http request
 	if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, url.String(), streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
-		client := http.Client{}
-		if noFollowRes, err := client.Do(noFollowReq); err == nil {
+		httpClient := &http.Client{}
+		if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
 			// Parse out the body
 			if bodyBytes, err := io.ReadAll(noFollowRes.Body); err == nil {
 				// Stream the context back to the user

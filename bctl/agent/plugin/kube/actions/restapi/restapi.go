@@ -54,8 +54,8 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 		return action, []byte{}, err
 	}
 
-	client := http.Client{}
-	res, err := client.Do(req)
+	httpClient := &http.Client{}
+	res, err := httpClient.Do(req)
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		r.logger.Error(rerr)
