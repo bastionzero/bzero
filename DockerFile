@@ -1,4 +1,5 @@
-FROM golang:1.16-alpine
+ARG BASE_IMAGE="golang:1.16-alpine"
+FROM ${BASE_IMAGE}
 
 RUN mkdir -p /bctl-agent-files && \
     mkdir -p /bctl-agent
