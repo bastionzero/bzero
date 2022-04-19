@@ -18,16 +18,16 @@ import (
 	"os/exec"
 )
 
-//IExecCmd is an abstracted interface of os.Process
+// IExecCmd is an abstracted interface of os.Process
 type IExecCmd interface {
 	Pid() int
-	//kill the attached child process
+	// kill the attached child process
 	Kill() error
-	//wait for the child to finish
+	// wait for the child to finish
 	Wait() error
 }
 
-//implementation of IExecCmd with os.Process embed
+// implementation of IExecCmd with os.Process embed
 type ExecCmd struct {
 	Cmd *exec.Cmd
 }

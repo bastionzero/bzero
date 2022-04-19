@@ -24,17 +24,19 @@ var (
 	sessionToken, logPath, refreshTokenCommand, localPort, localHost string
 	agentPubKey                                                      string
 
-	// Kube server specifc values
-	targetGroupsRaw, targetUser, certPath, keyPath string
-	localhostToken, configPath                     string
-	targetGroups                                   []string
+	// Common/shared plugin arguments
+	targetUser string
 
-	// Db and web specifc values
+	// Kube server specifc arguments
+	targetGroupsRaw, certPath, keyPath string
+	localhostToken, configPath         string
+	targetGroups                       []string
+
+	// Db and web specifc arguments
 	remoteHost string
 	remotePort int
 
-	// Shell specific values
-	// targetUser string (shared with kube)
+	// Shell specific arguments
 	connectionId  string
 	dataChannelId string
 )
