@@ -48,7 +48,7 @@ func SpawnTerminal(t *testing.T, runAsUser string, streamOutputChan chan smsg.St
 	if plugin == nil {
 		t.Errorf("Plugin is nil")
 	}
-	var action = "shell/open"
+	var action = string(bzshell.ShellOpen)
 
 	openPayload, _ := json.Marshal(bzshell.ShellOpenMessage{})
 
@@ -67,7 +67,7 @@ func SpawnTerminal(t *testing.T, runAsUser string, streamOutputChan chan smsg.St
 }
 
 func SendResize(t *testing.T, plugin *UnixShell, rows uint32, cols uint32) {
-	action := "shell/resize"
+	action := string(bzshell.ShellResize)
 
 	resizePayload, _ := json.Marshal(bzshell.ShellResizeMessage{
 		Rows: rows,
@@ -84,7 +84,7 @@ func SendResize(t *testing.T, plugin *UnixShell, rows uint32, cols uint32) {
 }
 
 func SendReplay(t *testing.T, plugin *UnixShell) []byte {
-	action := "shell/replay"
+	action := string(bzshell.ShellReplay)
 
 	replayPayload, _ := json.Marshal(bzshell.ShellReplayMessage{})
 
@@ -100,7 +100,7 @@ func SendReplay(t *testing.T, plugin *UnixShell) []byte {
 }
 
 func SendClose(t *testing.T, plugin *UnixShell) {
-	action := "shell/close"
+	action := string(bzshell.ShellClose)
 
 	closePayload, _ := json.Marshal(bzshell.ShellCloseMessage{})
 
@@ -114,7 +114,7 @@ func SendClose(t *testing.T, plugin *UnixShell) {
 }
 
 func SendToStdIn(t *testing.T, plugin *UnixShell, stdinstr string) {
-	action := "shell/input"
+	action := string(bzshell.ShellInput)
 
 	inputPayload, _ := json.Marshal(bzshell.ShellInputMessage{
 		Data: []byte(stdinstr),
@@ -228,7 +228,7 @@ func TestClose(t *testing.T) {
 
 	SendClose(t, plugin)
 
-	action := "shell/input"
+	action := string(bzshell.ShellInput)
 	inputPayload, _ := json.Marshal(bzshell.ShellInputMessage{
 		Data: []byte("ls -l\n"),
 	})
@@ -255,7 +255,7 @@ func TestNoUserExistsErr(t *testing.T) {
 	if plugin == nil {
 		t.Errorf("plugin is nil")
 	}
-	var action = "shell/open"
+	var action = string(bzshell.ShellOpen)
 
 	openPayload, _ := json.Marshal(bzshell.ShellOpenMessage{})
 	b64payload := testutils.B64Encode(openPayload)

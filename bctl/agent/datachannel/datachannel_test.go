@@ -102,7 +102,7 @@ func CreateOpenShellDataMsg() []byte {
 		Timestamp:     fmt.Sprint(time.Now().Unix()),
 		SchemaVersion: ksmsg.SchemaVersion,
 		Type:          string(ksmsg.Data),
-		Action:        "shell/open",
+		Action:        string(bzshell.ShellOpen),
 		ActionPayload: testutils.B64Encode(dataActionPayload),
 		TargetId:      "currently unused",
 		BZCertHash:    "fake",
