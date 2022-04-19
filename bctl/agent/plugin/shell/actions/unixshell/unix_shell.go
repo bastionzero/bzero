@@ -90,8 +90,8 @@ func New(
 }
 
 // Receive takes input from a client using the MRZAP datachannel and returns output via the MRZAP datachannel
-func (k *UnixShell) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	k.logger.Infof("Plugin received Data message with %v action", action)
+func (u *UnixShell) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	u.logger.Infof("Plugin received Data message with %v action", action)
 
 	switch bzshell.ShellSubAction(action) {
 	case bzshell.ShellOpen:
@@ -99,15 +99,15 @@ func (k *UnixShell) Receive(action string, actionPayload []byte) (string, []byte
 		// the plugin when it processes the SYN message. This is important
 		// because the RunAsUser is part of policy and the policy check happens
 		// based on the SYN message when the data channel is first opened.
-		if err := k.open(); err != nil {
+		if err := u.open(); err != nil {
 			errorString := fmt.Errorf("unable to start shell: %s", err)
-			k.logger.Error(errorString)
+			u.logger.Error(errorString)
 			return "", []byte{}, errorString
 		}
 	case bzshell.ShellClose:
-		if err := k.close(); err != nil {
+		if err := u.close(); err != nil {
 			rerr := fmt.Errorf("shell stop failed %v", err)
-			k.logger.Error(rerr)
+			u.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 	case bzshell.ShellInput:
@@ -115,13 +115,13 @@ func (k *UnixShell) Receive(action string, actionPayload []byte) (string, []byte
 
 		if err := json.Unmarshal(actionPayload, &shellInput); err != nil {
 			rerr := fmt.Errorf("malformed shell input payload %v: %s", actionPayload, err)
-			k.logger.Error(rerr)
+			u.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 
-		if err := k.shellInput(shellInput); err != nil {
+		if err := u.shellInput(shellInput); err != nil {
 			rerr := fmt.Errorf("write to stdin failed %v", err)
-			k.logger.Error(rerr)
+			u.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 	case bzshell.ShellResize:
@@ -129,13 +129,13 @@ func (k *UnixShell) Receive(action string, actionPayload []byte) (string, []byte
 
 		if err := json.Unmarshal(actionPayload, &shellResize); err != nil {
 			rerr := fmt.Errorf("malformed shell resize payload %v", actionPayload)
-			k.logger.Error(rerr)
+			u.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 
-		if err := k.setSize(shellResize.Cols, shellResize.Rows); err != nil {
+		if err := u.setSize(shellResize.Cols, shellResize.Rows); err != nil {
 			rerr := fmt.Errorf("shell resize failed %v", err)
-			k.logger.Error(rerr)
+			u.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 	case bzshell.ShellReplay:
@@ -143,14 +143,14 @@ func (k *UnixShell) Receive(action string, actionPayload []byte) (string, []byte
 
 		if err := json.Unmarshal(actionPayload, &shellReplay); err != nil {
 			rerr := fmt.Errorf("malformed shell replay output payload %v", actionPayload)
-			k.logger.Error(rerr)
+			u.logger.Error(rerr)
 			return action, []byte{}, rerr
 		}
 
 		outbuff := make([]byte, config.ShellStdOutBuffCapacity)
-		k.stdoutbuffMutex.Lock()
-		n, err := k.stdoutbuff.Read(outbuff)
-		k.stdoutbuffMutex.Unlock()
+		u.stdoutbuffMutex.Lock()
+		n, err := u.stdoutbuff.Read(outbuff)
+		u.stdoutbuffMutex.Unlock()
 
 		if err != nil {
 			return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %v", err)
@@ -164,8 +164,8 @@ func (k *UnixShell) Receive(action string, actionPayload []byte) (string, []byte
 }
 
 // Ready returns if the shell is running and can be interacted with
-func (k *UnixShell) Ready() bool {
-	return !(k.stdin == nil || k.stdout == nil)
+func (u *UnixShell) Ready() bool {
+	return !(u.stdin == nil || u.stdout == nil)
 }
 
 var startPty = func(
@@ -177,65 +177,65 @@ var startPty = func(
 	return StartPty(logger, runAsUser, commands, plugin)
 }
 
-func (k *UnixShell) open() error {
+func (u *UnixShell) open() error {
 	// If this method "open" is called twice is means something has gone very
 	//  wrong and failing early is the safest action.
-	if k.shellStarted {
+	if u.shellStarted {
 		return fmt.Errorf("attempted to start the shell but a call to open a shell has already been made")
 	}
-	k.shellStarted = true
+	u.shellStarted = true
 	commands := ""
 
 	// Catch that the tomb is dying and signal shell to close
 	go func() {
-		<-k.tmb.Dying()
-		k.logger.Info("shell plugin is terminating")
-		if k.execCmd != nil {
-			if err := k.execCmd.Kill(); err != nil {
-				k.logger.Errorf("unable to terminate pty: %s", err)
+		<-u.tmb.Dying()
+		u.logger.Info("shell plugin is terminating")
+		if u.execCmd != nil {
+			if err := u.execCmd.Kill(); err != nil {
+				u.logger.Errorf("unable to terminate pty: %s", err)
 			}
 		}
 	}()
 
 	// Start pseudo terminal
-	if err := startPty(k.logger, k.runAsUser, commands, k); err != nil {
+	if err := startPty(u.logger, u.runAsUser, commands, u); err != nil {
 		return err
 	}
 
 	// Start a go routine to wait for the pty cmd to exit and close the
 	// execCmdDone channel
 	go func() {
-		if err := k.execCmd.Wait(); err != nil {
-			k.logger.Errorf("pty command exited with err: %s", err)
+		if err := u.execCmd.Wait(); err != nil {
+			u.logger.Errorf("pty command exited with err: %s", err)
 			if exitError, ok := err.(*exec.ExitError); ok {
 				exitCode := exitError.ExitCode()
-				k.logger.Errorf("pty cmd exited with non-zero exit code %d err: %s", exitCode, err)
-				k.execCmdDone <- exitCode
+				u.logger.Errorf("pty cmd exited with non-zero exit code %d err: %s", exitCode, err)
+				u.execCmdDone <- exitCode
 			} else {
-				k.logger.Errorf("pty command exited with unknown exit code")
-				k.execCmdDone <- -1
+				u.logger.Errorf("pty command exited with unknown exit code")
+				u.execCmdDone <- -1
 			}
 		} else {
-			k.execCmdDone <- 0
+			u.execCmdDone <- 0
 		}
 
-		k.execCmd = nil
-		close(k.execCmdDone)
+		u.execCmd = nil
+		close(u.execCmdDone)
 	}()
 
 	// Start to read from shell and write to datachannel
-	k.logger.Debugf("Start separate go routine to read from pty stdout and write to data channel")
+	u.logger.Debugf("Start separate go routine to read from pty stdout and write to data channel")
 	done := make(chan int, 1)
 	go func() {
-		done <- k.writePump(k.logger)
+		done <- u.writePump(u.logger)
 	}()
 
 	return nil
 }
 
 // ctose closes pty file
-func (k *UnixShell) close() (err error) {
-	k.logger.Info("Stopping pty")
+func (u *UnixShell) close() (err error) {
+	u.logger.Info("Stopping pty")
 	if err := ptyFile.Close(); err != nil {
 		if err, ok := err.(*os.PathError); ok && err.Err != os.ErrClosed {
 			return fmt.Errorf("unable to close ptyFile. %s", err)
@@ -245,17 +245,17 @@ func (k *UnixShell) close() (err error) {
 }
 
 // shellInput passes payload byte stream to shell stdin
-func (k *UnixShell) shellInput(shellInput bzshell.ShellInputMessage) error {
-	if !k.Ready() {
+func (u *UnixShell) shellInput(shellInput bzshell.ShellInputMessage) error {
+	if !u.Ready() {
 		// This is to handle scenario when cli/console starts sending size data but pty has not been started yet
 		// Since packets are rejected, cli/console will resend these packets until pty starts successfully in separate thread
-		k.logger.Debug("Unix shell action is not ready. Rejecting incoming message packet")
+		u.logger.Debug("Unix shell action is not ready. Rejecting incoming message packet")
 		return errors.New("unix shell input handler is not ready, rejecting incoming packet")
 	}
 
-	k.logger.Tracef("Input message received: ")
-	if _, err := k.stdin.Write(shellInput.Data); err != nil {
-		k.logger.Errorf("Unable to write to stdin, err: %v.", err)
+	u.logger.Tracef("Input message received: ")
+	if _, err := u.stdin.Write(shellInput.Data); err != nil {
+		u.logger.Errorf("Unable to write to stdin, err: %v.", err)
 		return err
 	}
 
@@ -263,17 +263,17 @@ func (k *UnixShell) shellInput(shellInput bzshell.ShellInputMessage) error {
 }
 
 // setSize resizes the pseudo-terminal pty
-func (k *UnixShell) setSize(cols, rows uint32) (err error) {
-	k.logger.Debugf("Pty Resize data received: cols: %d, rows: %d", cols, rows)
-	if err := SetSize(k.logger, cols, rows); err != nil {
-		k.logger.Errorf("Unable to set pty size: %s", err)
+func (u *UnixShell) setSize(cols, rows uint32) (err error) {
+	u.logger.Debugf("Pty Resize data received: cols: %d, rows: %d", cols, rows)
+	if err := SetSize(u.logger, cols, rows); err != nil {
+		u.logger.Errorf("Unable to set pty size: %s", err)
 		return err
 	}
 	return nil
 }
 
 // writePump reads from pty stdout and writes to data channel.
-func (k *UnixShell) writePump(logger *logger.Logger) int {
+func (u *UnixShell) writePump(logger *logger.Logger) int {
 	defer func() {
 		if err := recover(); err != nil {
 			logger.Errorf("WritePump thread crashed with message: \n", err)
@@ -281,38 +281,38 @@ func (k *UnixShell) writePump(logger *logger.Logger) int {
 		}
 	}()
 
-	k.stdoutbuff = ringbuffer.New(config.ShellStdOutBuffCapacity)
+	u.stdoutbuff = ringbuffer.New(config.ShellStdOutBuffCapacity)
 
 	stdoutBytes := make([]byte, config.StreamDataPayloadSize)
-	reader := bufio.NewReader(k.stdout)
+	reader := bufio.NewReader(u.stdout)
 
 	// Wait for all input commands to run.
 	time.Sleep(time.Second)
 
 	for {
 		select {
-		case exitCode := <-k.execCmdDone:
+		case exitCode := <-u.execCmdDone:
 			// Handle pty exit by sending shell quit stream message
-			k.logger.Infof("Pty exited with code %d", exitCode)
-			k.sendStreamMessage(smsg.ShellQuit, "")
+			u.logger.Infof("Pty exited with code %d", exitCode)
+			u.sendStreamMessage(smsg.ShellQuit, "")
 			return exitCode
 		default:
 			stdoutBytesLen, err := reader.Read(stdoutBytes)
 
 			if err != nil {
-				k.sendStreamMessage(smsg.ShellQuit, "")
+				u.sendStreamMessage(smsg.ShellQuit, "")
 
 				logger.Errorf("WritePump failed when reading from stdout: \n", err)
 				return config.ErrorExitCode
 			}
 
-			k.stdoutbuffMutex.Lock()
-			k.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
-			k.stdoutbuffMutex.Unlock()
+			u.stdoutbuffMutex.Lock()
+			u.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
+			u.stdoutbuffMutex.Unlock()
 
 			str := base64.StdEncoding.EncodeToString(stdoutBytes[:stdoutBytesLen])
 
-			k.sendStreamMessage(smsg.ShellStdOut, str)
+			u.sendStreamMessage(smsg.ShellStdOut, str)
 
 			// Wait for stdout to process more data
 			time.Sleep(time.Millisecond)
@@ -320,13 +320,13 @@ func (k *UnixShell) writePump(logger *logger.Logger) int {
 	}
 }
 
-func (k *UnixShell) sendStreamMessage(streamType smsg.StreamType, content string) {
+func (u *UnixShell) sendStreamMessage(streamType smsg.StreamType, content string) {
 	message := smsg.StreamMessage{
 		Type:           string(streamType),
-		SequenceNumber: k.streamSequenceNumber,
+		SequenceNumber: u.streamSequenceNumber,
 		Content:        content,
 	}
 
-	k.streamOutputChan <- message
-	k.streamSequenceNumber++
+	u.streamOutputChan <- message
+	u.streamSequenceNumber++
 }
