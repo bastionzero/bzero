@@ -56,7 +56,6 @@ func TestExec(t *testing.T) {
 	mockResizeStream := testutils.MockStream{}
 	mockStreamConnection := new(testutils.MockStreamConnection)
 
-	// TODO: do something with this
 	var closeChan <-chan bool
 
 	mockStreamConnection.On("CloseChan").Return(closeChan)

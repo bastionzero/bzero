@@ -25,6 +25,15 @@ import (
 	spdystream "k8s.io/apimachinery/pkg/util/httpstream/spdy"
 )
 
+var performHandshake = func(req *http.Request, w http.ResponseWriter, serverProtocols []string) (string, error) {
+	return httpstream.Handshake(req, w, serverProtocols)
+}
+
+var getUpgradedConnection = func(w http.ResponseWriter, req *http.Request, handler httpstream.NewStreamHandler, pingPeriod time.Duration) httpstream.Connection {
+	upgrader := spdystream.NewResponseUpgraderWithPings(kubeutils.DefaultStreamCreationTimeout)
+	return upgrader.UpgradeResponse(w, req, handler)
+}
+
 type PortForwardRequest struct {
 	streamMessageContent portforward.KubePortForwardStreamMessageContent
 	streamMessage        smsg.StreamMessage
@@ -71,6 +80,7 @@ func New(logger *logger.Logger,
 		streamInputChan:       make(chan smsg.StreamMessage, 10),
 		ksInputChan:           make(chan plugin.ActionWrapper, 10),
 		streamPairs:           make(map[string]*httpStreamPair),
+		streamChan:            make(chan PortForwardRequest, 10),
 		streamCreationTimeout: kubeutils.DefaultStreamCreationTimeout,
 	}
 
@@ -151,7 +161,7 @@ readyMessageLoop:
 	}
 
 	// Perform our http handshake
-	_, err := httpstream.Handshake(request, writer, []string{kubeutils.PortForwardProtocolV1Name})
+	_, err := performHandshake(request, writer, []string{kubeutils.PortForwardProtocolV1Name})
 	if err != nil {
 		return fmt.Errorf("could not perform http handshake: %v", err.Error())
 	}
@@ -160,8 +170,7 @@ readyMessageLoop:
 	streamChan := make(chan httpstream.Stream, 1)
 
 	// Upgrade the response
-	upgrader := spdystream.NewResponseUpgraderWithPings(kubeutils.DefaultStreamCreationTimeout)
-	conn := upgrader.UpgradeResponse(writer, request, p.httpStreamReceived(context.TODO(), streamChan))
+	conn := getUpgradedConnection(writer, request, p.httpStreamReceived(context.TODO(), streamChan), kubeutils.DefaultStreamCreationTimeout)
 	if conn == nil {
 		return fmt.Errorf("unable to upgrade websocket connection")
 	}

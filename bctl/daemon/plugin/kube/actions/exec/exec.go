@@ -93,7 +93,6 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 
 						// check for end of stream
 						contentBytes, _ := base64.StdEncoding.DecodeString(msg.Content)
-						e.logger.Errorf("got %+v", string(contentBytes))
 						if string(contentBytes) == exec.EscChar {
 							e.logger.Info("exec stream ended")
 							spdy.conn.Close()
@@ -101,7 +100,6 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 						}
 
 						// write message to output
-						e.logger.Errorf("got %+v", contentBytes)
 						spdy.stdoutStream.Write(contentBytes)
 
 						// delete processed message, increment sequence number and grab next (if there is one)
