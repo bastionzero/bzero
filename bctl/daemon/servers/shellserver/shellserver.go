@@ -108,7 +108,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	subLogger := ss.logger.GetDatachannelLogger(ss.dataChannelId)
 
-	// Build the action payload to send in the syn message when opening the data channel
+	// Build the action payload to send in the syn message when opening the datachannel
 	actionParams := bzshell.ShellOpenMessage{
 		TargetUser: ss.targetUser,
 	}
@@ -125,7 +125,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 			for {
 				select {
 				case <-ss.tmb.Dying():
-					dc.Close(errors.New("shell server exiting...closing data channel"))
+					dc.Close(errors.New("shell server exiting...closing datachannel"))
 					return
 				case <-dcTmb.Dying():
 					// Wait until everything is dead and any close processes are sent before killing the datachannel

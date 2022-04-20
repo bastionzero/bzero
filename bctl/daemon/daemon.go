@@ -255,7 +255,7 @@ func parseFlags() error {
 
 	// Shell plugin variables
 	flag.StringVar(&connectionId, "connectionId", "", "The bzero connection id for the shell connection")
-	flag.StringVar(&dataChannelId, "dataChannelId", "", "The data channel id to attach to an existing shell connection")
+	flag.StringVar(&dataChannelId, "dataChannelId", "", "The datachannel id to attach to an existing shell connection")
 
 	flag.Parse()
 

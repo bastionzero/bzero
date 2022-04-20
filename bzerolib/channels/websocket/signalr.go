@@ -13,7 +13,7 @@ type SignalRNegotiateResponse struct {
 }
 
 // This is our SignalR wrapper, every message that comes in thru
-// the data channel will be sent using SignalR, so we have to be
+// the datachannel will be sent using SignalR, so we have to be
 // able to unwrap and re-wrap it.  The AgentMessage is our generic
 // message for everything we care about.
 

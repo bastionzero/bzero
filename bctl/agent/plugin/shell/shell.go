@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/actions/unixshell"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/actions/defaultshell"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -15,7 +15,7 @@ import (
 
 type IShellAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
-	Ready() bool
+	// Ready() bool
 }
 
 type ShellPlugin struct {
@@ -54,8 +54,8 @@ func New(parentTmb *tomb.Tomb,
 		return nil, err
 	} else {
 		switch parsedAction {
-		case shell.UnixShell:
-			if act, err := unixshell.New(plugin.tmb, subLogger, plugin.streamOutputChan, plugin.runAsUser); err != nil {
+		case shell.DefaultShell:
+			if act, err := defaultshell.New(plugin.tmb, subLogger, plugin.streamOutputChan, plugin.runAsUser); err != nil {
 				return nil, fmt.Errorf("could not start new action: %s", err)
 			} else {
 				plugin.logger.Infof("Shell plugin started %v action", action)

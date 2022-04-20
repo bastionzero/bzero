@@ -54,7 +54,7 @@ type DataChannel struct {
 	plugin       plgn.IPlugin
 	keysplitting IKeysplitting
 	handshook    bool // bool to indicate if we have received a valid syn ack (initally set to false)
-	attach       bool // bool to indicate if we are attaching to an existing data channel
+	attach       bool // bool to indicate if we are attaching to an existing datachannel
 
 	// channels for incoming messages
 	inputChan chan am.AgentMessage
@@ -122,7 +122,7 @@ func New(logger *logger.Logger,
 			return nil, &tomb.Tomb{}, err
 		}
 	} else {
-		logger.Infof("Sending SYN on existing data channel %s with actions %s.", dc.id, action)
+		logger.Infof("Sending SYN on existing datachannel %s with actions %s.", dc.id, action)
 		dc.sendSyn(action)
 	}
 
@@ -175,7 +175,7 @@ func (d *DataChannel) Ready() bool {
 }
 
 func (d *DataChannel) Close(reason error) {
-	d.logger.Infof("killing data channel tomb")
+	d.logger.Infof("killing datachannel tomb")
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
 }
 

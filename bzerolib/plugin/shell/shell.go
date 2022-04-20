@@ -16,7 +16,7 @@ package shell
 type ShellAction string
 
 const (
-	UnixShell ShellAction = "unixshell"
+	DefaultShell ShellAction = "default"
 )
 
 type ShellActionParams struct {

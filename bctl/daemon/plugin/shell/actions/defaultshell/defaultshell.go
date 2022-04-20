@@ -1,4 +1,4 @@
-package unixshell
+package defaultshell
 
 import (
 	"encoding/base64"
@@ -23,7 +23,7 @@ const (
 	InputDebounceTime = 5 * time.Millisecond
 )
 
-type UnixShell struct {
+type DefaultShell struct {
 	logger *logger.Logger
 	tmb    *tomb.Tomb
 
@@ -35,9 +35,9 @@ type UnixShell struct {
 	stdInChan chan byte
 }
 
-func New(logger *logger.Logger) (*UnixShell, chan plugin.ActionWrapper) {
+func New(logger *logger.Logger) (*DefaultShell, chan plugin.ActionWrapper) {
 
-	shellAction := &UnixShell{
+	shellAction := &DefaultShell{
 		logger: logger,
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
@@ -48,7 +48,7 @@ func New(logger *logger.Logger) (*UnixShell, chan plugin.ActionWrapper) {
 	return shellAction, shellAction.outputChan
 }
 
-func (u *UnixShell) Start(tmb *tomb.Tomb, attach bool) error {
+func (u *DefaultShell) Start(tmb *tomb.Tomb, attach bool) error {
 	u.tmb = tmb
 
 	if attach {
@@ -62,7 +62,7 @@ func (u *UnixShell) Start(tmb *tomb.Tomb, attach bool) error {
 		openShellDataMessage := bzshell.ShellOpenMessage{
 			// note the TargetUser in this data message is ignored by the agent
 			// because it is policy-checked by bzero when its sent in the SYN
-			// message when opening the data channel and should never be changed
+			// message when opening the datachannel and should never be changed
 			// afterwards
 			TargetUser: "",
 		}
@@ -84,7 +84,7 @@ func (u *UnixShell) Start(tmb *tomb.Tomb, attach bool) error {
 	return nil
 }
 
-func (u *UnixShell) Replay(replayData []byte) error {
+func (u *DefaultShell) Replay(replayData []byte) error {
 	u.logger.Debug("Unix shell received replay message with action")
 	if _, err := os.Stdout.Write(replayData); err != nil {
 		u.logger.Errorf("Error writing shell replay message to Stdout: %s", err)
@@ -94,12 +94,12 @@ func (u *UnixShell) Replay(replayData []byte) error {
 	return nil
 }
 
-func (u *UnixShell) ReceiveStream(smessage smsg.StreamMessage) {
+func (u *DefaultShell) ReceiveStream(smessage smsg.StreamMessage) {
 	u.logger.Debugf("Unix shell received %v stream, message count: %d", smessage.Type, len(u.streamInputChan)+1)
 	u.streamInputChan <- smessage
 }
 
-func (u *UnixShell) sendOutputMessage(action bzshell.ShellSubAction, payload interface{}) {
+func (u *DefaultShell) sendOutputMessage(action bzshell.ShellSubAction, payload interface{}) {
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	u.outputChan <- plugin.ActionWrapper{
@@ -108,7 +108,7 @@ func (u *UnixShell) sendOutputMessage(action bzshell.ShellSubAction, payload int
 	}
 }
 
-func (u *UnixShell) handleStreamMessages() {
+func (u *DefaultShell) handleStreamMessages() {
 	for {
 		select {
 		case <-u.tmb.Dying():
@@ -135,7 +135,7 @@ func (u *UnixShell) handleStreamMessages() {
 }
 
 // Reads from StdIn and pushes to an input channel
-func (u *UnixShell) readStdIn() {
+func (u *DefaultShell) readStdIn() {
 	// switch stdin into 'raw' mode
 	// https://pkg.go.dev/golang.org/x/term#pkg-overview
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -164,7 +164,7 @@ func (u *UnixShell) readStdIn() {
 }
 
 // processes input channel by debouncing all keypresses within a time interval
-func (u *UnixShell) processStdIn() {
+func (u *DefaultShell) processStdIn() {
 	inputBuf := make([]byte, InputBufferSize)
 
 	for {
@@ -189,7 +189,7 @@ func (u *UnixShell) processStdIn() {
 	}
 }
 
-func (u *UnixShell) sendTerminalSize() {
+func (u *DefaultShell) sendTerminalSize() {
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err != nil {
 		u.logger.Errorf("Failed to get current terminal size %s", err)
 	} else {
@@ -203,7 +203,7 @@ func (u *UnixShell) sendTerminalSize() {
 
 // Captures any terminal resize events using the SIGWINCH signal and send the
 // new terminal size
-func (u *UnixShell) listenForTerminalSizeChanges() {
+func (u *DefaultShell) listenForTerminalSizeChanges() {
 	ch := make(chan os.Signal, 1)
 	sig := unix.SIGWINCH
 
