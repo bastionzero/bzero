@@ -19,6 +19,12 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
+// wrap the client-creation code so that during testing we can inject a mock client
+var makeRequest = func(req *http.Request) (*http.Response, error) {
+	client := http.Client{}
+	return client.Do(req)
+}
+
 type StreamAction struct {
 	logger *logger.Logger
 	tmb    *tomb.Tomb
@@ -111,8 +117,7 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 
 	// Make the request and wait for the body to close
 	req = req.WithContext(ctx)
-	httpClient := &http.Client{}
-	res, err := httpClient.Do(req)
+	res, err := makeRequest(req)
 	if err != nil {
 		defer cancel()
 		rerr := fmt.Errorf("bad response to API request: %s", err)
@@ -237,8 +242,7 @@ func (s *StreamAction) handleLastLogStream(url *url.URL, streamActionRequest str
 
 	// Build our http request
 	if noFollowReq, err := kubeutils.BuildHttpRequest(s.kubeHost, url.String(), streamActionRequest.Body, streamActionRequest.Method, streamActionRequest.Headers, s.serviceAccountToken, s.targetUser, s.targetGroups); err == nil {
-		httpClient := &http.Client{}
-		if noFollowRes, err := httpClient.Do(noFollowReq); err == nil {
+		if noFollowRes, err := makeRequest(noFollowReq); err == nil {
 			// Parse out the body
 			if bodyBytes, err := io.ReadAll(noFollowRes.Body); err == nil {
 				// Stream the context back to the user

@@ -19,6 +19,15 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
+// wrap this code so at test-time we can mock the dial / config
+var doDial = func(dialer httpstream.Dialer, protocolName string) (httpstream.Connection, string, error) {
+	return dialer.Dial(kubeutils.PortForwardProtocolV1Name)
+}
+
+var getConfig = func() (*rest.Config, error) {
+	return rest.InClusterConfig()
+}
+
 type PortForwardAction struct {
 	tmb    *tomb.Tomb
 	logger *logger.Logger
@@ -179,7 +188,7 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 
 	// Now make our stream chan
 	// Create the in-cluster config
-	config, err := rest.InClusterConfig()
+	config, err := getConfig()
 	if err != nil {
 		rerr := fmt.Errorf("error creating in-custer config: %s", err)
 		p.logger.Error(rerr)
@@ -212,7 +221,7 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "https", Path: p.Endpoint, Host: hostIP})
 
 	var readyMessageErr string
-	streamCh, protocolSelected, err := dialer.Dial(kubeutils.PortForwardProtocolV1Name)
+	streamCh, protocolSelected, err := doDial(dialer, kubeutils.PortForwardProtocolV1Name)
 	if err != nil {
 		rerr := fmt.Errorf("error dialing portforward spdy stream: %s", err)
 		p.logger.Error(rerr)
