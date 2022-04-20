@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell/actions/unixshell"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell/actions/defaultshell"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/shell"
@@ -55,10 +55,10 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzshell.Shell
 		}
 	}()
 
-	// Create the UnixShell action
-	actLogger := logger.GetActionLogger(string(bzshell.UnixShell))
+	// Create the DefaultShell action
+	actLogger := logger.GetActionLogger(string(bzshell.DefaultShell))
 	var actOutputChan chan plugin.ActionWrapper
-	shellDaemonPlugin.action, actOutputChan = unixshell.New(actLogger)
+	shellDaemonPlugin.action, actOutputChan = defaultshell.New(actLogger)
 
 	// listen to shell action output channel and push to outputqueue. If output
 	// channel is done then close the shell daemon plugin
@@ -68,6 +68,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzshell.Shell
 			case <-shellDaemonPlugin.tmb.Dying():
 				return
 			case m, more := <-actOutputChan:
+				logger.Infof("GOING TO OUTPUT CHAN")
 				if more {
 					shellDaemonPlugin.outputQueue <- m
 				} else {
@@ -81,7 +82,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzshell.Shell
 
 	// Start the shell action
 	if err := shellDaemonPlugin.action.Start(shellDaemonPlugin.tmb, attach); err != nil {
-		return &shellDaemonPlugin, fmt.Errorf("Error starting the shell action: %s", err)
+		return &shellDaemonPlugin, fmt.Errorf("error starting the shell action: %s", err)
 	}
 
 	return &shellDaemonPlugin, nil

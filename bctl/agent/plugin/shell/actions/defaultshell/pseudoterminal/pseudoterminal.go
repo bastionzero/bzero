@@ -20,7 +20,7 @@ const (
 	langEnvVariableKey  = "LANG"
 	homeEnvVariable     = "HOME=/home/"
 	groupsIdentifier    = "groups="
-	defaultShellCommand = "bash"
+	defaultShellCommand = "sh"
 )
 
 type IPseudoTerminal interface {

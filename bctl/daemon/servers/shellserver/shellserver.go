@@ -9,7 +9,6 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
@@ -74,7 +73,7 @@ func StartShellServer(
 	}
 
 	// create our new datachannel
-	if _, err := shellServer.newDataChannel(string(shell.UnixShell), shellServer.websocket); err == nil {
+	if _, err := shellServer.newDataChannel(string(bzshell.DefaultShell), shellServer.websocket); err == nil {
 	} else {
 		logger.Errorf("error starting datachannel: %s", err)
 	}

@@ -48,14 +48,14 @@ func New(logger *logger.Logger) (*DefaultShell, chan plugin.ActionWrapper) {
 	return shellAction, shellAction.outputChan
 }
 
-func (u *DefaultShell) Start(tmb *tomb.Tomb, attach bool) error {
-	u.tmb = tmb
+func (d *DefaultShell) Start(tmb *tomb.Tomb, attach bool) error {
+	d.tmb = tmb
 
 	if attach {
 		// If we are attaching send a shell replay message to replay terminal
 		// output
 		shellReplayDataMessage := bzshell.ShellReplayMessage{}
-		u.sendOutputMessage(bzshell.ShellReplay, shellReplayDataMessage)
+		d.sendOutputMessage(bzshell.ShellReplay, shellReplayDataMessage)
 	} else {
 		// If we are not attaching then send a ShellOpen data message to start
 		// the pty on the target
@@ -66,112 +66,110 @@ func (u *DefaultShell) Start(tmb *tomb.Tomb, attach bool) error {
 			// afterwards
 			TargetUser: "",
 		}
-		u.sendOutputMessage(bzshell.ShellOpen, openShellDataMessage)
+		d.sendOutputMessage(bzshell.ShellOpen, openShellDataMessage)
 	}
 
 	// Set initial terminal dimensions and then listen for any changes to
 	// terminal size
-	u.sendTerminalSize()
-	u.listenForTerminalSizeChanges()
+	d.sendTerminalSize()
+	d.listenForTerminalSizeChanges()
 
 	// listen to stream messages on input chan and write to stdout
-	go u.handleStreamMessages()
+	go d.handleStreamMessages()
 
 	// reading Stdin in raw mode and forward keypresses after debouncing
-	go u.readStdIn()
-	go u.processStdIn()
+	go d.readStdIn()
+	go d.sendStdIn()
 
 	return nil
 }
 
-func (u *DefaultShell) Replay(replayData []byte) error {
-	u.logger.Debug("Unix shell received replay message with action")
+func (d *DefaultShell) Replay(replayData []byte) error {
+	d.logger.Debug("Default shell received replay message with action")
 	if _, err := os.Stdout.Write(replayData); err != nil {
-		u.logger.Errorf("Error writing shell replay message to Stdout: %s", err)
+		d.logger.Errorf("Error writing shell replay message to Stdout: %s", err)
 		return err
 	}
 
 	return nil
 }
 
-func (u *DefaultShell) ReceiveStream(smessage smsg.StreamMessage) {
-	u.logger.Debugf("Unix shell received %v stream, message count: %d", smessage.Type, len(u.streamInputChan)+1)
-	u.streamInputChan <- smessage
+func (d *DefaultShell) ReceiveStream(smessage smsg.StreamMessage) {
+	d.logger.Debugf("Default shell received %v stream, message count: %d", smessage.Type, len(d.streamInputChan)+1)
+	d.streamInputChan <- smessage
 }
 
-func (u *DefaultShell) sendOutputMessage(action bzshell.ShellSubAction, payload interface{}) {
-	// Send payload to plugin output queue
-	payloadBytes, _ := json.Marshal(payload)
-	u.outputChan <- plugin.ActionWrapper{
-		Action:        string(action),
-		ActionPayload: payloadBytes,
-	}
-}
-
-func (u *DefaultShell) handleStreamMessages() {
+func (d *DefaultShell) handleStreamMessages() {
 	for {
 		select {
-		case <-u.tmb.Dying():
+		case <-d.tmb.Dying():
 			return
-		case streamMessage := <-u.streamInputChan:
+		case streamMessage := <-d.streamInputChan:
 			// process the incoming stream messages
 			switch smsg.StreamType(streamMessage.Type) {
 			case smsg.StdOut:
 				if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
-					u.logger.Errorf("Error decoding ShellStdOut stream content: %s", err)
+					d.logger.Errorf("Error decoding ShellStdOut stream content: %s", err)
 				} else {
 					if _, err = os.Stdout.Write(contentBytes); err != nil {
-						u.logger.Errorf("Error writing to Stdout: %s", err)
+						d.logger.Errorf("Error writing to Stdout: %s", err)
 					}
 				}
 			case smsg.Stop:
-				u.tmb.Kill(fmt.Errorf("Received shell quit stream message."))
+				d.tmb.Kill(fmt.Errorf("received shell quit stream message"))
 				return
 			default:
-				u.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
+				d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 			}
 		}
 	}
 }
 
 // Reads from StdIn and pushes to an input channel
-func (u *DefaultShell) readStdIn() {
+func (d *DefaultShell) readStdIn() {
+	d.logger.Info("STARTING")
 	// switch stdin into 'raw' mode
 	// https://pkg.go.dev/golang.org/x/term#pkg-overview
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		u.logger.Errorf("Error switching std to raw mode: %s", err)
+		d.logger.Errorf("Error switching std to raw mode: %s", err)
 		return
 	}
 	defer term.Restore(int(os.Stdin.Fd()), oldState)
+
+	d.logger.Info("STARTED")
 
 	b := make([]byte, 1)
 
 	for {
 		select {
-		case <-u.tmb.Dying():
+		case <-d.tmb.Dying():
 			return
 		default:
+			d.logger.Infof("READING")
+
 			n, err := os.Stdin.Read(b)
 			if err != nil || n != 1 {
-				u.tmb.Kill(fmt.Errorf("Error reading last keypress from Stdin: %s", err))
+				d.tmb.Kill(fmt.Errorf("error reading last keypress from Stdin: %s", err))
 				return
 			}
+			d.logger.Infof("READ")
 
-			u.stdInChan <- b[0]
+			d.stdInChan <- b[0]
 		}
 	}
 }
 
 // processes input channel by debouncing all keypresses within a time interval
-func (u *DefaultShell) processStdIn() {
+func (d *DefaultShell) sendStdIn() {
 	inputBuf := make([]byte, InputBufferSize)
 
 	for {
 		select {
-		case <-u.tmb.Dying():
+		case <-d.tmb.Dying():
 			return
-		case b := <-u.stdInChan:
+		case b := <-d.stdInChan:
+			d.logger.Info("APPENDING")
 			inputBuf = append(inputBuf, b)
 		case <-time.After(InputDebounceTime):
 			if len(inputBuf) >= 1 {
@@ -179,7 +177,8 @@ func (u *DefaultShell) processStdIn() {
 				shellInputDataMessage := bzshell.ShellInputMessage{
 					Data: inputBuf,
 				}
-				u.sendOutputMessage(bzshell.ShellInput, shellInputDataMessage)
+				d.logger.Info("SENDING")
+				d.sendOutputMessage(bzshell.ShellInput, shellInputDataMessage)
 
 				// clear the input buffer by slicing it to size 0 which will still
 				// keep memory allocated for the underlying capacity of the slice
@@ -189,21 +188,30 @@ func (u *DefaultShell) processStdIn() {
 	}
 }
 
-func (u *DefaultShell) sendTerminalSize() {
+func (d *DefaultShell) sendTerminalSize() {
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err != nil {
-		u.logger.Errorf("Failed to get current terminal size %s", err)
+		d.logger.Errorf("Failed to get current terminal size %s", err)
 	} else {
 		shellResizeMessage := bzshell.ShellResizeMessage{
 			Rows: uint32(h),
 			Cols: uint32(w),
 		}
-		u.sendOutputMessage(bzshell.ShellResize, shellResizeMessage)
+		d.sendOutputMessage(bzshell.ShellResize, shellResizeMessage)
+	}
+}
+
+func (d *DefaultShell) sendOutputMessage(action bzshell.ShellSubAction, payload interface{}) {
+	// Send payload to plugin output queue
+	payloadBytes, _ := json.Marshal(payload)
+	d.outputChan <- plugin.ActionWrapper{
+		Action:        string(action),
+		ActionPayload: payloadBytes,
 	}
 }
 
 // Captures any terminal resize events using the SIGWINCH signal and send the
 // new terminal size
-func (u *DefaultShell) listenForTerminalSizeChanges() {
+func (d *DefaultShell) listenForTerminalSizeChanges() {
 	ch := make(chan os.Signal, 1)
 	sig := unix.SIGWINCH
 
@@ -211,12 +219,12 @@ func (u *DefaultShell) listenForTerminalSizeChanges() {
 	go func() {
 		for {
 			select {
-			case <-u.tmb.Dying():
+			case <-d.tmb.Dying():
 				signal.Reset(sig)
 				close(ch)
 				return
 			case <-ch:
-				u.sendTerminalSize()
+				d.sendTerminalSize()
 			}
 		}
 	}()

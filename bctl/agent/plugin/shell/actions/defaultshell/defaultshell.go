@@ -177,10 +177,7 @@ func (d *DefaultShell) open() error {
 		}
 	}()
 
-	if err := d.writePump(); err != nil {
-		d.logger.Error(err)
-		d.terminal.Kill()
-	}
+	go d.writePump()
 
 	return nil
 }
@@ -211,7 +208,7 @@ func (d *DefaultShell) setSize(cols, rows uint32) error {
 }
 
 // writePump reads from pty stdout and writes to datachannel.
-func (d *DefaultShell) writePump() error {
+func (d *DefaultShell) writePump() {
 	defer func() {
 		if err := recover(); err != nil {
 			d.logger.Errorf("WritePump thread crashed with message: %s", err)
@@ -232,7 +229,8 @@ func (d *DefaultShell) writePump() error {
 
 		if err != nil {
 			d.sendStreamMessage(smsg.Stop, "")
-			return fmt.Errorf("WritePump failed when reading from stdout: %s", err)
+			d.logger.Errorf("WritePump failed when reading from stdout: %s", err)
+			return
 		}
 
 		d.stdoutbuffMutex.Lock()
@@ -250,6 +248,7 @@ func (d *DefaultShell) writePump() error {
 
 func (d *DefaultShell) sendStreamMessage(streamType smsg.StreamType, content string) {
 	message := smsg.StreamMessage{
+		Action:         "shell/default",
 		Type:           streamType,
 		SequenceNumber: d.streamSequenceNumber,
 		Content:        content,
