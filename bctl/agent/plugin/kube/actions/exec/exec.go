@@ -16,14 +16,6 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
-var getExecutor = func(config *rest.Config, method string, url *url.URL) (remotecommand.Executor, error) {
-	return remotecommand.NewSPDYExecutor(config, method, url)
-}
-
-var getConfig = func() (*rest.Config, error) {
-	return rest.InClusterConfig()
-}
-
 type ExecAction struct {
 	logger *logger.Logger
 	tmb    *tomb.Tomb
@@ -140,7 +132,7 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 
 	// Now open up our local exec session
 	// Create the in-cluster config
-	config, err := getConfig()
+	config, err := rest.InClusterConfig()
 	if err != nil {
 		rerr := fmt.Errorf("error creating in-custer config: %s", err)
 		e.logger.Error(rerr)
@@ -170,7 +162,7 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	}
 
 	// Turn it into a SPDY executor
-	exec, err := getExecutor(config, "POST", kubeExecApiUrlParsed)
+	exec, err := remotecommand.NewSPDYExecutor(config, "POST", kubeExecApiUrlParsed)
 	if err != nil {
 		return string(bzexec.ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}

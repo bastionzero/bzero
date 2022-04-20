@@ -11,12 +11,6 @@ import (
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 )
 
-// wrap the client-creation code so that during testing we can inject a mock client
-var makeRequest = func(req *http.Request) (*http.Response, error) {
-	client := http.Client{}
-	return client.Do(req)
-}
-
 type RestApiAction struct {
 	serviceAccountToken string
 	kubeHost            string
@@ -60,7 +54,8 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 		return action, []byte{}, err
 	}
 
-	res, err := makeRequest(req)
+	httpClient := &http.Client{}
+	res, err := httpClient.Do(req)
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		r.logger.Error(rerr)
