@@ -83,7 +83,7 @@ func TestRestApi(t *testing.T) {
 
 	action, responsePayload, err := r.Receive("restapi", payloadBytes)
 	assert.Nil(err)
-	assert.Equal(kuberest.RestResponse, action)
+	assert.Equal(string(kuberest.RestResponse), action)
 
 	// restapi should return the response it got from the kube API
 	expectedResponse := buildExpectedResponsePayload(statusCode, headers, requestId, testString, assert)

@@ -1,12 +1,10 @@
 package restapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
-	"io/ioutil"
+	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -15,33 +13,11 @@ import (
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
 	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"gopkg.in/tomb.v2"
 )
 
-type MockResponseWriter struct {
-	mock.Mock
-	http.ResponseWriter
-}
-
-func (m MockResponseWriter) Header() http.Header {
-	args := m.Called()
-	return args.Get(0).(map[string][]string)
-}
-
-func (m MockResponseWriter) Write(content []byte) (int, error) {
-	args := m.Called(content)
-	return args.Int(0), args.Error(1)
-}
-
-func (m MockResponseWriter) WriteHeader(statusCode int) {
-	m.Called()
-}
-
 func TestMain(m *testing.M) {
 	flag.Parse()
-	//oldMakeRequest := makeRequest
-	//defer func() { makeRequest = oldMakeRequest }()
 
 	exitCode := m.Run()
 
@@ -55,86 +31,99 @@ func TestRestApiOK(t *testing.T) {
 	logger := testutils.MockLogger()
 	requestId := "rid"
 	logId := "lid"
-	command := "get pod"
+	command := "get pods"
+	sendData := "send data"
+	receiveData := "receive data"
+	urlPath := "test-path"
 	r, outputChan := New(logger, requestId, logId, command)
 
-	request := http.Request{
-		URL:           &url.URL{Path: "test-path"},
-		Header:        make(map[string][]string),
-		ContentLength: 8,
-		Body:          ioutil.NopCloser(bytes.NewBufferString("request?")),
-	}
+	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
-	writer := MockResponseWriter{}
-	writer.On("Write", []byte("Back atcha")).Return(10, nil)
+	writer := testutils.MockResponseWriter{}
+	writer.On("Write", []byte(receiveData)).Return(12, nil)
 
-	// need a goroutine because this won't return until we've received the message
-	// so, could put the rest in a goroutine and actually call this
-	go r.Start(&tmb, &writer, &request)
+	// need a goroutine because Start won't return until we've received the message
+	go func() {
+		reqMessage := <-outputChan
 
-	reqMessage := <-outputChan
+		assert.Equal(string(kuberest.RestRequest), reqMessage.Action)
+		var payload kuberest.KubeRestApiActionPayload
+		err := json.Unmarshal(reqMessage.ActionPayload, &payload)
+		assert.Nil(err)
+		assert.Equal(sendData, payload.Body)
+		assert.Equal(command, payload.CommandBeingRun)
+		assert.Equal(requestId, payload.RequestId)
+		assert.Equal(logId, payload.LogId)
 
-	assert.Equal(kuberest.RestRequest, reqMessage.Action)
-	var payload kuberest.KubeRestApiActionPayload
-	err := json.Unmarshal(reqMessage.ActionPayload, &payload)
+		payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
+			Headers:    make(map[string][]string),
+			Content:    []byte(receiveData),
+			StatusCode: http.StatusOK,
+		})
+
+		r.ReceiveKeysplitting(plugin.ActionWrapper{
+			ActionPayload: payloadBytes,
+		})
+
+		// FIXME: address race condition here
+		time.Sleep(1 * time.Second)
+		writer.AssertExpectations(t)
+	}()
+
+	err := r.Start(&tmb, &writer, &request)
 	assert.Nil(err)
-	assert.Equal("request?", payload.Body)
-
-	payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
-		Headers:    make(map[string][]string), // TODO:
-		Content:    []byte("Back atcha"),
-		StatusCode: http.StatusOK,
-	})
-
-	r.ReceiveKeysplitting(plugin.ActionWrapper{
-		ActionPayload: payloadBytes,
-	})
-
-	time.Sleep(3 * time.Second)
 }
 
-/*
 func TestRestApiNotFound(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
 	logger := testutils.MockLogger()
 	requestId := "rid"
 	logId := "lid"
-	command := "get pod"
+	command := "get pods"
+	sendData := "send data"
+	receiveData := "receive data 2"
+	urlPath := "test-path"
 	r, outputChan := New(logger, requestId, logId, command)
 
-	request := http.Request{
-		URL:           &url.URL{Path: "test-path"},
-		Header:        make(map[string][]string),
-		ContentLength: 8,
-		Body:          ioutil.NopCloser(bytes.NewBufferString("request?")),
-	}
+	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
-	writer := MockResponseWriter{}
-	writer.On("Write", []byte("Back atcha 2")).Return(12, nil)
+	writer := testutils.MockResponseWriter{}
+	writer.On("Write", []byte(receiveData)).Return(12, nil)
+	writer.On("Header").Return(make(map[string][]string))
+	writer.On("WriteHeader", http.StatusInternalServerError).Return()
 
-	// need a goroutine because this won't return until we've received the message
-	// so, could put the rest in a goroutine and actually call this
-	go r.Start(&tmb, &writer, &request)
+	// need a goroutine because Start won't return until we've received the message
+	go func() {
+		reqMessage := <-outputChan
 
-	reqMessage := <-outputChan
+		assert.Equal(string(kuberest.RestRequest), reqMessage.Action)
+		var payload kuberest.KubeRestApiActionPayload
+		err := json.Unmarshal(reqMessage.ActionPayload, &payload)
+		assert.Nil(err)
+		assert.Equal(sendData, payload.Body)
+		assert.Equal(command, payload.CommandBeingRun)
+		assert.Equal(requestId, payload.RequestId)
+		assert.Equal(logId, payload.LogId)
 
-	assert.Equal(kuberest.RestRequest, reqMessage.Action)
-	var payload kuberest.KubeRestApiActionPayload
-	err := json.Unmarshal(reqMessage.ActionPayload, &payload)
-	assert.Nil(err)
-	assert.Equal("request?", payload.Body)
+		payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
+			Headers: map[string][]string{
+				"Content-Length": {"12"},
+				"Origin":         {"val1", "val2"},
+			},
+			Content:    []byte(receiveData),
+			StatusCode: http.StatusNotFound,
+		})
 
-	payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
-		Headers:    make(map[string][]string), // TODO:
-		Content:    []byte("Back atcha 2"),
-		StatusCode: http.StatusOK,
-	})
+		r.ReceiveKeysplitting(plugin.ActionWrapper{
+			ActionPayload: payloadBytes,
+		})
 
-	r.ReceiveKeysplitting(plugin.ActionWrapper{
-		ActionPayload: payloadBytes,
-	})
+		// FIXME: address race condition here
+		time.Sleep(1 * time.Second)
+		writer.AssertExpectations(t)
+	}()
 
-	time.Sleep(3 * time.Second)
+	err := r.Start(&tmb, &writer, &request)
+	assert.Equal(fmt.Errorf("request failed with status code %v: %v", http.StatusNotFound, receiveData), err)
 }
-*/

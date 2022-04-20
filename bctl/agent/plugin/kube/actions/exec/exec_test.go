@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	execaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/testutils"
@@ -54,7 +55,10 @@ func (m MockExecutor) Stream(options remotecommand.StreamOptions) error {
 		}
 	}()
 
-	args := m.Called(options)
+	// NOTE: using Called() with the entire options object is infeasible
+	// because the action creates some of its own pointers
+	// it's enough to check that stdwriter has the right members
+	args := m.Called(options.Stdout)
 	return args.Error(0)
 }
 
@@ -92,11 +96,12 @@ func TestExec(t *testing.T) {
 	outputChan := make(chan smsg.StreamMessage, 5)
 
 	requestId := "rid"
+	logId := "lid"
 	testString := "echo hi"
 
 	mockExec := MockExecutor{}
-	// FIXME: need some bigass replicas to fit in here
-	mockExec.On("Stream").Return(nil)
+	stdoutWriter := NewStdWriter(outputChan, smsg.CurrentSchema, requestId, string(kube.Exec), smsg.StdOut, logId)
+	mockExec.On("Stream", stdoutWriter).Return(nil)
 	setGetExecutor(mockExec)
 	setGetConfig()
 
@@ -130,4 +135,6 @@ func TestExec(t *testing.T) {
 
 	testutils.AssertNextMessageHasContent(assert, outputChan, testString)
 	testutils.AssertNextMessageHasContent(assert, outputChan, fmt.Sprintf("error: %s", testString))
+
+	mockExec.AssertExpectations(t)
 }

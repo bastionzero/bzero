@@ -4,19 +4,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"flag"
-	"io"
 	"net/http"
 	"net/textproto"
 	"os"
 	"testing"
-	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/rest"
@@ -37,11 +34,11 @@ func buildStartActionPayload(assert *assert.Assertions, headers map[string][]str
 	return payloadBytes
 }
 
-func buildActionPayload(assert *assert.Assertions, requestId string) []byte {
+func buildActionPayload(assert *assert.Assertions, bodyText string, requestId string) []byte {
 	payload := portforward.KubePortForwardActionPayload{
 		RequestId:            requestId,
 		LogId:                "lid",
-		Data:                 []byte("test data"),
+		Data:                 []byte(bodyText),
 		PortForwardRequestId: "", // TODO: could make this better
 		PodPort:              5000,
 	}
@@ -50,63 +47,7 @@ func buildActionPayload(assert *assert.Assertions, requestId string) []byte {
 	return payloadBytes
 }
 
-type MockStream struct {
-	mock.Mock
-	io.ReadWriteCloser
-	myStreamData string
-}
-
-func (m MockStream) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
-func (m MockStream) Read(p []byte) (n int, err error) {
-	args := m.Called(p)
-
-	// use test string
-	copy(p, []byte(m.myStreamData))
-
-	return args.Int(0), args.Error(1)
-}
-func (m MockStream) Write(p []byte) (n int, err error) {
-	args := m.Called(p)
-	return args.Int(0), args.Error(1)
-}
-func (m MockStream) Reset() error {
-	args := m.Called()
-	return args.Error(0)
-}
-func (m MockStream) Headers() http.Header {
-	args := m.Called()
-	return args.Get(0).(map[string][]string)
-}
-func (m MockStream) Identifier() uint32 {
-	args := m.Called()
-	return args.Get(0).(uint32)
-}
-
-type MockStreamConnection struct {
-	mock.Mock
-	httpstream.Connection
-}
-
-func (m *MockStreamConnection) CreateStream(headers http.Header) (httpstream.Stream, error) {
-	args := m.Called(headers)
-	return args.Get(0).(httpstream.Stream), args.Error(1)
-}
-func (m *MockStreamConnection) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
-func (m *MockStreamConnection) CloseChan() <-chan bool {
-	args := m.Called()
-	return args.Get(0).(<-chan bool)
-}
-func (m *MockStreamConnection) SetIdleTimeout(timeout time.Duration) {
-	m.Called(timeout)
-}
-
-func setDoDial(streamConnection *MockStreamConnection) {
+func setDoDial(streamConnection *testutils.MockStreamConnection) {
 	doDial = func(dialer httpstream.Dialer, protocolName string) (httpstream.Connection, string, error) {
 		return streamConnection, "", nil
 	}
@@ -137,12 +78,12 @@ func TestPortforward(t *testing.T) {
 	requestId := "rid"
 	testData := "test data"
 
-	mockStream := MockStream{myStreamData: testData}
+	mockStream := testutils.MockStream{MyStreamData: testData}
 	mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
 	mockStream.On("Write", []byte(testData)).Return(6, nil)
 	mockStream.On("Close").Return(nil)
 
-	mockStreamConnection := new(MockStreamConnection)
+	mockStreamConnection := new(testutils.MockStreamConnection)
 	mockStreamConnection.On("CreateStream", http.Header{
 		textproto.CanonicalMIMEHeaderKey(kubeutils.PortHeader):                 []string{"5000"},
 		textproto.CanonicalMIMEHeaderKey(kubeutils.PortForwardRequestIDHeader): []string{""},
@@ -168,7 +109,7 @@ func TestPortforward(t *testing.T) {
 	assert.Equal("", readyMessage.Content)
 
 	// test dataIn
-	payload = buildActionPayload(assert, requestId)
+	payload = buildActionPayload(assert, testData, requestId)
 	action, responsePayload, err = p.Receive(string(portforward.DataInPortForward), payload)
 	assert.Nil(err)
 	assert.Equal(string(portforward.DataInPortForward), action)
@@ -182,4 +123,7 @@ func TestPortforward(t *testing.T) {
 	err = json.Unmarshal(wrappedContent, &content)
 	assert.Nil(err)
 	assert.Equal(testData, string(content.Content))
+
+	mockStream.AssertExpectations(t)
+	mockStreamConnection.AssertExpectations(t)
 }

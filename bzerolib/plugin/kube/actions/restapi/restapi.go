@@ -1,6 +1,8 @@
 package restapi
 
+type RestSubAction string
+
 const (
-	RestResponse = "kube/restapi/response"
-	RestRequest  = "kube/restapi/request"
+	RestResponse RestSubAction = "kube/restapi/response"
+	RestRequest  RestSubAction = "kube/restapi/request"
 )

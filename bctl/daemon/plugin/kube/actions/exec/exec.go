@@ -68,7 +68,8 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 	isTty := kubeutils.IsQueryParamPresent(request, "tty")
 
 	// Now since we made our local connection to kubectl, initiate a connection with Bastion
-	e.outputChan <- wrapStartPayload(isTty, e.requestId, e.logId, request.URL.Query()["command"], request.URL.String())
+	// FIXME: just put this in a class function...
+	e.sendStartMessage(isTty, request.URL.Query()["command"], request.URL.String())
 
 	// Set up a go function for stdout
 	go func() {
@@ -92,6 +93,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 
 						// check for end of stream
 						contentBytes, _ := base64.StdEncoding.DecodeString(msg.Content)
+						e.logger.Errorf("got %+v", string(contentBytes))
 						if string(contentBytes) == exec.EscChar {
 							e.logger.Info("exec stream ended")
 							spdy.conn.Close()
@@ -99,6 +101,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 						}
 
 						// write message to output
+						e.logger.Errorf("got %+v", contentBytes)
 						spdy.stdoutStream.Write(contentBytes)
 
 						// delete processed message, increment sequence number and grab next (if there is one)
@@ -141,11 +144,10 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 					if n != kubeutils.ExecChunkSize || len(buffer) > kubeutils.ExecDefaultMaxBufferSize {
 						break
 					}
-
 				}
 
 				// Send message to agent
-				e.outputChan <- wrapStdinPayload(e.requestId, e.logId, buffer)
+				e.sendStdinPayload(buffer)
 			}
 		}
 
@@ -170,7 +172,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 						}
 					} else {
 						// Emit this as a new resize event
-						e.outputChan <- wrapResizePayload(e.requestId, e.logId, size.Width, size.Height)
+						e.sendResizeMessage(size.Width, size.Height)
 					}
 				}
 			}
@@ -205,47 +207,48 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 	return nil
 }
 
-func wrapStartPayload(isTty bool, requestId string, logId string, command []string, endpoint string) plugin.ActionWrapper {
+func (e *ExecAction) sendStartMessage(isTty bool, command []string, endpoint string) {
 	payload := exec.KubeExecStartActionPayload{
-		RequestId:            requestId,
+		RequestId:            e.requestId,
 		StreamMessageVersion: smsg.CurrentSchema,
-		LogId:                logId,
+		LogId:                e.logId,
 		IsTty:                isTty,
 		Command:              command,
 		Endpoint:             endpoint,
+		CommandBeingRun:      e.commandBeingRun,
 	}
 
 	payloadBytes, _ := json.Marshal(payload)
-	return plugin.ActionWrapper{
+	e.outputChan <- plugin.ActionWrapper{
 		Action:        string(exec.ExecStart),
 		ActionPayload: payloadBytes,
 	}
 }
 
-func wrapResizePayload(requestId string, logId string, width uint16, height uint16) plugin.ActionWrapper {
+func (e *ExecAction) sendResizeMessage(width uint16, height uint16) {
 	payload := exec.KubeExecResizeActionPayload{
-		RequestId: requestId,
-		LogId:     logId,
+		RequestId: e.requestId,
+		LogId:     e.logId,
 		Width:     width,
 		Height:    height,
 	}
 
 	payloadBytes, _ := json.Marshal(payload)
-	return plugin.ActionWrapper{
+	e.outputChan <- plugin.ActionWrapper{
 		Action:        string(exec.ExecResize),
 		ActionPayload: payloadBytes,
 	}
 }
 
-func wrapStdinPayload(requestId string, logId string, stdin []byte) plugin.ActionWrapper {
+func (e *ExecAction) sendStdinPayload(stdin []byte) {
 	payload := exec.KubeStdinActionPayload{
-		RequestId: requestId,
-		LogId:     logId,
+		RequestId: e.requestId,
+		LogId:     e.logId,
 		Stdin:     stdin,
 	}
 
 	payloadBytes, _ := json.Marshal(payload)
-	return plugin.ActionWrapper{
+	e.outputChan <- plugin.ActionWrapper{
 		Action:        string(exec.ExecInput),
 		ActionPayload: payloadBytes,
 	}

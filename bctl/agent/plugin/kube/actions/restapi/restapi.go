@@ -89,7 +89,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 	}
 	responsePayloadBytes, _ := json.Marshal(responsePayload)
 
-	return kuberest.RestResponse, responsePayloadBytes, nil
+	return string(kuberest.RestResponse), responsePayloadBytes, nil
 }
 
 func (r *RestApiAction) buildHttpRequest(endpoint, body, method string, headers map[string][]string) (*http.Request, error) {
