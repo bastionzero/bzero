@@ -40,7 +40,7 @@ func TestRestApiOK(t *testing.T) {
 	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
 	writer := testutils.MockResponseWriter{}
-	writer.On("Write", []byte(receiveData)).Return(12, nil)
+	writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 
 	// need a goroutine because Start won't return until we've received the message
 	go func() {
@@ -89,7 +89,7 @@ func TestRestApiNotFound(t *testing.T) {
 	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
 	writer := testutils.MockResponseWriter{}
-	writer.On("Write", []byte(receiveData)).Return(12, nil)
+	writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 	writer.On("Header").Return(make(map[string][]string))
 	writer.On("WriteHeader", http.StatusInternalServerError).Return()
 

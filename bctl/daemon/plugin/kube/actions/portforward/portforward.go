@@ -80,7 +80,6 @@ func New(logger *logger.Logger,
 		streamInputChan:       make(chan smsg.StreamMessage, 10),
 		ksInputChan:           make(chan plugin.ActionWrapper, 10),
 		streamPairs:           make(map[string]*httpStreamPair),
-		streamChan:            make(chan PortForwardRequest, 10),
 		streamCreationTimeout: kubeutils.DefaultStreamCreationTimeout,
 	}
 

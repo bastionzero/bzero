@@ -3,11 +3,13 @@ package portforward
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"net/http"
 	"net/textproto"
 	"os"
 	"testing"
+	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
@@ -80,7 +82,7 @@ func TestPortforward(t *testing.T) {
 
 	mockStream := testutils.MockStream{MyStreamData: testData}
 	mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
-	mockStream.On("Write", []byte(testData)).Return(6, nil)
+	mockStream.On("Write", []byte(testData)).Return(len(testData), nil)
 	mockStream.On("Close").Return(nil)
 
 	mockStreamConnection := new(testutils.MockStreamConnection)
@@ -123,6 +125,10 @@ func TestPortforward(t *testing.T) {
 	err = json.Unmarshal(wrappedContent, &content)
 	assert.Nil(err)
 	assert.Equal(testData, string(content.Content))
+
+	tmb.Kill(errors.New("test kill"))
+
+	time.Sleep(time.Second)
 
 	mockStream.AssertExpectations(t)
 	mockStreamConnection.AssertExpectations(t)

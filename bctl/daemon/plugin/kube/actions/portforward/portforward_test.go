@@ -34,6 +34,12 @@ func setGetUpgradedConnection(mockConnection *testutils.MockStreamConnection) {
 
 func TestMain(m *testing.M) {
 	flag.Parse()
+	oldGetUpgradedConnection := getUpgradedConnection
+	oldPerformHandshake := performHandshake
+	defer func() {
+		getUpgradedConnection = oldGetUpgradedConnection
+		performHandshake = oldPerformHandshake
+	}()
 
 	exitCode := m.Run()
 

@@ -36,8 +36,8 @@ func TestStream(t *testing.T) {
 	receiveData2 := "receive data 2"
 	receiveData4 := "receive data 4"
 	urlPath := "test-path"
-	// TODO: check validity
-	r, outputChan := New(logger, requestId, logId, command)
+
+	s, outputChan := New(logger, requestId, logId, command)
 
 	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
@@ -65,7 +65,7 @@ func TestStream(t *testing.T) {
 			More:           true,
 			Content:        base64.StdEncoding.EncodeToString([]byte(receiveData1)),
 		}
-		r.ReceiveStream(message1)
+		s.ReceiveStream(message1)
 		message4 := smsg.StreamMessage{
 			Type:           smsg.Data,
 			SequenceNumber: 4,
@@ -73,7 +73,7 @@ func TestStream(t *testing.T) {
 			Content:        base64.StdEncoding.EncodeToString([]byte(receiveData4)),
 		}
 		// implicit assertion that this call never happens
-		r.ReceiveStream(message4)
+		s.ReceiveStream(message4)
 
 		// send header message
 		kubeWatchHeadersPayload := stream.KubeStreamHeadersPayload{
@@ -91,7 +91,7 @@ func TestStream(t *testing.T) {
 			Content:        base64.StdEncoding.EncodeToString(kubeWatchHeadersPayloadBytes),
 		}
 		// upon receiving this, message 1 will also be processed
-		r.ReceiveStream(message0)
+		s.ReceiveStream(message0)
 
 		message2 := smsg.StreamMessage{
 			Type:           smsg.Data,
@@ -100,9 +100,9 @@ func TestStream(t *testing.T) {
 			Content:        base64.StdEncoding.EncodeToString([]byte(receiveData2)),
 		}
 		// this should be processed immediately
-		r.ReceiveStream(message2)
+		s.ReceiveStream(message2)
 		// send this again -- still shouldn't be processed
-		r.ReceiveStream(message4)
+		s.ReceiveStream(message4)
 
 		// send a stream end message
 		endMessage := smsg.StreamMessage{
@@ -111,16 +111,14 @@ func TestStream(t *testing.T) {
 			More:           false,
 			Content:        base64.StdEncoding.EncodeToString([]byte("the end")),
 		}
-		r.ReceiveStream(endMessage)
-
-		// OTHER WAYS TO END THIS THOUGH
+		s.ReceiveStream(endMessage)
 
 		// FIXME: address race condition here
 		time.Sleep(1 * time.Second)
 		writer.AssertExpectations(t)
 	}()
 
-	err := r.Start(&tmb, &writer, &request)
+	err := s.Start(&tmb, &writer, &request)
 	assert.Nil(err)
 }
 

@@ -26,6 +26,8 @@ func setNewSPDYService(mockSpdy *SPDYService) {
 
 func TestMain(m *testing.M) {
 	flag.Parse()
+	oldNewSPDYService := NewSPDYService
+	defer func() { NewSPDYService = oldNewSPDYService }()
 
 	exitCode := m.Run()
 
@@ -50,7 +52,7 @@ func TestExec(t *testing.T) {
 	mockStdinStream.On("Read", make([]byte, kubeutils.ExecChunkSize)).Return(len(streamData), nil)
 
 	mockStdoutStream := testutils.MockStream{}
-	mockStdoutStream.On("Write", []byte(receiveData)).Return(12, nil)
+	mockStdoutStream.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 
 	mockStderrStream := testutils.MockStream{}
 	mockResizeStream := testutils.MockStream{}
