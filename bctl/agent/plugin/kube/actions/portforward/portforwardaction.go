@@ -106,7 +106,6 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 				p.DataHeaders,
 				p.ErrorHeaders,
 				p.logId,
-				p.requestId,
 				dataInputAction.PortForwardRequestId,
 				p.streamOutputChan,
 				p.streamMessageVersion,

@@ -22,7 +22,6 @@ type PortForwardRequest struct {
 	logger *logger.Logger
 
 	logId                string
-	requestId            string
 	portForwardRequestId string
 
 	dataHeaders  map[string]string
@@ -48,7 +47,6 @@ func createPortForwardRequest(
 	dataHeaders map[string]string,
 	errorHeaders map[string]string,
 	logId string,
-	requestId string,
 	portForwardRequestId string,
 	streamOutputChan chan smsg.StreamMessage,
 	streamMessageVersion smsg.SchemaVersion,
@@ -56,7 +54,6 @@ func createPortForwardRequest(
 	p := &PortForwardRequest{
 		logger:                    logger,
 		logId:                     logId,
-		requestId:                 requestId,
 		portForwardRequestId:      portForwardRequestId,
 		podPort:                   podPort,
 		dataHeaders:               dataHeaders,
@@ -251,7 +248,6 @@ func (p *PortForwardRequest) sendStreamMessage(sequenceNumber int, streamType sm
 	p.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  p.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		RequestId:      p.requestId,
 		LogId:          p.logId,
 		Action:         string(bzkube.PortForward),
 		Type:           streamType,
