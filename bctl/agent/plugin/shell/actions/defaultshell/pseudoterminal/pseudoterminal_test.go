@@ -52,13 +52,12 @@ func TestShutdown(t *testing.T) {
 	} else {
 		for {
 			go func() {
-				time.Sleep(2 * time.Second)
+				time.Sleep(1 * time.Second)
 				terminal.Kill()
 			}()
 
 			select {
 			case <-terminal.Done():
-				assert.Equal(t, 0, 0)
 				return
 			case <-time.After(5 * time.Second):
 				t.Error("terminal failed to die")

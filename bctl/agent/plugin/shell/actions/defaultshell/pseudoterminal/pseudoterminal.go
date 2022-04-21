@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path"
 	"strconv"
 	"strings"
@@ -48,7 +49,7 @@ type PseudoTerminal struct {
 
 // StartPty starts pty and provides handles to stdin and stdout
 func New(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTerminal, error) {
-	logger.Info("Starting pty")
+	logger.Info("Starting up pseudo terminal")
 
 	// Check if runAsUser is valid and exists
 	if strings.TrimSpace(runAsUser) == "" {
@@ -65,7 +66,7 @@ func New(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTer
 	shellCommandArgs := []string{"-c"}
 	if err := doesUserExist(runAsUser, shellCommand, shellCommandArgs); err != nil {
 		// if user does not exist, fail the session
-		return nil, fmt.Errorf("failed to start pty for %s user: %s", runAsUser, err)
+		return nil, fmt.Errorf("failed to determine whether %s user exists: %s", runAsUser, err)
 	}
 
 	logger.Debugf("Using default shell %s", shellCommand)
@@ -120,7 +121,12 @@ func buildCommand(commandstr string, shellCommand string, shellCommandArgs []str
 	cmd.Env = append(cmd.Env, runAsUserHomeEnvVariable)
 
 	// Setting cwd of the command to be the user's home directory
-	cmd.Dir = fmt.Sprintf("/home/%s", runAsUser)
+	if currentUser, err := user.Lookup(runAsUser); err != nil {
+		return nil, fmt.Errorf("failed to lookup user: %s", runAsUser)
+	} else {
+		cmd.Dir = currentUser.HomeDir
+	}
+	//cmd.Dir = fmt.Sprintf("/home/%s", runAsUser)
 
 	return cmd, nil
 }
@@ -129,7 +135,6 @@ func (p *PseudoTerminal) Done() <-chan struct{} {
 	doneChan := make(chan struct{})
 
 	go func() {
-		defer p.closePty()
 		defer close(doneChan)
 
 		if p.command == nil {
@@ -148,20 +153,12 @@ func (p *PseudoTerminal) Done() <-chan struct{} {
 	return doneChan
 }
 
-func (p *PseudoTerminal) closePty() {
+func (p *PseudoTerminal) Kill() {
 	if p.ptyFile != nil {
 		if err := p.ptyFile.Close(); err != nil {
 			p.logger.Errorf("failed to close pty: %s", err)
 		}
 		p.ptyFile = nil
-	}
-}
-
-func (p *PseudoTerminal) Kill() {
-	if p.command != nil && p.command.Process != nil {
-		if err := p.command.Process.Kill(); err != nil {
-			p.logger.Errorf("failed to close command process: %s", err)
-		}
 	}
 }
 
@@ -206,14 +203,17 @@ func doesUserExist(username string, shellCommand string, shellCommandArgs []stri
 func getDefaultShellForUser(user string) (string, error) {
 	defaultShell := defaultShellCommand
 	defaultShellCmd := exec.Command(defaultShell, "-c", fmt.Sprintf("getent passwd %s | awk -F: '{print $NF}'", user))
-	if out, err := defaultShellCmd.Output(); err == nil {
+
+	if out, err := defaultShellCmd.Output(); err != nil {
+		return defaultShell, fmt.Errorf("failed to get default shell for user %s: %s", user, err)
+	} else if len(out) == 0 {
+		return defaultShell, nil
+	} else {
 		shellCmdPath := strings.TrimSpace(string(out))
 		// Use just the shell command and not full path because exec.Command()
 		// will find the correct path to use by searching for the command in $PATH
 		defaultShell = path.Base(shellCmdPath) // /bin/bash -> bash
 		return defaultShell, nil
-	} else {
-		return defaultShell, fmt.Errorf("failed to get default shell for user %s: %s", user, err)
 	}
 }
 
