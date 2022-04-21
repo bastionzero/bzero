@@ -12,7 +12,6 @@ Describe how to test this PR....
 #### Ready to run system tests?
 
 - [ ] Yes
-- [ ] No
 
 ## Relevant release note information
 
