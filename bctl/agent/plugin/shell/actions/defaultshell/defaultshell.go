@@ -214,8 +214,10 @@ func (d *DefaultShell) writePump() {
 
 	for {
 		if stdoutBytesLen, err := reader.Read(stdoutBytes); err != nil {
+			if d.tmb.Alive() {
+				d.logger.Errorf("error reading from stdout: %s", err)
+			}
 			d.sendStreamMessage(smsg.Stop, stdoutBytes[:stdoutBytesLen])
-			d.logger.Errorf("error reading from stdout: %s", err)
 			return
 		} else {
 			d.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
