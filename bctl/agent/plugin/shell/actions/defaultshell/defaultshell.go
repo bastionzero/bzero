@@ -127,6 +127,17 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) (string, []b
 			return action, replayBytes, nil
 		}
 
+		// outbuff := make([]byte, ShellStdOutBuffCapacity)
+		// d.stdoutbuffMutex.Lock()
+		// defer d.stdoutbuffMutex.Unlock()
+
+		// // does this need a timeout?
+		// if n, err := d.stdoutbuff.Read(outbuff); err != nil {
+		// 	return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
+		// } else {
+		// 	return action, outbuff[0:n], nil
+		// }
+
 	default:
 		return action, []byte{}, fmt.Errorf("unrecognized shell action received: %s", action)
 	}
