@@ -155,6 +155,8 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						if nextMessage.Type == smsg.WebStreamEnd || (nextMessage.Type == smsg.Stream && !nextMessage.More) {
 							return nil
 						}
+						delete(w.streamMessages, w.expectedSequenceNumber)
+						w.expectedSequenceNumber += 1
 					}
 				}
 			} else {

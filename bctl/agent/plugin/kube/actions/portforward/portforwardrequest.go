@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
+	kubeaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -20,14 +20,6 @@ import (
 type PortForwardRequest struct {
 	tmb    *tomb.Tomb
 	logger *logger.Logger
-
-	logId                string
-	requestId            string
-	portForwardRequestId string
-
-	dataHeaders  map[string]string
-	errorHeaders map[string]string
-	podPort      int64
 
 	// To send data/error to our portforward sessions
 	portforwardDataInChannel  chan []byte
@@ -41,50 +33,19 @@ type PortForwardRequest struct {
 	doneChan chan bool
 }
 
-func createPortForwardRequest(
-	tmb *tomb.Tomb,
-	logger *logger.Logger,
-	podPort int64,
-	dataHeaders map[string]string,
-	errorHeaders map[string]string,
-	logId string,
-	requestId string,
-	portForwardRequestId string,
-	streamOutputChan chan smsg.StreamMessage,
-	streamMessageVersion smsg.SchemaVersion,
-) *PortForwardRequest {
-	p := &PortForwardRequest{
-		logger:                    logger,
-		logId:                     logId,
-		requestId:                 requestId,
-		portForwardRequestId:      portForwardRequestId,
-		podPort:                   podPort,
-		dataHeaders:               dataHeaders,
-		errorHeaders:              errorHeaders,
-		streamOutputChan:          streamOutputChan,
-		streamMessageVersion:      streamMessageVersion,
-		portforwardDataInChannel:  make(chan []byte),
-		portforwardErrorInChannel: make(chan []byte),
-		tmb:                       tmb,
-		doneChan:                  make(chan bool),
-	}
+func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, dataHeaders map[string]string, errorHeaders map[string]string, targetUser, logId, requestId, endpoint string, podPort int64, targetGroups []string, streamCh httpstream.Connection) error {
+	p.logger.Infof("Starting port forward connection for: %s on port: %d. PortforwardRequestId: %ss", endpoint, podPort, portforwardRequestId)
+
 	// Update our error headers to include the podPort
-	p.errorHeaders[kubeutils.PortHeader] = fmt.Sprintf("%d", podPort)
-	p.errorHeaders[kubeutils.PortForwardRequestIDHeader] = portForwardRequestId
-
-	return p
-}
-
-func (p *PortForwardRequest) openPortForwardStream(endpoint string, streamCh httpstream.Connection) error {
-	p.logger.Infof("Starting port forward connection for: %s on port: %d. PortforwardRequestId: %ss", endpoint, p.podPort, p.portForwardRequestId)
+	errorHeaders[kubeutils.PortHeader] = fmt.Sprintf("%d", podPort)
+	errorHeaders[kubeutils.PortForwardRequestIDHeader] = portforwardRequestId
 
 	// Create our two streams with the provided headers
 	// We purposely share the header object for data and error stream
 	headers := http.Header{}
-	for name, value := range p.errorHeaders {
+	for name, value := range errorHeaders {
 		headers.Add(name, value)
 	}
-
 	// Create our http.Header
 	errorStream, err := streamCh.CreateStream(headers)
 	if err != nil {
@@ -93,11 +54,10 @@ func (p *PortForwardRequest) openPortForwardStream(endpoint string, streamCh htt
 		return rerr
 	}
 
-	for name, value := range p.dataHeaders {
+	for name, value := range dataHeaders {
 		// Set so we override any error headers that were set
 		headers.Set(name, value)
 	}
-
 	// Create our http.Header
 	dataStream, err := streamCh.CreateStream(headers)
 	if err != nil {
@@ -154,7 +114,7 @@ func (p *PortForwardRequest) openPortForwardStream(endpoint string, streamCh htt
 			case <-p.tmb.Dying():
 				return
 			default:
-				p.forwardStream(smsg.Data, dataStream, dataSeqNumber)
+				p.forwardStream(smsg.Data, dataStream, dataSeqNumber, portforwardRequestId, requestId, logId)
 				dataSeqNumber += 1
 			}
 		}
@@ -172,7 +132,7 @@ func (p *PortForwardRequest) openPortForwardStream(endpoint string, streamCh htt
 			case <-p.tmb.Dying():
 				return
 			default:
-				p.forwardStream(smsg.Error, errorStream, errorSeqNumber)
+				p.forwardStream(smsg.Error, errorStream, errorSeqNumber, portforwardRequestId, requestId, logId)
 				errorSeqNumber += 1
 			}
 		}
@@ -195,9 +155,16 @@ func (p *PortForwardRequest) openPortForwardStream(endpoint string, streamCh htt
 	return nil
 }
 
-// NOTE: we don't need to use schema version here because Portforward is broken on previous versions of bzero
+// NOTE: we don't need to use TypeV2 here because Portforward is broken on previous versions of bzero
 // thus, anyone using it at all is using the new version
-func (p *PortForwardRequest) forwardStream(streamType smsg.StreamType, stream httpstream.Stream, sequenceNumber int) {
+func (p *PortForwardRequest) forwardStream(
+	streamType smsg.StreamType,
+	stream httpstream.Stream,
+	sequenceNumber int,
+	portforwardRequestId string,
+	requestId string,
+	logId string,
+) {
 	buf := make([]byte, portforward.DataStreamBufferSize)
 	n, err := stream.Read(buf)
 	if err != nil {
@@ -205,7 +172,7 @@ func (p *PortForwardRequest) forwardStream(streamType smsg.StreamType, stream ht
 			rerr := fmt.Errorf("error reading data from data stream: %s", err)
 			p.logger.Error(rerr)
 		} else if streamType == smsg.Data {
-			content, err := p.wrapStreamMessageContent([]byte{})
+			content, err := p.wrapStreamMessageContent([]byte{}, portforwardRequestId)
 			if err != nil {
 				p.logger.Error(err)
 
@@ -214,14 +181,14 @@ func (p *PortForwardRequest) forwardStream(streamType smsg.StreamType, stream ht
 			}
 
 			// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
-			p.sendStreamMessage(sequenceNumber, streamType, false, content)
+			p.sendStreamMessage(sequenceNumber, requestId, logId, streamType, false, content)
 		}
 		p.doneChan <- true
 		return
 	}
 
 	// Send this data back to the bastion
-	content, err := p.wrapStreamMessageContent(buf[:n])
+	content, err := p.wrapStreamMessageContent(buf[:n], portforwardRequestId)
 	if err != nil {
 		p.logger.Error(err)
 
@@ -229,12 +196,12 @@ func (p *PortForwardRequest) forwardStream(streamType smsg.StreamType, stream ht
 		p.doneChan <- true
 	}
 	// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
-	p.sendStreamMessage(sequenceNumber, streamType, true, content)
+	p.sendStreamMessage(sequenceNumber, requestId, logId, streamType, true, content)
 }
 
-func (p *PortForwardRequest) wrapStreamMessageContent(content []byte) (string, error) {
+func (p *PortForwardRequest) wrapStreamMessageContent(content []byte, portforwardRequestId string) (string, error) {
 	streamMessageToSend := portforward.KubePortForwardStreamMessageContent{
-		PortForwardRequestId: p.portForwardRequestId,
+		PortForwardRequestId: portforwardRequestId,
 		Content:              content,
 	}
 	streamMessageToSendBytes, err := json.Marshal(streamMessageToSend)
@@ -246,13 +213,20 @@ func (p *PortForwardRequest) wrapStreamMessageContent(content []byte) (string, e
 	return base64.StdEncoding.EncodeToString(streamMessageToSendBytes), nil
 }
 
-func (p *PortForwardRequest) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, content string) {
+func (p *PortForwardRequest) sendStreamMessage(
+	sequenceNumber int,
+	requestId string,
+	logId string,
+	streamType smsg.StreamType,
+	more bool,
+	content string,
+) {
 	p.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  p.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		RequestId:      p.requestId,
-		LogId:          p.logId,
-		Action:         string(bzkube.PortForward),
+		RequestId:      requestId,
+		LogId:          logId,
+		Action:         string(kubeaction.PortForward),
 		Type:           streamType,
 		More:           more,
 		Content:        content,
