@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +37,7 @@ func TestRunCommand(t *testing.T) {
 		}
 
 		reader := bufio.NewReader(terminal.StdOut())
-		stdoutBytes := make([]byte, 10)
+		stdoutBytes := make([]byte, 1000)
 		if n, err := reader.Read(stdoutBytes); err != nil {
 			t.Errorf("failed to read from stdout: %s", err)
 		} else {
@@ -124,5 +125,5 @@ func whoAmI() (string, error) {
 		return "", nil
 	}
 
-	return string(stdout), nil
+	return strings.TrimSpace(string(stdout)), nil
 }
