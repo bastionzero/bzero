@@ -15,6 +15,8 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
+var runAsUser = "Bojji"
+
 type MockPseudoTerminal struct {
 	mock.Mock
 	IPseudoTerminal
@@ -45,7 +47,7 @@ func (m MockPseudoTerminal) Kill() {
 }
 
 func setMakePseudoTerminal(mockPT MockPseudoTerminal) {
-	makePseudoTerminal = func(logger *logger.Logger, runAsUser string, command string) (IPseudoTerminal, error) {
+	NewPseudoTerminal = func(logger *logger.Logger, runAsUser string, command string) (IPseudoTerminal, error) {
 		return mockPT, nil
 	}
 }
@@ -53,6 +55,8 @@ func setMakePseudoTerminal(mockPT MockPseudoTerminal) {
 func createPseudoTerminal() MockPseudoTerminal {
 	mockPT := MockPseudoTerminal{}
 
+	// pipe takes anything that's written to the writer and outputs it via the reader
+	// writer.Write("genius") -> reader.Read() => "genius"
 	reader, writer := io.Pipe()
 	mockPT.On("StdIn").Return(writer)
 	mockPT.On("StdOut").Return(reader)
@@ -98,7 +102,7 @@ func TestShellOpen(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, "Bojji")
+	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -108,7 +112,7 @@ func TestShellClose(t *testing.T) {
 	mockPT := createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, "Bojji")
+	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -127,7 +131,7 @@ func TestShellInput(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, "Bojji")
+	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -146,7 +150,7 @@ func TestShellResize(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, "Bojji")
+	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -172,13 +176,19 @@ func TestShellReplay(t *testing.T) {
 
 	// init shell
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, "Bojji")
+	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
 
 	testContent := "BastionZero"
 	shellInput(t, dshell, testContent)
+
+	// check to see if our output is the same as our input
+	msg := <-streamMessageChan
+	content, err := base64.StdEncoding.DecodeString(string(msg.Content))
+	assert.Nil(t, err)
+	assert.Equal(t, testContent, string(content))
 
 	// request shell replay
 	action := string(bzshell.ShellReplay)

@@ -16,6 +16,7 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 )
 
 // Declaring flags as package-accessible variables
@@ -112,17 +113,17 @@ func reportError(logger *logger.Logger, errorReport error) {
 func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	logger.Infof("Opening websocket to Bastion: %s for plugin %s", serviceUrl, plugin)
 
-	switch plugin {
-	case "kube":
+	switch bzplugin.PluginName(plugin) {
+	case bzplugin.Kube:
 		params["websocketType"] = "cluster"
 		return startKubeServer(logger, headers, params)
-	case "db":
+	case bzplugin.Db:
 		params["websocketType"] = "db"
 		return startDbServer(logger, headers, params)
-	case "web":
+	case bzplugin.Web:
 		params["websocketType"] = "web"
 		return startWebServer(logger, headers, params)
-	case "shell":
+	case bzplugin.Shell:
 		params["websocketType"] = "shell"
 		return startShellServer(logger, headers, params)
 	default:

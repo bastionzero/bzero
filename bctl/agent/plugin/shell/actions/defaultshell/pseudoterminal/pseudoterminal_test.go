@@ -26,7 +26,10 @@ func TestPseudoTerminalCreation(t *testing.T) {
 }
 
 func TestRunCommand(t *testing.T) {
+	// we use a command that requires calculation so that we don't confuse an error that
+	// outputs the entire string with a successful execution
 	keystrokes := "declare -i myvar=5+1; echo $myvar\n"
+	expectedOutput := "6"
 
 	if terminal, err := getPseudoTerminal(); err != nil {
 		t.Errorf("failed to create new pseudo terminal: %s", err)
@@ -42,7 +45,7 @@ func TestRunCommand(t *testing.T) {
 		if n, err := terminal.StdOut().Read(stdoutBytes); err != nil {
 			t.Errorf("failed to read from stdout: %s", err)
 		} else {
-			assert.Contains(t, string(stdoutBytes[:n]), "6")
+			assert.Contains(t, string(stdoutBytes[:n]), expectedOutput)
 		}
 	}
 }
@@ -113,7 +116,7 @@ func whoAmI() (string, error) {
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			// The program has exited with an exit code != 0
-			return "", fmt.Errorf("encountered an error while running command %v : %v", cmdstr, exitErr.Error())
+			return "", fmt.Errorf("encountered an error while running command %v : %s", cmdstr, exitErr)
 		}
 		return "", nil
 	}

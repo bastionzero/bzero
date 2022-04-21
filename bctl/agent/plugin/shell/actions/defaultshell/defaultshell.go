@@ -1,7 +1,6 @@
 package defaultshell
 
 import (
-	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -33,7 +32,8 @@ import (
 //     Done - a channel for letting the action know when the terminal has ended
 //     Kill - kills the command
 
-var makePseudoTerminal = func(logger *logger.Logger, runAsUser string, command string) (IPseudoTerminal, error) {
+// for testing purposes this needs to be a variable so that we can overwrite it with our mocked version in test
+var NewPseudoTerminal = func(logger *logger.Logger, runAsUser string, command string) (IPseudoTerminal, error) {
 	return pseudoterminal.New(logger, runAsUser, command)
 }
 
@@ -144,7 +144,7 @@ func (d *DefaultShell) open() error {
 		return fmt.Errorf("attempted to start the shell but a call to open a shell has already been made")
 	}
 
-	if terminal, err := makePseudoTerminal(d.logger, d.runAsUser, ""); err != nil {
+	if terminal, err := NewPseudoTerminal(d.logger, d.runAsUser, ""); err != nil {
 		return err
 	} else {
 		d.terminal = terminal
@@ -156,7 +156,6 @@ func (d *DefaultShell) open() error {
 			d.terminal.Kill()
 			return
 		case <-d.terminal.Done():
-			d.tmb.Killf("default shell action done")
 			return
 		}
 	}()
@@ -201,13 +200,12 @@ func (d *DefaultShell) writePump() {
 
 	d.stdoutbuff = ringbuffer.New(shellStdOutBuffCapacity)
 	stdoutBytes := make([]byte, streamDataPayloadSize)
-	reader := bufio.NewReader(d.terminal.StdOut())
 
 	// Wait for all input commands to run.
 	time.Sleep(time.Second)
 
 	for {
-		if stdoutBytesLen, err := reader.Read(stdoutBytes); err != nil {
+		if stdoutBytesLen, err := d.terminal.StdOut().Read(stdoutBytes); err != nil {
 			d.sendStreamMessage(smsg.Stop, stdoutBytes[:stdoutBytesLen])
 			d.logger.Errorf("error reading from stdout: %s", err)
 			return

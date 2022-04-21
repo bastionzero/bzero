@@ -127,7 +127,6 @@ func (d *DefaultShell) handleStreamMessages() {
 
 // Reads from StdIn and pushes to an input channel
 func (d *DefaultShell) readStdIn() {
-	d.logger.Info("STARTING")
 	// switch stdin into 'raw' mode
 	// https://pkg.go.dev/golang.org/x/term#pkg-overview
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -137,8 +136,6 @@ func (d *DefaultShell) readStdIn() {
 	}
 	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
-	d.logger.Info("STARTED")
-
 	b := make([]byte, 1)
 
 	for {
@@ -146,8 +143,6 @@ func (d *DefaultShell) readStdIn() {
 		case <-d.tmb.Dying():
 			return
 		default:
-			d.logger.Infof("READING")
-
 			n, err := os.Stdin.Read(b)
 			if err != nil || n != 1 {
 				d.tmb.Kill(fmt.Errorf("error reading last keypress from Stdin: %s", err))
@@ -169,7 +164,6 @@ func (d *DefaultShell) sendStdIn() {
 		case <-d.tmb.Dying():
 			return
 		case b := <-d.stdInChan:
-			d.logger.Info("APPENDING")
 			inputBuf = append(inputBuf, b)
 		case <-time.After(InputDebounceTime):
 			if len(inputBuf) >= 1 {
@@ -177,7 +171,6 @@ func (d *DefaultShell) sendStdIn() {
 				shellInputDataMessage := bzshell.ShellInputMessage{
 					Data: inputBuf,
 				}
-				d.logger.Info("SENDING")
 				d.sendOutputMessage(bzshell.ShellInput, shellInputDataMessage)
 
 				// clear the input buffer by slicing it to size 0 which will still
