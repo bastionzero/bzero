@@ -68,7 +68,6 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 	isTty := kubeutils.IsQueryParamPresent(request, "tty")
 
 	// Now since we made our local connection to kubectl, initiate a connection with Bastion
-	// FIXME: just put this in a class function...
 	e.sendStartMessage(isTty, request.URL.Query()["command"], request.URL.String())
 
 	// Set up a go function for stdout

@@ -207,6 +207,7 @@ func (p *PortForwardRequest) wrapStreamMessageContent(content []byte, portforwar
 	streamMessageToSendBytes, err := json.Marshal(streamMessageToSend)
 	if err != nil {
 		rerr := fmt.Errorf("error marsheling stream message: %s", err)
+
 		return "", rerr
 	}
 
