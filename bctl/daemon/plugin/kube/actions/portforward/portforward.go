@@ -29,9 +29,9 @@ var performHandshake = func(req *http.Request, w http.ResponseWriter, serverProt
 	return httpstream.Handshake(req, w, serverProtocols)
 }
 
-var getUpgradedConnection = func(w http.ResponseWriter, req *http.Request, handler httpstream.NewStreamHandler, pingPeriod time.Duration) httpstream.Connection {
+var getUpgradedConnection = func(w http.ResponseWriter, req *http.Request, streamChan chan httpstream.Stream, pingPeriod time.Duration) httpstream.Connection {
 	upgrader := spdystream.NewResponseUpgraderWithPings(kubeutils.DefaultStreamCreationTimeout)
-	return upgrader.UpgradeResponse(w, req, handler)
+	return upgrader.UpgradeResponse(w, req, httpStreamReceived(context.TODO(), streamChan))
 }
 
 type PortForwardRequest struct {
@@ -77,6 +77,7 @@ func New(logger *logger.Logger,
 		logId:                 logId,
 		commandBeingRun:       command,
 		outputChan:            make(chan plugin.ActionWrapper, 10),
+		streamChan:            make(chan PortForwardRequest, 10),
 		streamInputChan:       make(chan smsg.StreamMessage, 10),
 		ksInputChan:           make(chan plugin.ActionWrapper, 10),
 		streamPairs:           make(map[string]*httpStreamPair),
@@ -169,7 +170,7 @@ readyMessageLoop:
 	streamChan := make(chan httpstream.Stream, 1)
 
 	// Upgrade the response
-	conn := getUpgradedConnection(writer, request, p.httpStreamReceived(context.TODO(), streamChan), kubeutils.DefaultStreamCreationTimeout)
+	conn := getUpgradedConnection(writer, request, streamChan, kubeutils.DefaultStreamCreationTimeout)
 	if conn == nil {
 		return fmt.Errorf("unable to upgrade websocket connection")
 	}
@@ -322,10 +323,12 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 			default:
 				buf := make([]byte, portforward.DataStreamBufferSize)
 				n, err := portforwardSession.dataStream.Read(buf)
-				if err != nil || err != io.EOF {
+				if err != nil && err != io.EOF {
 					p.logger.Error(fmt.Errorf("received error on datastream: %s", err))
 
 					doneChan <- true
+					return
+				} else if err == io.EOF {
 					return
 				}
 
@@ -349,15 +352,17 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	// We have to keep track of error and data seq numbers and keep a buffer
 	expectedDataSeqNumber := 0
 	expectedErrorSeqNumber := 0
-	dataBuffer := make(map[int][]byte)
-	errorBuffer := make(map[int][]byte)
+	dataBuffer := make(map[int]PortForwardRequest)
+	errorBuffer := make(map[int]PortForwardRequest)
 
 	// Set up our message processors
-	processDataMessage := func(content []byte) {
+	processDataMessage := func(content []byte, more bool) {
 		if _, err := io.Copy(portforwardSession.dataStream, bytes.NewReader(content)); err != nil {
 			rerr := fmt.Errorf("error writing to stream data: %s", err)
 			p.logger.Error(rerr)
-
+			doneChan <- true
+		}
+		if !more {
 			doneChan <- true
 		}
 		expectedDataSeqNumber += 1
@@ -386,23 +391,18 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 			if portForwardRequest.streamMessage.Type == smsg.Data {
 				// Check our seqNumber
 				if portForwardRequest.streamMessage.SequenceNumber == expectedDataSeqNumber {
-					processDataMessage(portForwardRequest.streamMessageContent.Content)
+					processDataMessage(portForwardRequest.streamMessageContent.Content, portForwardRequest.streamMessage.More)
 				} else {
 					// Update our buffer
-					dataBuffer[portForwardRequest.streamMessage.SequenceNumber] = portForwardRequest.streamMessageContent.Content
+					dataBuffer[portForwardRequest.streamMessage.SequenceNumber] = portForwardRequest
 				}
 
 				// Always attempt to processes out of order messages
-				outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
+				outOfOrderDataRequest, ok := dataBuffer[expectedDataSeqNumber]
 				for ok {
 					// Keep pulling older messages
-					processDataMessage(outOfOrderDataContent)
-					outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
-				}
-
-				if !portForwardRequest.streamMessage.More {
-					// Alert on our done chan
-					doneChan <- true
+					processDataMessage(outOfOrderDataRequest.streamMessageContent.Content, outOfOrderDataRequest.streamMessage.More)
+					outOfOrderDataRequest, ok = dataBuffer[expectedDataSeqNumber]
 				}
 
 			} else if portForwardRequest.streamMessage.Type == smsg.Error {
@@ -410,15 +410,15 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 					processErrorMessage(portForwardRequest.streamMessageContent.Content)
 				} else {
 					// Update our buffer
-					errorBuffer[portForwardRequest.streamMessage.SequenceNumber] = portForwardRequest.streamMessageContent.Content
+					errorBuffer[portForwardRequest.streamMessage.SequenceNumber] = portForwardRequest
 				}
 
 				// Always attempt to process out of order messages
-				outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
+				outOfOrderErrorRequest, ok := errorBuffer[expectedErrorSeqNumber]
 				for ok {
 					// Keep pulling older messages
-					processErrorMessage(outOfOrderErrorContent)
-					outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
+					processErrorMessage([]byte(outOfOrderErrorRequest.streamMessageContent.Content))
+					outOfOrderErrorRequest, ok = errorBuffer[expectedErrorSeqNumber]
 				}
 
 			} else {

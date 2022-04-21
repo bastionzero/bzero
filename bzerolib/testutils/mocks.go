@@ -58,7 +58,7 @@ func (m MockStream) Reset() error {
 }
 func (m MockStream) Headers() http.Header {
 	args := m.Called()
-	return args.Get(0).(map[string][]string)
+	return args.Get(0).(http.Header)
 }
 func (m MockStream) Identifier() uint32 {
 	args := m.Called()
@@ -69,6 +69,7 @@ func (m MockStream) Identifier() uint32 {
 type MockStreamConnection struct {
 	mock.Mock
 	httpstream.Connection
+	headers http.Header
 }
 
 func (m *MockStreamConnection) CreateStream(headers http.Header) (httpstream.Stream, error) {

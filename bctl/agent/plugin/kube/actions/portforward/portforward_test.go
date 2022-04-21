@@ -6,13 +6,11 @@ import (
 	"errors"
 	"flag"
 	"net/http"
-	"net/textproto"
 	"os"
 	"testing"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
-	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
@@ -87,8 +85,8 @@ func TestPortforward(t *testing.T) {
 
 	mockStreamConnection := new(testutils.MockStreamConnection)
 	mockStreamConnection.On("CreateStream", http.Header{
-		textproto.CanonicalMIMEHeaderKey(kubeutils.PortHeader):                 []string{"5000"},
-		textproto.CanonicalMIMEHeaderKey(kubeutils.PortForwardRequestIDHeader): []string{""},
+		"Port":      []string{"5000"},
+		"Requestid": []string{""},
 	}).Return(mockStream, nil)
 
 	setDoDial(mockStreamConnection)

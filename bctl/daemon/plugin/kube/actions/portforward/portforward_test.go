@@ -1,6 +1,7 @@
 package portforward
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -26,10 +28,23 @@ func setPerformHandshake() {
 	}
 }
 
-func setGetUpgradedConnection(mockConnection *testutils.MockStreamConnection) {
-	getUpgradedConnection = func(w http.ResponseWriter, req *http.Request, handler httpstream.NewStreamHandler, pingPeriod time.Duration) httpstream.Connection {
+func setGetUpgradedConnection(mockConnection *testutils.MockStreamConnection) (http.Header, http.Header) {
+	dataHeaders := http.Header{}
+	dataHeaders.Set(kubeutils.StreamType, kubeutils.StreamTypeData)
+	errorHeaders := http.Header{}
+	errorHeaders.Set(kubeutils.StreamType, kubeutils.StreamTypeError)
+	getUpgradedConnection = func(w http.ResponseWriter, req *http.Request, streamChan chan httpstream.Stream, pingPeriod time.Duration) httpstream.Connection {
+		dataHeaders.Set(kubeutils.PortForwardRequestIDHeader, req.Header.Get(kubeutils.PortForwardRequestIDHeader))
+		errorHeaders.Set(kubeutils.PortForwardRequestIDHeader, req.Header.Get(kubeutils.PortForwardRequestIDHeader))
+		go func() {
+			dataStream, _ := mockConnection.CreateStream(dataHeaders)
+			errorStream, _ := mockConnection.CreateStream(errorHeaders)
+			streamChan <- dataStream
+			streamChan <- errorStream
+		}()
 		return mockConnection
 	}
+	return dataHeaders, errorHeaders
 }
 
 func TestMain(m *testing.M) {
@@ -55,9 +70,15 @@ func TestPortForward(t *testing.T) {
 	logId := "lid"
 	command := "logs"
 	sendData := "send data"
+	testData := "receive data"
+	streamData := "stream data"
+	streamError := "stream error"
 	urlPath := "test-path"
 
-	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+	headers := http.Header{}
+	headers.Set(kubeutils.PortForwardRequestIDHeader, requestId)
+
+	request := testutils.MockHttpRequest("GET", urlPath, headers, sendData)
 
 	mockStreamConnection := testutils.MockStreamConnection{}
 	mockStreamConnection.On("SetIdleTimeout", kubeutils.DefaultIdleTimeout).Return()
@@ -68,7 +89,22 @@ func TestPortForward(t *testing.T) {
 	writer := testutils.MockResponseWriter{}
 
 	setPerformHandshake()
-	setGetUpgradedConnection(&mockStreamConnection)
+	dataHeaders, errorHeaders := setGetUpgradedConnection(&mockStreamConnection)
+
+	mockDataStream := testutils.MockStream{MyStreamData: streamData}
+	mockDataStream.On("Headers").Return(dataHeaders)
+	mockDataStream.On("Close").Return(nil)
+	mockDataStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(len(streamData), nil)
+	mockDataStream.On("Write", []byte(testData)).Return(len(testData), nil).Times(3)
+
+	mockErrorStream := testutils.MockStream{MyStreamData: streamError}
+	mockErrorStream.On("Headers").Return(errorHeaders)
+	mockErrorStream.On("Close").Return(nil)
+	mockErrorStream.On("Read", make([]byte, portforward.ErrorStreamBufferSize)).Return(len(streamError), nil)
+	mockErrorStream.On("Write", []byte(testData)).Return(len(testData), nil)
+
+	mockStreamConnection.On("CreateStream", dataHeaders).Return(mockDataStream, nil)
+	mockStreamConnection.On("CreateStream", errorHeaders).Return(mockErrorStream, nil)
 
 	p, outputChan := New(logger, requestId, logId, command)
 
@@ -84,27 +120,89 @@ func TestPortForward(t *testing.T) {
 		assert.Equal(logId, payload.LogId)
 
 		p.ReceiveStream(smsg.StreamMessage{
-			Type:           smsg.Ready,
-			SequenceNumber: 0,
-			Content:        "",
+			Type:    smsg.Ready,
+			Content: "",
 		})
-		/*
-			streamMessageToSend := portforward.KubePortForwardStreamMessageContent{
-				PortForwardRequestId: "pid",
-				Content:              []byte(testData),
+		// FIXME: these might come in either order
+		n := 0
+		receivedDataIn := false
+		receivedError := false
+		for n < 2 {
+			msg := <-outputChan
+			switch msg.Action {
+			case string(portforward.DataInPortForward):
+				var dataInPayload portforward.KubePortForwardActionPayload
+				err = json.Unmarshal(msg.ActionPayload, &dataInPayload)
+				assert.Nil(err)
+				assert.Equal([]byte(streamData), dataInPayload.Data)
+				receivedDataIn = true
+			case string(portforward.ErrorPortForward):
+				var errorInPayload portforward.KubePortForwardActionPayload
+				err = json.Unmarshal(msg.ActionPayload, &errorInPayload)
+				assert.Nil(err)
+				assert.Equal([]byte(streamError), errorInPayload.Data)
+				receivedError = true
 			}
-			streamMessageToSendBytes, _ := json.Marshal(streamMessageToSend)
-			encodedContent := base64.StdEncoding.EncodeToString(streamMessageToSendBytes)
-			p.ReceiveStream(smsg.StreamMessage{
-				SequenceNumber: 1,
-				Content:        encodedContent,
-				Type:           smsg.Data,
-			})
-		*/
+			n++
+		}
+		assert.True(receivedDataIn)
+		assert.True(receivedError)
+
+		streamMessageToSend := portforward.KubePortForwardStreamMessageContent{
+			PortForwardRequestId: "pid",
+			Content:              []byte(testData),
+		}
+		streamMessageToSendBytes, _ := json.Marshal(streamMessageToSend)
+		encodedContent := base64.StdEncoding.EncodeToString(streamMessageToSendBytes)
+
+		p.ReceiveStream(smsg.StreamMessage{
+			SequenceNumber: 0,
+			Content:        encodedContent,
+			Type:           smsg.Data,
+			More:           true,
+		})
+
+		p.ReceiveStream(smsg.StreamMessage{
+			SequenceNumber: 2,
+			Content:        encodedContent,
+			Type:           smsg.Data,
+			More:           false,
+		})
+
+		p.ReceiveStream(smsg.StreamMessage{
+			SequenceNumber: 0,
+			Content:        encodedContent,
+			Type:           smsg.Error,
+			More:           false,
+		})
+
+		p.ReceiveStream(smsg.StreamMessage{
+			SequenceNumber: 1,
+			Content:        encodedContent,
+			Type:           smsg.Data,
+			More:           true,
+		})
+
+		time.Sleep(time.Second)
 
 		tmb.Kill(errors.New("test kill"))
 
 		time.Sleep(time.Second)
+
+		receivedStopRequestMsg := false
+		receivedStopMsg := false
+		// need to drain the channel, as several extra data and error messages have been sent to it
+		for len(outputChan) > 0 {
+			msg := <-outputChan
+			if msg.Action == string(portforward.StopPortForwardRequest) {
+				receivedStopRequestMsg = true
+			} else if msg.Action == string(portforward.StopPortForward) {
+				receivedStopMsg = true
+			}
+		}
+		assert.True(receivedStopRequestMsg)
+		assert.True(receivedStopMsg)
+
 		writer.AssertExpectations(t)
 	}()
 
@@ -137,8 +235,8 @@ func TestPortForwardError(t *testing.T) {
 		Code:    http.StatusForbidden,
 		Reason:  "Forbidden",
 	})
-	// TODO: 0?
-	writer.On("Write", errorJson).Return(0, nil)
+
+	writer.On("Write", errorJson).Return(len(errorJson), nil)
 
 	go func() {
 		// get initial payload from output channel
@@ -170,4 +268,11 @@ func TestPortForwardError(t *testing.T) {
 
 	err := p.Start(&tmb, &writer, &request)
 	assert.Equal(fmt.Errorf("error starting portforward stream: %s", errorStr), err)
+}
+
+func checkDataInMessage(assert *assert.Assertions, msg plugin.ActionWrapper, testStr string) {
+	var dataInPayload portforward.KubePortForwardActionPayload
+	err := json.Unmarshal(msg.ActionPayload, &dataInPayload)
+	assert.Nil(err)
+	assert.Equal([]byte(testStr), dataInPayload.Data)
 }

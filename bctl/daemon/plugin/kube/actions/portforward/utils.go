@@ -76,11 +76,32 @@ func (p *httpStreamPair) printError(s string) {
 	}
 }
 
+// monitorStreamPair waits for the pair to receive both its error and data
+// streams, or for the timeout to expire (whichever happens first), and then
+// removes the pair.
+func (p *PortForwardAction) monitorStreamPair(portforwardStreamPair *httpStreamPair, timeout <-chan time.Time) {
+	select {
+	case <-timeout:
+		p.logger.Error(fmt.Errorf("request %s, timed out waiting for streams", portforwardStreamPair.requestID))
+	case <-portforwardStreamPair.complete:
+		p.logger.Infof("Request %s, successfully received error and data streams.", portforwardStreamPair.requestID)
+	}
+	p.removeStreamPair(portforwardStreamPair.requestID)
+}
+
+// removeStreamPair removes the stream pair identified by requestID from streamPairs.
+func (p *PortForwardAction) removeStreamPair(requestID string) {
+	p.streamPairsLock.Lock()
+	defer p.streamPairsLock.Unlock()
+
+	delete(p.streamPairs, requestID)
+}
+
 // httpStreamReceived is the httpstream.NewStreamHandler for port
 // forward streams. It checks each stream's port and stream type headers,
 // rejecting any streams that with missing or invalid values. Each valid
 // stream is sent to the streams channel.
-func (p *PortForwardAction) httpStreamReceived(ctx context.Context, streams chan httpstream.Stream) func(httpstream.Stream, <-chan struct{}) error {
+func httpStreamReceived(ctx context.Context, streams chan httpstream.Stream) func(httpstream.Stream, <-chan struct{}) error {
 	return func(stream httpstream.Stream, replySent <-chan struct{}) error {
 		// make sure it has a valid port header
 		portString := stream.Headers().Get(kubeutils.PortHeader)
@@ -111,25 +132,4 @@ func (p *PortForwardAction) httpStreamReceived(ctx context.Context, streams chan
 			return errors.New("request has been cancelled")
 		}
 	}
-}
-
-// monitorStreamPair waits for the pair to receive both its error and data
-// streams, or for the timeout to expire (whichever happens first), and then
-// removes the pair.
-func (p *PortForwardAction) monitorStreamPair(portforwardStreamPair *httpStreamPair, timeout <-chan time.Time) {
-	select {
-	case <-timeout:
-		p.logger.Error(fmt.Errorf("request %s, timed out waiting for streams", portforwardStreamPair.requestID))
-	case <-portforwardStreamPair.complete:
-		p.logger.Infof("Request %s, successfully received error and data streams.", portforwardStreamPair.requestID)
-	}
-	p.removeStreamPair(portforwardStreamPair.requestID)
-}
-
-// removeStreamPair removes the stream pair identified by requestID from streamPairs.
-func (p *PortForwardAction) removeStreamPair(requestID string) {
-	p.streamPairsLock.Lock()
-	defer p.streamPairsLock.Unlock()
-
-	delete(p.streamPairs, requestID)
 }
