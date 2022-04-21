@@ -15,6 +15,7 @@ package ringbuffer
 
 import (
 	"fmt"
+	"sync"
 )
 
 func min(a int, b int) int {
@@ -36,6 +37,7 @@ type RingBuffer struct {
 	size       int
 	start, end int
 	full       bool
+	lock       sync.RWMutex
 }
 
 // New is the RingBuffer constructor
@@ -52,32 +54,44 @@ func New(size int) *RingBuffer {
 
 func (r *RingBuffer) sanitycheck() (err error) {
 	if r.start > r.size {
-		return fmt.Errorf("Ringbuffer sanity check failed (start > size) start=%d, end=%d, size=%d", r.start, r.end, r.size)
+		return fmt.Errorf("ringbuffer sanity check failed (start > size) start=%d, end=%d, size=%d", r.start, r.end, r.size)
 	}
 	if r.end > r.size {
-		return fmt.Errorf("Ringbuffer sanity check failed (end > size) start=%d, end=%d, size=%d", r.start, r.end, r.size)
+		return fmt.Errorf("ringbuffer sanity check failed (end > size) start=%d, end=%d, size=%d", r.start, r.end, r.size)
 	}
 	if r.start < 0 {
-		return fmt.Errorf("Ringbuffer sanity check failed (start < 0) start=%d, end=%d, size=%d", r.start, r.end, r.size)
+		return fmt.Errorf("ringbuffer sanity check failed (start < 0) start=%d, end=%d, size=%d", r.start, r.end, r.size)
 	}
 	if r.end < 0 {
-		return fmt.Errorf("Ringbuffer sanity check failed (end < 0) start=%d, end=%d, size=%d", r.start, r.end, r.size)
+		return fmt.Errorf("ringbuffer sanity check failed (end < 0) start=%d, end=%d, size=%d", r.start, r.end, r.size)
 	}
 	if r.size < 0 {
-		return fmt.Errorf("Ringbuffer sanity check failed (size < 0) start=%d, end=%d, size=%d", r.start, r.end, r.size)
+		return fmt.Errorf("ringbuffer sanity check failed (size < 0) start=%d, end=%d, size=%d", r.start, r.end, r.size)
 	}
 
 	// All checks pass
 	return nil
 }
 
+func (r *RingBuffer) ReadAll() ([]byte, error) {
+	outbuff := make([]byte, r.size)
+	if n, err := r.Read(outbuff); err != nil {
+		return []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
+	} else {
+		return outbuff[0:n], nil
+	}
+}
+
 func (r *RingBuffer) Read(p []byte) (n int, err error) {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+
 	if err := r.sanitycheck(); err != nil {
 		return 0, err
 	}
 
 	// There are two cases:
-	if r.full == false {
+	if !r.full {
 		// Case 1 - The head hasn't eaten it's own tail yet (full == false)
 		//  data in buffer less than buffer size
 		//   --> r.start < r.end < r.size
@@ -104,11 +118,14 @@ func (r *RingBuffer) Read(p []byte) (n int, err error) {
 }
 
 func (r *RingBuffer) Write(p []byte) (n int, err error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
 	r.sanitycheck()
 	n = len(p)
 
 	// Buffer will be full when write completes
-	if r.full == false && (r.end+n) >= r.size {
+	if !r.full && (r.end+n) >= r.size {
 		r.full = true
 	}
 
@@ -129,7 +146,7 @@ func (r *RingBuffer) Write(p []byte) (n int, err error) {
 	}
 
 	r.end = (r.end + n) % r.size
-	if r.full == true {
+	if r.full {
 		// head eats tail
 		r.start = r.end
 	}

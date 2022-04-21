@@ -7,6 +7,20 @@ package websocket
 
 import am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 
+const (
+	// SignalR Constants
+	signalRMessageTerminatorByte = 0x1E
+)
+
+type SignalRMessageType int
+
+const (
+	// Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#invocation-message-encoding
+	Invocation SignalRMessageType = 1
+	// Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#completion-message-encoding
+	Completion SignalRMessageType = 3
+)
+
 type SignalRNegotiateResponse struct {
 	NegotiateVersion int
 	ConnectionId     string

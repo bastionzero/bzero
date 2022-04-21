@@ -223,8 +223,8 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 
 	// start plugin based on name
 	subLogger := d.logger.GetPluginLogger(pluginName)
-	switch plgn.PluginName(pluginName) {
-	case plgn.Kube:
+	switch bzplugin.PluginName(pluginName) {
+	case bzplugin.Kube:
 		// Deserialize the action params
 		var kubeParams bzkube.KubeActionParams
 		if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
@@ -237,7 +237,7 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		} else {
 			d.plugin = plugin
 		}
-	case plgn.Db:
+	case bzplugin.Db:
 		// Deserialize the action params
 		var dbParams bzdb.DbActionParams
 		if err := json.Unmarshal(actionParams, &dbParams); err != nil {
@@ -250,7 +250,7 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		} else {
 			d.plugin = plugin
 		}
-	case plgn.Web:
+	case bzplugin.Web:
 		// Deserialize the action params
 		var webParams bzweb.WebActionParams
 		if err := json.Unmarshal(actionParams, &webParams); err != nil {
@@ -263,7 +263,7 @@ func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
 		} else {
 			d.plugin = plugin
 		}
-	case plgn.Shell:
+	case bzplugin.Shell:
 		// Deserialize the action params
 		var shellParams bzshell.ShellActionParams
 		if err := json.Unmarshal(actionParams, &shellParams); err != nil {

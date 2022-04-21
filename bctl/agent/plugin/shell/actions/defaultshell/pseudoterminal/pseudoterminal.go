@@ -1,3 +1,20 @@
+// Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"). You may not
+// use this file except in compliance with the License. A copy of the
+// License is located at
+//
+// http://aws.amazon.com/apache2.0/
+//
+// or in the "license" file accompanying this file. This file is distributed
+// on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+// This code has been modified from the code covered by the Apache License 2.0.
+// Modifications Copyright (C) 2022 BastionZero Inc.  The BastionZero Agent
+// is licensed under the Apache 2.0 License.
+
 package pseudoterminal
 
 import (
@@ -23,14 +40,6 @@ const (
 	defaultShellCommand = "sh"
 )
 
-type IPseudoTerminal interface {
-	StdIn() *os.File
-	StdOut() *os.File
-	SetSize(wsCol, wRow uint32) error
-	Done() <-chan struct{}
-	Kill()
-}
-
 type PseudoTerminal struct {
 	logger  *logger.Logger
 	ptyFile *os.File
@@ -38,7 +47,7 @@ type PseudoTerminal struct {
 }
 
 // StartPty starts pty and provides handles to stdin and stdout
-func Start(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTerminal, error) {
+func New(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTerminal, error) {
 	logger.Info("Starting pty")
 
 	// Check if runAsUser is valid and exists
@@ -48,7 +57,7 @@ func Start(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoT
 
 	// Attempt to get default shell to use for the runAsUser
 	logger.Debugf("Trying to get default shell to use for user %s", runAsUser)
-	shellCommand, err := defaultShellForUser(runAsUser)
+	shellCommand, err := getDefaultShellForUser(runAsUser)
 	if err != nil {
 		logger.Errorf("Failed getting default shell for user %s: %s", runAsUser, err)
 	}
@@ -76,7 +85,6 @@ func Start(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoT
 }
 
 func buildCommand(commandstr string, shellCommand string, shellCommandArgs []string, runAsUser string) (*exec.Cmd, error) {
-	// Start the command with a pty
 	var cmd *exec.Cmd
 
 	if strings.TrimSpace(commandstr) == "" {
@@ -121,6 +129,7 @@ func (p *PseudoTerminal) Done() <-chan struct{} {
 	doneChan := make(chan struct{})
 
 	go func() {
+		defer p.closePty()
 		defer close(doneChan)
 
 		if p.command == nil {
@@ -139,11 +148,20 @@ func (p *PseudoTerminal) Done() <-chan struct{} {
 	return doneChan
 }
 
+func (p *PseudoTerminal) closePty() {
+	if p.ptyFile != nil {
+		if err := p.ptyFile.Close(); err != nil {
+			p.logger.Errorf("failed to close pty: %s", err)
+		}
+		p.ptyFile = nil
+	}
+}
+
 func (p *PseudoTerminal) Kill() {
-	if p.command == nil || p.command.Process == nil {
-		return
-	} else {
-		p.command.Process.Kill()
+	if p.command != nil && p.command.Process != nil {
+		if err := p.command.Process.Kill(); err != nil {
+			p.logger.Errorf("failed to close command process: %s", err)
+		}
 	}
 }
 
@@ -156,14 +174,14 @@ func (p *PseudoTerminal) StdOut() *os.File {
 }
 
 // SetSize sets size of console terminal window.
-func (p *PseudoTerminal) SetSize(wsCol, wRow uint32) error {
+func (p *PseudoTerminal) SetSize(cols, rows uint32) error {
 	winSize := pty.Winsize{
-		Cols: uint16(wsCol),
-		Rows: uint16(wRow),
+		Cols: uint16(cols),
+		Rows: uint16(rows),
 	}
 
 	if err := pty.Setsize(p.ptyFile, &winSize); err != nil {
-		return fmt.Errorf("set pty size failed: %s", err)
+		return fmt.Errorf("set terminal window size failed: %s", err)
 	}
 	return nil
 }
@@ -185,7 +203,7 @@ func doesUserExist(username string, shellCommand string, shellCommandArgs []stri
 
 // Get the default shell for the user based on configuration in /etc/passwd file.
 // https://unix.stackexchange.com/a/352320
-func defaultShellForUser(user string) (string, error) {
+func getDefaultShellForUser(user string) (string, error) {
 	defaultShell := defaultShellCommand
 	defaultShellCmd := exec.Command(defaultShell, "-c", fmt.Sprintf("getent passwd %s | awk -F: '{print $NF}'", user))
 	if out, err := defaultShellCmd.Output(); err == nil {

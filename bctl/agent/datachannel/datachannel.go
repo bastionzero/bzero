@@ -19,6 +19,7 @@ import (
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -183,7 +184,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 
 				// Start plugin based on action
 				actionPrefix := parsedAction[0]
-				if err := d.startPlugin(plgn.PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
+				if err := d.startPlugin(bzplugin.PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
 					d.sendError(rrr.ComponentStartupError, err)
 					return
 				}
@@ -217,7 +218,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	}
 }
 
-func (d *DataChannel) startPlugin(pluginName plgn.PluginName, action string, payload []byte) error {
+func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	// create channel and listener and pass it to the new plugin
@@ -240,13 +241,13 @@ func (d *DataChannel) startPlugin(pluginName plgn.PluginName, action string, pay
 	var err error
 
 	switch pluginName {
-	case plgn.Kube:
+	case bzplugin.Kube:
 		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
-	case plgn.Db:
+	case bzplugin.Db:
 		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
-	case plgn.Web:
+	case bzplugin.Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
-	case plgn.Shell:
+	case bzplugin.Shell:
 		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")

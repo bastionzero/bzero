@@ -27,11 +27,6 @@ import (
 )
 
 const (
-	// SignalR Constants
-	signalRMessageTerminatorByte = 0x1E
-	signalRInvocationMessageType = 1 // Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#invocation-message-encoding
-	signalRCompletionMessageType = 3 // Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#completion-message-encoding
-
 	// Enum target types
 	Cluster = 2
 	Db      = 3
@@ -299,7 +294,8 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 			return messages, fmt.Errorf("error unmarshalling SignalR message from Bastion: %v", string(msg))
 		}
 
-		if signalRMessageType.Type == signalRCompletionMessageType {
+		switch SignalRMessageType(signalRMessageType.Type) {
+		case Completion:
 			var completionMessage SignalRCompletionMessage
 			if err := json.Unmarshal(msg, &completionMessage); err != nil {
 				return messages, fmt.Errorf("error unmarshalling SignalR completion message from Bastion: %v", string(msg))
@@ -324,7 +320,7 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 			} else {
 				return messages, fmt.Errorf("error received completion message from Bastion without a invocationId: %v", string(msg))
 			}
-		} else if signalRMessageType.Type == signalRInvocationMessageType {
+		case Invocation:
 			var invocationMessage SignalRInvocationMessage
 			if err := json.Unmarshal(msg, &invocationMessage); err != nil {
 				return messages, fmt.Errorf("error unmarshalling SignalR invocation message from Bastion: %s. Error: %s", string(msg), err)
@@ -336,7 +332,7 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 			} else {
 				w.logger.Errorf("Ignoring SignalR invocation message because it doesn't have an AgentMessage argument")
 			}
-		} else {
+		default:
 			msg := fmt.Sprintf("Ignoring SignalR message with type %v", signalRMessageType.Type)
 			w.logger.Tracef(msg)
 		}
@@ -361,7 +357,7 @@ func (w *Websocket) processOutput(message signalRInvocationMessage) {
 
 	signalRMessage := SignalRInvocationMessage{
 		Target:       target,
-		Type:         signalRInvocationMessageType,
+		Type:         int(Invocation),
 		Arguments:    []am.AgentMessage{message.agentMessage},
 		InvocationId: message.invocationId,
 	}
