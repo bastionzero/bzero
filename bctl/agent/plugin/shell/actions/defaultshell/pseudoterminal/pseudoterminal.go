@@ -140,7 +140,7 @@ func (p *PseudoTerminal) Done() <-chan struct{} {
 		if p.command == nil {
 			return
 		} else if err := p.command.Wait(); err != nil {
-			// d.logger.Errorf("pty command exited with err: %s", err)
+			p.logger.Errorf("pty command exited with err: %s", err)
 			if exitError, ok := err.(*exec.ExitError); ok {
 				exitCode := exitError.ExitCode()
 				p.logger.Errorf("pty cmd exited with non-zero exit code %d err: %s", exitCode, err)
@@ -151,6 +151,14 @@ func (p *PseudoTerminal) Done() <-chan struct{} {
 	}()
 
 	return doneChan
+}
+
+func (p *PseudoTerminal) Closed() bool {
+	if p.command != nil {
+		return p.command.ProcessState.Exited()
+	} else {
+		return false
+	}
 }
 
 func (p *PseudoTerminal) Kill() {

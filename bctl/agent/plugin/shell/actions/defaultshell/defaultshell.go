@@ -46,6 +46,7 @@ type IPseudoTerminal interface {
 	SetSize(cols, rows uint32) error
 	Done() <-chan struct{}
 	Kill()
+	Closed() bool
 }
 
 type DefaultShell struct {
@@ -126,17 +127,6 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) (string, []b
 			return action, replayBytes, nil
 		}
 
-		// outbuff := make([]byte, ShellStdOutBuffCapacity)
-		// d.stdoutbuffMutex.Lock()
-		// defer d.stdoutbuffMutex.Unlock()
-
-		// // does this need a timeout?
-		// if n, err := d.stdoutbuff.Read(outbuff); err != nil {
-		// 	return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
-		// } else {
-		// 	return action, outbuff[0:n], nil
-		// }
-
 	default:
 		return action, []byte{}, fmt.Errorf("unrecognized shell action received: %s", action)
 	}
@@ -212,9 +202,11 @@ func (d *DefaultShell) writePump() {
 	// Wait for all input commands to run.
 	time.Sleep(time.Second)
 
+	d.logger.Infof("HERE: %s", d.terminal.Closed())
+
 	for {
 		if stdoutBytesLen, err := reader.Read(stdoutBytes); err != nil {
-			if d.tmb.Alive() {
+			if !d.terminal.Closed() {
 				d.logger.Errorf("error reading from stdout: %s", err)
 			}
 			d.sendStreamMessage(smsg.Stop, stdoutBytes[:stdoutBytesLen])
