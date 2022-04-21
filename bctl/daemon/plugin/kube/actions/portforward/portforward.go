@@ -103,7 +103,6 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 	}
 
 	// First get the stream
-	p.logger.Errorf("map is a %+v", p.requestMap)
 	streamChan, ok := p.getRequestMap(kubePortforwardStreamMessageContent.PortForwardRequestId)
 	if !ok {
 		p.logger.Error(fmt.Errorf("unable to find stream chan for request: %s", kubePortforwardStreamMessageContent.PortForwardRequestId))
