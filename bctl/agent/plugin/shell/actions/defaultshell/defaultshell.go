@@ -202,8 +202,6 @@ func (d *DefaultShell) writePump() {
 	// Wait for all input commands to run.
 	time.Sleep(time.Second)
 
-	d.logger.Infof("HERE: %s", d.terminal.Closed())
-
 	for {
 		if stdoutBytesLen, err := reader.Read(stdoutBytes); err != nil {
 			if !d.terminal.Closed() {

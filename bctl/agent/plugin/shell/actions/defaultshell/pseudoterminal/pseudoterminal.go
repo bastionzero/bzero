@@ -154,9 +154,11 @@ func (p *PseudoTerminal) Done() <-chan struct{} {
 }
 
 func (p *PseudoTerminal) Closed() bool {
-	if p.command != nil {
+	if p.command.ProcessState != nil {
 		return p.command.ProcessState.Exited()
 	} else {
+		// If we have not defined processState,
+		// that means that program has not started yet
 		return false
 	}
 }
