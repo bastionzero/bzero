@@ -20,6 +20,7 @@ package pseudoterminal
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -162,11 +163,11 @@ func (p *PseudoTerminal) Kill() {
 	}
 }
 
-func (p *PseudoTerminal) StdIn() *os.File {
+func (p *PseudoTerminal) StdIn() io.Writer {
 	return p.ptyFile
 }
 
-func (p *PseudoTerminal) StdOut() *os.File {
+func (p *PseudoTerminal) StdOut() io.Reader {
 	return p.ptyFile
 }
 

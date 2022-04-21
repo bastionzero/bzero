@@ -1,14 +1,13 @@
 package pseudoterminal
 
 import (
-	"bufio"
 	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
-	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/logger/mock"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,21 +26,23 @@ func TestPseudoTerminalCreation(t *testing.T) {
 }
 
 func TestRunCommand(t *testing.T) {
-	keystrokes := []byte("echo 'BastionZero'")
+	keystrokes := "declare -i myvar=5+1; echo $myvar\n"
 
 	if terminal, err := getPseudoTerminal(); err != nil {
 		t.Errorf("failed to create new pseudo terminal: %s", err)
 	} else {
-		if _, err := terminal.StdIn().Write(keystrokes); err != nil {
-			t.Errorf("Unable to write to stdin: %s", err)
+		for _, char := range keystrokes {
+			if _, err := terminal.StdIn().Write([]byte(string(char))); err != nil {
+				t.Errorf("Unable to write to stdin: %s", err)
+			}
 		}
+		time.Sleep(1 * time.Second) // let the command run
 
-		reader := bufio.NewReader(terminal.StdOut())
 		stdoutBytes := make([]byte, 1000)
-		if n, err := reader.Read(stdoutBytes); err != nil {
+		if n, err := terminal.StdOut().Read(stdoutBytes); err != nil {
 			t.Errorf("failed to read from stdout: %s", err)
 		} else {
-			assert.Contains(t, string(stdoutBytes[:n]), "BastionZero")
+			assert.Contains(t, string(stdoutBytes[:n]), "6")
 		}
 	}
 }
@@ -89,7 +90,7 @@ func TestDoesUserExist(t *testing.T) {
 }
 
 func getPseudoTerminal() (*PseudoTerminal, error) {
-	logger := mockLogger()
+	logger := mock.MockLogger()
 	runAsUser, err := whoAmI()
 	if err != nil {
 		return nil, fmt.Errorf("failed to grab current user")
@@ -101,13 +102,6 @@ func getPseudoTerminal() (*PseudoTerminal, error) {
 	} else {
 		return terminal, nil
 	}
-}
-
-func mockLogger() *logger.Logger {
-	if logger, err := logger.New(logger.DefaultLoggerConfig(logger.Debug.String()), "/dev/null", false); err == nil {
-		return logger
-	}
-	return nil
 }
 
 // whoAmI returns the current username that the agent is running under

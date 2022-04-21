@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/actions/defaultshell/pseudoterminal"
@@ -33,6 +33,10 @@ import (
 //     Done - a channel for letting the action know when the terminal has ended
 //     Kill - kills the command
 
+var makePseudoTerminal = func(logger *logger.Logger, runAsUser string, command string) (IPseudoTerminal, error) {
+	return pseudoterminal.New(logger, runAsUser, command)
+}
+
 const (
 	// Buffer capacity of 100000 items with each buffer item of 1024 bytes leads to max usage of 100MB (100000 * 1024 bytes = 100MB) of instance memory.
 	// When changing streamDataPayloadSize, make corresponding change to buffer capacity to ensure no more than 100MB of instance memory is used.
@@ -41,8 +45,8 @@ const (
 )
 
 type IPseudoTerminal interface {
-	StdIn() *os.File
-	StdOut() *os.File
+	StdIn() io.Writer
+	StdOut() io.Reader
 	SetSize(cols, rows uint32) error
 	Done() <-chan struct{}
 	Kill()
@@ -126,17 +130,6 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) (string, []b
 			return action, replayBytes, nil
 		}
 
-		// outbuff := make([]byte, ShellStdOutBuffCapacity)
-		// d.stdoutbuffMutex.Lock()
-		// defer d.stdoutbuffMutex.Unlock()
-
-		// // does this need a timeout?
-		// if n, err := d.stdoutbuff.Read(outbuff); err != nil {
-		// 	return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
-		// } else {
-		// 	return action, outbuff[0:n], nil
-		// }
-
 	default:
 		return action, []byte{}, fmt.Errorf("unrecognized shell action received: %s", action)
 	}
@@ -151,7 +144,7 @@ func (d *DefaultShell) open() error {
 		return fmt.Errorf("attempted to start the shell but a call to open a shell has already been made")
 	}
 
-	if terminal, err := pseudoterminal.New(d.logger, d.runAsUser, ""); err != nil {
+	if terminal, err := makePseudoTerminal(d.logger, d.runAsUser, ""); err != nil {
 		return err
 	} else {
 		d.terminal = terminal
@@ -163,6 +156,7 @@ func (d *DefaultShell) open() error {
 			d.terminal.Kill()
 			return
 		case <-d.terminal.Done():
+			d.tmb.Killf("default shell action done")
 			return
 		}
 	}()
