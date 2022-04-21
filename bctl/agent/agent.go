@@ -107,8 +107,6 @@ func run(logger *logger.Logger) {
 	if control, err := startControlChannel(logger, getAgentVersion()); err != nil {
 		reportError(logger, err)
 	} else {
-		logger.Info("Connection created successfully. Listening for incoming commands...")
-
 		// wait until we recieve a kill signal and quit
 		signal := blockUntilSignaled()
 		control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))

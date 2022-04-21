@@ -1,5 +1,9 @@
 package webdial
 
+import (
+	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+)
+
 type WebDialSubAction string
 
 const (
@@ -10,6 +14,8 @@ const (
 
 type WebDialActionPayload struct {
 	RequestId string `json:"requestId"`
+	// (optional) informs Agent what SchemaVersion to use
+	StreamMessageVersion smsg.SchemaVersion `json:"streamMessageVersion"`
 }
 
 type WebInputActionPayload struct {
@@ -19,6 +25,7 @@ type WebInputActionPayload struct {
 	Method         string              `json:"method"`
 	SequenceNumber int                 `json:"sequenceNumber"`
 	RequestId      string              `json:"requestId"`
+	More           bool                `json:"more"`
 }
 
 type WebOutputActionPayload struct {

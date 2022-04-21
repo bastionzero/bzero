@@ -49,7 +49,8 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 	// Build and send the action payload to start the tcp connection on the agent
 	payload := dial.DialActionPayload{
-		RequestId: d.requestId,
+		RequestId:            d.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
 	}
 	d.sendOutputMessage(dial.DialStart, payload)
 
@@ -73,21 +74,22 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 
 				// process the incoming stream messages *in order*
 				for streamMessage, ok := streamMessages[expectedSequenceNumber]; ok; streamMessage, ok = streamMessages[expectedSequenceNumber] {
-					switch smsg.StreamType(streamMessage.Type) {
-					case smsg.DbStream:
+					// if we got an old-fashioned end message or a newfangled one
+					if streamMessage.Type == smsg.DbStreamEnd || (streamMessage.Type == smsg.Stream && !streamMessage.More) {
+						// since there's no more stream coming, close the local connection
+						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
+						d.closed = true
+						return
+
+						// again, might have gotten an old or new message depending on what we asked for
+					} else if streamMessage.Type == smsg.DbStream || streamMessage.Type == smsg.Stream {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
-							lconn.Write(contentBytes) // did you know this blocks forever if you write too fast to it? yeah.
+							lconn.Write(contentBytes)
 						}
-					case smsg.DbStreamEnd:
 
-						// The agent has closed the connection, close the local connection as well
-						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-						d.closed = true
-
-						return
-					default:
+					} else {
 						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 					}
 

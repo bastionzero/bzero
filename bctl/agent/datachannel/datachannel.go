@@ -189,7 +189,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 		// Grab user's action
 		if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
 			rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
-			d.sendError(rrr.KeysplittingExecutionError, rerr)
+			d.sendError(rrr.ComponentProcessingError, rerr)
 			return
 		} else {
 
@@ -198,7 +198,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 
 				// Start plugin based on action
 				actionPrefix := parsedAction[0]
-				if err := d.startPlugin(PluginName(actionPrefix), synPayload.ActionPayload); err != nil {
+				if err := d.startPlugin(PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
 					d.sendError(rrr.ComponentStartupError, err)
 					return
 				}
@@ -218,15 +218,15 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 			d.sendKeysplitting(keysplittingMessage, dataPayload.Action, returnPayload)
 		} else {
 			rerr := fmt.Errorf("plugin error processing keysplitting message: %s", err)
-			d.sendError(rrr.KeysplittingExecutionError, rerr)
+			d.sendError(rrr.ComponentProcessingError, rerr)
 		}
 	default:
 		rerr := fmt.Errorf("invalid Keysplitting Payload")
-		d.sendError(rrr.KeysplittingExecutionError, rerr)
+		d.sendError(rrr.ComponentProcessingError, rerr)
 	}
 }
 
-func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
+func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	// create channel and listener and pass it to the new plugin
@@ -237,7 +237,7 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 			case <-d.tmb.Dying():
 				return
 			case streamMessage := <-streamOutputChan:
-				d.logger.Infof("Sending %s stream message", streamMessage.Type)
+				d.logger.Infof("Sending %s/%s/%v stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
 				d.send(am.Stream, streamMessage)
 			}
 		}
@@ -252,20 +252,20 @@ func (d *DataChannel) startPlugin(pluginName PluginName, payload []byte) error {
 	case Kube:
 		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
 	case Db:
-		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, payload)
+		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case Web:
-		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, payload)
+		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
-		return fmt.Errorf("tried to start an unrecognized plugin: %s", pluginName)
+		return fmt.Errorf("unrecognized plugin name")
 	}
 
 	if err != nil {
-		return err
+		rerr := fmt.Errorf("failed to start %s plugin: %s", pluginName, err)
+		d.logger.Error(rerr)
+		return rerr
 	} else {
+		d.logger.Infof("%s plugin started!", pluginName)
 		d.plugin = plugin
+		return nil
 	}
-
-	d.logger.Infof("%s plugin started!", pluginName)
-
-	return nil
 }

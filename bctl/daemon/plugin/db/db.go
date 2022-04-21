@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"sync"
 
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
@@ -13,7 +12,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
-	bzdial "bastionzero.com/bctl/v1/bzerolib/plugin/db/actions/dial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -32,8 +30,7 @@ type DbDaemonPlugin struct {
 	streamInputChan chan smsg.StreamMessage
 	outputQueue     chan plugin.ActionWrapper
 
-	actions       map[string]IDbDaemonAction
-	actionMapLock sync.RWMutex // for keeping the action map thread-safe
+	action IDbDaemonAction
 
 	// Db-specific vars
 	sequenceNumber int
@@ -45,7 +42,6 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 		logger:          logger,
 		streamInputChan: make(chan smsg.StreamMessage, 25),
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
-		actions:         make(map[string]IDbDaemonAction),
 		sequenceNumber:  0,
 	}
 
@@ -57,7 +53,9 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzdb.DbAction
 			case <-plugin.tmb.Dying():
 				return
 			case streamMessage := <-plugin.streamInputChan:
-				plugin.processStream(streamMessage)
+				if err := plugin.processStream(streamMessage); err != nil {
+					plugin.logger.Error(err)
+				}
 			}
 		}
 	}()
@@ -71,13 +69,12 @@ func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 }
 
 func (d *DbDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
-	// find action by requestid in map and push stream message to it
-	if act, ok := d.getActionsMap(smessage.RequestId); ok {
-		act.ReceiveStream(smessage)
+	if d.action != nil {
+		d.action.ReceiveStream(smessage)
+		return nil
+	} else {
+		return fmt.Errorf("db plugin received stream message before an action was created. Ignoring")
 	}
-
-	d.logger.Tracef("unknown request ID: %v. This is expected if the action has already been completed", smessage.RequestId)
-	return nil
 }
 
 func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte) (string, []byte, error) {
@@ -111,20 +108,7 @@ func (d *DbDaemonPlugin) processKeysplitting(action string, actionPayload []byte
 	d.logger.Infof("Db plugin received keysplitting message with action: %s", action)
 
 	// currently the only keysplitting message we care about is the acknowledgement of our request for the agent to stop the dial action
-	if action == string(bzdial.DialStop) {
-		var dbStop bzdial.DialActionPayload
-		if err := json.Unmarshal(actionPayload, &dbStop); err != nil {
-			return fmt.Errorf("could not unmarshal json: %s", err)
-		} else {
-			if act, ok := d.getActionsMap(dbStop.RequestId); ok {
-				act.ReceiveKeysplitting(plugin.ActionWrapper{
-					Action:        action,
-					ActionPayload: actionPayload,
-				})
-				return nil
-			}
-		}
-	}
+	// but since we don't do anything with it we log it, make a comment, and return nil
 	return nil
 }
 
@@ -140,22 +124,14 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 
 	// Create action logger
 	actLogger := d.logger.GetActionLogger(string(dbFood.Action))
-	actLogger.AddRequestId(requestId)
 
-	var act IDbDaemonAction
 	var actOutputChan chan plugin.ActionWrapper
-
 	switch bzdb.DbAction(dbFood.Action) {
 	case bzdb.Dial:
-		act, actOutputChan = dial.New(actLogger, requestId)
+		d.action, actOutputChan = dial.New(actLogger, requestId)
 	default:
-		rerr := fmt.Errorf("unrecognized db action: %v", string(dbFood.Action))
-		d.logger.Error(rerr)
-		return rerr
+		return fmt.Errorf("unrecognized db action: %v", string(dbFood.Action))
 	}
-
-	// add the action to the action map for future interaction
-	d.updateActionsMap(act, requestId)
 
 	// listen to action output channel, remove action from map if channel is closed
 	go func() {
@@ -167,46 +143,20 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 				if more {
 					d.outputQueue <- m
 				} else {
-					d.logger.Infof("Closing db %s action with request id: %s", dbFood.Action, requestId)
-					d.deleteActionsMap(requestId)
-
+					d.logger.Infof("Closing db %s action", dbFood.Action)
 					d.tmb.Kill(fmt.Errorf("done with the only action this datachannel will ever do"))
-
 					return
 				}
 			}
 		}
 	}()
 
-	d.logger.Infof("Created %s action with requestId %v", string(dbFood.Action), requestId)
+	d.logger.Infof("Created %s action", string(dbFood.Action))
 
 	// send local tcp connection to action
-	if err := act.Start(d.tmb, dbFood.Conn); err != nil {
-		d.logger.Error(fmt.Errorf("%s error: %s", string(dbFood.Action), err))
+	if err := d.action.Start(d.tmb, dbFood.Conn); err != nil {
+		return fmt.Errorf("%s error: %s", string(dbFood.Action), err)
 	}
 
 	return nil
-}
-
-func (d *DbDaemonPlugin) updateActionsMap(newAction IDbDaemonAction, id string) {
-	// Helper function so we avoid writing to this map at the same time
-	d.actionMapLock.Lock()
-	defer d.actionMapLock.Unlock()
-
-	d.actions[id] = newAction
-}
-
-func (d *DbDaemonPlugin) deleteActionsMap(rid string) {
-	d.actionMapLock.Lock()
-	defer d.actionMapLock.Unlock()
-
-	delete(d.actions, rid)
-}
-
-func (d *DbDaemonPlugin) getActionsMap(rid string) (IDbDaemonAction, bool) {
-	d.actionMapLock.Lock()
-	defer d.actionMapLock.Unlock()
-
-	act, ok := d.actions[rid]
-	return act, ok
 }

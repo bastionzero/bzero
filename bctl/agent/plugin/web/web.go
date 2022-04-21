@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webwebsocket"
@@ -14,10 +13,6 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
 )
-
-type JustRequestId struct {
-	RequestId string `json:"requestId"`
-}
 
 type IWebAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
@@ -28,141 +23,95 @@ type WebPlugin struct {
 	tmb    *tomb.Tomb // datachannel's tomb
 	logger *logger.Logger
 
+	action           IWebAction
 	streamOutputChan chan smsg.StreamMessage
 
 	// remote host:port
 	remotePort int
 	remoteHost string
-
-	// Keep track of all the dials TCP connections
-	actions        map[string]IWebAction
-	actionsMapLock sync.Mutex
 }
 
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
+	action string,
 	payload []byte) (*WebPlugin, error) {
 
 	// Unmarshal the Syn payload
 	var actionPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &actionPayload); err != nil {
-		return nil, fmt.Errorf("malformed web plugin SYN payload %v", string(payload))
+		return nil, fmt.Errorf("malformed web plugin SYN payload %s", string(payload))
 	}
 
 	plugin := &WebPlugin{
-		remotePort:       actionPayload.RemotePort,
-		remoteHost:       actionPayload.RemoteHost,
-		logger:           logger,
-		tmb:              parentTmb, // if datachannel dies, so should we
+		tmb:    parentTmb, // if datachannel dies, so should we
+		logger: logger,
+
 		streamOutputChan: ch,
-		actions:          make(map[string]IWebAction),
+
+		remotePort: actionPayload.RemotePort,
+		remoteHost: actionPayload.RemoteHost,
 	}
 
-	return plugin, nil
+	// start the action for the plugin
+	subLogger := plugin.logger.GetActionLogger(action)
+
+	var rerr error
+	if parsedAction, err := parseAction(action); err != nil {
+		rerr = err
+	} else {
+		switch parsedAction {
+		case bzweb.Dial:
+			plugin.action, rerr = webdial.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+		case bzweb.Websocket:
+			plugin.action, rerr = webwebsocket.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+		default:
+			rerr = fmt.Errorf("unhandled web action")
+		}
+	}
+
+	if rerr != nil {
+		plugin.logger.Errorf("failed to start plugin action %s: %s", action, rerr)
+		return nil, rerr
+	} else {
+		plugin.logger.Infof("Web plugin started %v action", action)
+		return plugin, nil
+	}
 }
 
-func (k *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	k.logger.Infof("Plugin received Data message with %v action", action)
+func (w *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+	w.logger.Debugf("Web plugin received message with %v action", action)
 
-	// parse action
+	if safePayload, err := cleanPayload(actionPayload); err != nil {
+		w.logger.Error(err)
+		return "", []byte{}, err
+	} else if action, payload, err := w.action.Receive(action, safePayload); err != nil {
+		return "", []byte{}, err
+	} else {
+		return action, payload, err
+	}
+}
+
+func parseAction(action string) (bzweb.WebAction, error) {
 	parsedAction := strings.Split(action, "/")
 	if len(parsedAction) < 2 {
-		return "", []byte{}, fmt.Errorf("malformed action: %s", action)
+		return "", fmt.Errorf("malformed action: %s", action)
 	}
-	webAction := parsedAction[1]
+	return bzweb.WebAction(parsedAction[1]), nil
+}
 
+func cleanPayload(payload []byte) ([]byte, error) {
 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
 	// so that we can murder its family
-	if len(actionPayload) > 0 {
-		actionPayload = actionPayload[1 : len(actionPayload)-1]
+	if len(payload) > 0 {
+		payload = payload[1 : len(payload)-1]
 	}
 
 	// Json unmarshalling encodes bytes in base64
-	actionPayloadSafe, base64Err := base64.StdEncoding.DecodeString(string(actionPayload))
-	if base64Err != nil {
-		k.logger.Errorf("error decoding actionPayload: %s", base64Err)
-		return "", []byte{}, base64Err
-	}
-
-	// Grab just the request ID so that we can look up whether it's associated with a previously started action object
-	var justrid JustRequestId
-	var rid string
-	if err := json.Unmarshal(actionPayloadSafe, &justrid); err != nil {
-		return "", []byte{}, fmt.Errorf("could not unmarshal json: %s, payload: %s", err, string(actionPayloadSafe))
+	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
+		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
 	} else {
-		rid = justrid.RequestId
+		return payloadSafe, nil
 	}
-
-	// Lookup if we already started an action for this requestId
-	if act, ok := k.getActionsMap(rid); ok {
-		// If we did, send the payload data to this action
-		action, payload, err := act.Receive(action, actionPayloadSafe)
-
-		// Check if that last message closed the action, if so delete from map
-		if act.Closed() {
-			k.deleteActionsMap(rid)
-		}
-
-		return action, payload, err
-	} else {
-		subLogger := k.logger.GetActionLogger(action)
-		subLogger.AddRequestId(rid)
-		switch bzweb.WebAction(webAction) {
-		case bzweb.Dial:
-			// Create a new web dial action
-			a, err := webdial.New(subLogger, k.remoteHost, k.remotePort, k.tmb, k.streamOutputChan)
-			k.updateActionsMap(a, rid) // save action for later input
-
-			if err != nil {
-				rerr := fmt.Errorf("could not start new action object: %s", err)
-				k.logger.Error(rerr)
-				return "", []byte{}, rerr
-			}
-
-			// Send the payload to the action and add it to the map for future incoming requests
-			action, payload, err := a.Receive(action, actionPayloadSafe)
-			return action, payload, err
-		case bzweb.Websocket:
-			// Create a new web websocket action
-			a, err := webwebsocket.New(subLogger, k.remoteHost, k.remotePort, k.tmb, k.streamOutputChan)
-			k.updateActionsMap(a, rid) // save action for later input
-
-			if err != nil {
-				rerr := fmt.Errorf("could not start new action object: %s", err)
-				k.logger.Error(rerr)
-				return "", []byte{}, rerr
-			}
-
-			// Send the payload to the action and add it to the map for future incoming requests
-			action, payload, err := a.Receive(action, actionPayloadSafe)
-			return action, payload, err
-		default:
-			rerr := fmt.Errorf("unhandled db action: %v", action)
-			k.logger.Error(rerr)
-			return "", []byte{}, rerr
-		}
-	}
-
-}
-
-// Helper function so we avoid writing to this map at the same time
-func (k *WebPlugin) updateActionsMap(newAction IWebAction, id string) {
-	k.actionsMapLock.Lock()
-	k.actions[id] = newAction
-	k.actionsMapLock.Unlock()
-}
-
-func (k *WebPlugin) deleteActionsMap(rid string) {
-	k.actionsMapLock.Lock()
-	delete(k.actions, rid)
-	k.actionsMapLock.Unlock()
-}
-
-func (k *WebPlugin) getActionsMap(rid string) (IWebAction, bool) {
-	k.actionsMapLock.Lock()
-	defer k.actionsMapLock.Unlock()
-	act, ok := k.actions[rid]
-	return act, ok
 }

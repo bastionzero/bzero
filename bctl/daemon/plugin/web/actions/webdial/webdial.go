@@ -4,9 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -14,6 +14,10 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 
 	"gopkg.in/tomb.v2"
+)
+
+const (
+	chunkSize = 124 * 1024 // 124KB
 )
 
 type WebDialAction struct {
@@ -51,8 +55,9 @@ func New(logger *logger.Logger,
 
 func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
 	// Build the action payload to start the web action dial
-	payload := webdial.WebDialActionPayload{
-		RequestId: w.requestId,
+	payload := bzwebdial.WebDialActionPayload{
+		RequestId:            w.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
 	}
 
 	// Send payload to plugin output queue
@@ -73,29 +78,8 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	// First extract the headers out of the request
 	headers := bzhttp.GetHeaders(request.Header)
 
-	// Now extract the body
-	bodyInBytes, err := bzhttp.GetBodyBytes(request.Body)
-	if err != nil {
-		w.logger.Error(err)
-		return err
-	}
-
-	// Build the action payload
-	dataInPayload := webdial.WebInputActionPayload{
-		RequestId:      w.requestId,
-		SequenceNumber: 0, // currently do not implement sequence number
-		Endpoint:       request.URL.String(),
-		Headers:        headers,
-		Method:         request.Method,
-		Body:           bodyInBytes,
-	}
-
-	// Send payload to plugin output queue
-	dataInPayloadBytes, _ := json.Marshal(dataInPayload)
-	w.outputChan <- plugin.ActionWrapper{
-		Action:        string(bzwebdial.WebDialInput),
-		ActionPayload: dataInPayloadBytes,
-	}
+	// Send our request, in chunks if the body > chunksize
+	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
 
 	// this signals to the parent plugin that the action is done
 	defer close(w.outputChan)
@@ -137,13 +121,12 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				continue
 			}
 
-			switch smsg.StreamType(data.Type) {
-			case smsg.WebStream, smsg.WebStreamEnd:
+			// may have gotten an old-fashioned or newfangled message type, depending on what we asked for
+			if data.Type == smsg.WebStream || data.Type == smsg.WebStreamEnd || data.Type == smsg.Stream {
 				w.streamMessages[data.SequenceNumber] = data
-
 				// process the incoming stream messages *in order*
 				for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
-					var response webdial.WebOutputActionPayload
+					var response bzwebdial.WebOutputActionPayload
 					if contentBytes, err := base64.StdEncoding.DecodeString(nextMessage.Content); err != nil {
 						return err
 					} else if err := json.Unmarshal(contentBytes, &response); err != nil {
@@ -151,42 +134,82 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						w.logger.Error(rerr)
 						return rerr
 					} else {
-
 						// we only write this header once
 						// ref: https://stackoverflow.com/questions/57828645/how-to-handle-superfluous-response-writeheader-call-in-order-to-return-500
 						if !headerSet {
-
 							// extract and build our writer headers
 							for name, values := range response.Headers {
 								for _, value := range values {
 									writer.Header().Add(name, value)
 								}
 							}
-
 							writer.WriteHeader(response.StatusCode)
 							headerSet = true
 						}
-
 						// write response to user
 						w.logger.Tracef("Writing chunk #%d of size %d", w.expectedSequenceNumber, len(response.Content))
 						writer.Write(response.Content)
 
 						// if this is our last stream message, then we can return
-						if smsg.StreamType(nextMessage.Type) == smsg.WebStreamEnd {
+						// again, might be hearing about this via old language or new
+						if nextMessage.Type == smsg.WebStreamEnd || (nextMessage.Type == smsg.Stream && !nextMessage.More) {
 							return nil
 						}
 
-						// remove the message we've already processed
 						delete(w.streamMessages, w.expectedSequenceNumber)
-
-						// increment our sequence number
 						w.expectedSequenceNumber += 1
 					}
 				}
-			default:
+			} else {
 				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}
+	}
+}
+
+func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, headers map[string][]string, method string) {
+	buf := make([]byte, chunkSize)
+	more := true
+	sequenceNumber := 0
+
+	for numBytes, err := body.Read(buf); more; numBytes, err = body.Read(buf) {
+		if err == io.EOF {
+			more = false
+		} else if err != nil {
+			w.logger.Errorf("error chunking http request: %s", err)
+
+			returnPayload := bzwebdial.WebInterruptActionPayload{
+				RequestId: w.requestId,
+			}
+			payloadBytes, _ := json.Marshal(returnPayload)
+
+			// send the agent our interrupt message
+			w.outputChan <- plugin.ActionWrapper{
+				Action:        string(bzwebdial.WebDialInterrupt),
+				ActionPayload: payloadBytes,
+			}
+			return
+		}
+
+		// Build the action payload
+		dataInPayload := bzwebdial.WebInputActionPayload{
+			RequestId:      w.requestId,
+			Endpoint:       endpoint,
+			Headers:        headers,
+			Method:         method,
+			SequenceNumber: sequenceNumber,
+			Body:           buf[:numBytes],
+			More:           more,
+		}
+
+		// Send payload to plugin output queue
+		dataInPayloadBytes, _ := json.Marshal(dataInPayload)
+		w.outputChan <- plugin.ActionWrapper{
+			Action:        string(bzwebdial.WebDialInput),
+			ActionPayload: dataInPayloadBytes,
+		}
+
+		sequenceNumber++
 	}
 }
 
