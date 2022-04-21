@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"bastionzero.com/bctl/v1/bzerolib/mocks"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 func TestStream(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
-	logger := testutils.MockLogger()
+	logger := mocks.MockLogger()
 	requestId := "rid"
 	logId := "lid"
 	command := "logs"
@@ -39,9 +39,9 @@ func TestStream(t *testing.T) {
 
 	s, outputChan := New(logger, requestId, logId, command)
 
-	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
-	writer := testutils.MockResponseWriter{}
+	writer := mocks.MockResponseWriter{}
 	writer.On("Write", []byte(receiveData1)).Return(12, nil)
 	writer.On("Write", []byte(receiveData2)).Return(14, nil)
 	writer.On("Header").Return(make(map[string][]string))

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"bastionzero.com/bctl/v1/bzerolib/mocks"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
-	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 func TestRestApiOK(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
-	logger := testutils.MockLogger()
+	logger := mocks.MockLogger()
 	requestId := "rid"
 	logId := "lid"
 	command := "get pods"
@@ -37,9 +37,9 @@ func TestRestApiOK(t *testing.T) {
 	urlPath := "test-path"
 	r, outputChan := New(logger, requestId, logId, command)
 
-	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
-	writer := testutils.MockResponseWriter{}
+	writer := mocks.MockResponseWriter{}
 	writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 
 	// need a goroutine because Start won't return until we've received the message
@@ -77,7 +77,7 @@ func TestRestApiOK(t *testing.T) {
 func TestRestApiNotFound(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
-	logger := testutils.MockLogger()
+	logger := mocks.MockLogger()
 	requestId := "rid"
 	logId := "lid"
 	command := "get pods"
@@ -86,9 +86,9 @@ func TestRestApiNotFound(t *testing.T) {
 	urlPath := "test-path"
 	r, outputChan := New(logger, requestId, logId, command)
 
-	request := testutils.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
-	writer := testutils.MockResponseWriter{}
+	writer := mocks.MockResponseWriter{}
 	writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 	writer.On("Header").Return(make(map[string][]string))
 	writer.On("WriteHeader", http.StatusInternalServerError).Return()

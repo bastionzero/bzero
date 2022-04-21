@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/mocks"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 func TestExec(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
-	logger := testutils.MockLogger()
+	logger := mocks.MockLogger()
 	requestId := "rid"
 	logId := "lid"
 	command := "exec"
@@ -48,15 +48,15 @@ func TestExec(t *testing.T) {
 	urlPath := "test-path"
 	e, outputChan := New(logger, requestId, logId, command)
 
-	mockStdinStream := testutils.MockStream{MyStreamData: streamData}
+	mockStdinStream := mocks.MockStream{MyStreamData: streamData}
 	mockStdinStream.On("Read", make([]byte, kubeutils.ExecChunkSize)).Return(len(streamData), nil)
 
-	mockStdoutStream := testutils.MockStream{}
+	mockStdoutStream := mocks.MockStream{}
 	mockStdoutStream.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 
-	mockStderrStream := testutils.MockStream{}
-	mockResizeStream := testutils.MockStream{}
-	mockStreamConnection := new(testutils.MockStreamConnection)
+	mockStderrStream := mocks.MockStream{}
+	mockResizeStream := mocks.MockStream{}
+	mockStreamConnection := new(mocks.MockStreamConnection)
 
 	var closeChan <-chan bool
 
@@ -74,9 +74,9 @@ func TestExec(t *testing.T) {
 
 	setNewSPDYService(mockSpdy)
 
-	request := testutils.MockHttpRequest("GET", urlPath, map[string][]string{"X-Stream-Protocol-Version": {"test"}}, sendData)
+	request := mocks.MockHttpRequest("GET", urlPath, map[string][]string{"X-Stream-Protocol-Version": {"test"}}, sendData)
 
-	writer := testutils.MockResponseWriter{}
+	writer := mocks.MockResponseWriter{}
 
 	err := e.Start(&tmb, &writer, &request)
 	assert.Nil(err)

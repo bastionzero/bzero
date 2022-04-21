@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"bastionzero.com/bctl/v1/bzerolib/mocks"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
@@ -56,7 +56,7 @@ func TestMain(m *testing.M) {
 
 func TestStream(t *testing.T) {
 	assert := assert.New(t)
-	logger := testutils.MockLogger()
+	logger := mocks.MockLogger()
 	var tmb tomb.Tomb
 	outputChan := make(chan smsg.StreamMessage, 10)
 

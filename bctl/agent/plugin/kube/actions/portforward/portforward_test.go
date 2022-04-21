@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"bastionzero.com/bctl/v1/bzerolib/mocks"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
@@ -47,7 +47,7 @@ func buildActionPayload(assert *assert.Assertions, bodyText string, requestId st
 	return payloadBytes
 }
 
-func setDoDial(streamConnection *testutils.MockStreamConnection) {
+func setDoDial(streamConnection *mocks.MockStreamConnection) {
 	doDial = func(dialer httpstream.Dialer, protocolName string) (httpstream.Connection, string, error) {
 		return streamConnection, "", nil
 	}
@@ -71,19 +71,19 @@ func TestMain(m *testing.M) {
 
 func TestPortforward(t *testing.T) {
 	assert := assert.New(t)
-	logger := testutils.MockLogger()
+	logger := mocks.MockLogger()
 	var tmb tomb.Tomb
 	outputChan := make(chan smsg.StreamMessage, 1)
 
 	requestId := "rid"
 	testData := "test data"
 
-	mockStream := testutils.MockStream{MyStreamData: testData}
+	mockStream := mocks.MockStream{MyStreamData: testData}
 	mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
 	mockStream.On("Write", []byte(testData)).Return(len(testData), nil)
 	mockStream.On("Close").Return(nil)
 
-	mockStreamConnection := new(testutils.MockStreamConnection)
+	mockStreamConnection := new(mocks.MockStreamConnection)
 	mockStreamConnection.On("CreateStream", http.Header{
 		"Port":      []string{"5000"},
 		"Requestid": []string{""},

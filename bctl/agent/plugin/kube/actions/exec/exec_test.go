@@ -9,10 +9,10 @@ import (
 	"os"
 	"testing"
 
+	"bastionzero.com/bctl/v1/bzerolib/mocks"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	execaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"gopkg.in/tomb.v2"
@@ -91,7 +91,7 @@ func TestMain(m *testing.M) {
 
 func TestExec(t *testing.T) {
 	assert := assert.New(t)
-	logger := testutils.MockLogger()
+	logger := mocks.MockLogger()
 	var tmb tomb.Tomb
 	outputChan := make(chan smsg.StreamMessage, 5)
 
@@ -133,8 +133,8 @@ func TestExec(t *testing.T) {
 	assert.Equal(string(execaction.ExecInput), action)
 	assert.Equal([]byte{}, responsePayload)
 
-	testutils.AssertNextMessageHasContent(assert, outputChan, testString)
-	testutils.AssertNextMessageHasContent(assert, outputChan, fmt.Sprintf("error: %s", testString))
+	mocks.AssertNextMessageHasContent(assert, outputChan, testString)
+	mocks.AssertNextMessageHasContent(assert, outputChan, fmt.Sprintf("error: %s", testString))
 
 	mockExec.AssertExpectations(t)
 }

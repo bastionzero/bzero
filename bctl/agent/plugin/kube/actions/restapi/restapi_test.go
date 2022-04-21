@@ -11,8 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"bastionzero.com/bctl/v1/bzerolib/mocks"
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
-	"bastionzero.com/bctl/v1/bzerolib/testutils"
 )
 
 // inject logic for what happens when restapi makes an HTTP request
@@ -62,7 +62,7 @@ func TestMain(m *testing.M) {
 
 func TestRestApi(t *testing.T) {
 	assert := assert.New(t)
-	logger := testutils.MockLogger()
+	logger := mocks.MockLogger()
 
 	statusCode := 200
 	requestId := "rid"
