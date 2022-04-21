@@ -205,17 +205,24 @@ func (d *DefaultShell) writePump() {
 	time.Sleep(time.Second)
 
 	for {
-		if stdoutBytesLen, err := d.terminal.StdOut().Read(stdoutBytes); err != nil {
-			d.sendStreamMessage(smsg.Stop, stdoutBytes[:stdoutBytesLen])
-			d.logger.Errorf("error reading from stdout: %s", err)
+		select {
+		case <-d.terminal.Done():
+			d.logger.Infof("pty command exited sending stop stream message")
+			d.sendStreamMessage(smsg.Stop, []byte{})
 			return
-		} else {
-			d.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
-			d.sendStreamMessage(smsg.StdOut, stdoutBytes[:stdoutBytesLen])
-		}
+		default:
+			if stdoutBytesLen, err := d.terminal.StdOut().Read(stdoutBytes); err != nil {
+				d.sendStreamMessage(smsg.Stop, stdoutBytes[:stdoutBytesLen])
+				d.logger.Errorf("error reading from stdout: %s", err)
+				return
+			} else {
+				d.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
+				d.sendStreamMessage(smsg.StdOut, stdoutBytes[:stdoutBytesLen])
+			}
 
-		// Wait for stdout to process more data
-		time.Sleep(time.Millisecond)
+			// Wait for stdout to process more data
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 

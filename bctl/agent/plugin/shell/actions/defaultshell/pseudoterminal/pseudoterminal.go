@@ -43,9 +43,10 @@ const (
 )
 
 type PseudoTerminal struct {
-	logger  *logger.Logger
-	ptyFile *os.File
-	command *exec.Cmd
+	logger   *logger.Logger
+	ptyFile  *os.File
+	command  *exec.Cmd
+	doneChan chan struct{}
 }
 
 // StartPty starts pty and provides handles to stdin and stdout
@@ -78,10 +79,27 @@ func New(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTer
 		logger.Errorf("Failed to start pty: %s\n", err)
 		return nil, fmt.Errorf("failed to start pty: %s", err)
 	} else {
+
+		doneChan := make(chan struct{})
+
+		go func() {
+			defer close(doneChan)
+
+			if err := cmd.Wait(); err != nil {
+				if exitError, ok := err.(*exec.ExitError); ok {
+					exitCode := exitError.ExitCode()
+					logger.Errorf("pty cmd exited with non-zero exit code %d err: %s", exitCode, err)
+				} else {
+					logger.Errorf("pty command exited with unknown exit code")
+				}
+			}
+		}()
+
 		return &PseudoTerminal{
-			logger:  logger,
-			ptyFile: ptyFile,
-			command: cmd,
+			logger:   logger,
+			ptyFile:  ptyFile,
+			command:  cmd,
+			doneChan: doneChan,
 		}, nil
 	}
 }
@@ -133,25 +151,7 @@ func buildCommand(commandstr string, shellCommand string, shellCommandArgs []str
 }
 
 func (p *PseudoTerminal) Done() <-chan struct{} {
-	doneChan := make(chan struct{})
-
-	go func() {
-		defer close(doneChan)
-
-		if p.command == nil {
-			return
-		} else if err := p.command.Wait(); err != nil {
-			// d.logger.Errorf("pty command exited with err: %s", err)
-			if exitError, ok := err.(*exec.ExitError); ok {
-				exitCode := exitError.ExitCode()
-				p.logger.Errorf("pty cmd exited with non-zero exit code %d err: %s", exitCode, err)
-			} else {
-				p.logger.Errorf("pty command exited with unknown exit code")
-			}
-		}
-	}()
-
-	return doneChan
+	return p.doneChan
 }
 
 func (p *PseudoTerminal) Kill() {
