@@ -328,8 +328,6 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 
 					doneChan <- true
 					return
-				} else if err == io.EOF {
-					return
 				}
 
 				// Now send this data to Bastion
