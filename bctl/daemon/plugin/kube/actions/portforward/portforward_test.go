@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/mocks"
-	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -123,7 +122,7 @@ func TestPortForward(t *testing.T) {
 			Type:    smsg.Ready,
 			Content: "",
 		})
-		// FIXME: these might come in either order
+		// these might come in either order
 		n := 0
 		receivedDataIn := false
 		receivedError := false
@@ -149,7 +148,7 @@ func TestPortForward(t *testing.T) {
 		assert.True(receivedError)
 
 		streamMessageToSend := portforward.KubePortForwardStreamMessageContent{
-			PortForwardRequestId: "pid",
+			PortForwardRequestId: requestId,
 			Content:              []byte(testData),
 		}
 		streamMessageToSendBytes, _ := json.Marshal(streamMessageToSend)
@@ -268,11 +267,4 @@ func TestPortForwardError(t *testing.T) {
 
 	err := p.Start(&tmb, &writer, &request)
 	assert.Equal(fmt.Errorf("error starting portforward stream: %s", errorStr), err)
-}
-
-func checkDataInMessage(assert *assert.Assertions, msg plugin.ActionWrapper, testStr string) {
-	var dataInPayload portforward.KubePortForwardActionPayload
-	err := json.Unmarshal(msg.ActionPayload, &dataInPayload)
-	assert.Nil(err)
-	assert.Equal([]byte(testStr), dataInPayload.Data)
 }
