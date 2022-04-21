@@ -229,7 +229,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 			case <-d.tmb.Dying():
 				return
 			case streamMessage := <-streamOutputChan:
-				d.logger.Infof("Sending %s/%s/%v stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
+				d.logger.Infof("Sending %s - %s - %v stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
 				d.send(am.Stream, streamMessage)
 			}
 		}
