@@ -9,26 +9,18 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
-	"bastionzero.com/bctl/v1/bctl/agent/plugin"
+	plgn "bastionzero.com/bctl/v1/bctl/agent/plugin"
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-)
-
-// Plugins this datachannel accepts
-type PluginName string
-
-const (
-	Kube PluginName = "kube"
-	Db   PluginName = "db"
-	Web  PluginName = "web"
 )
 
 type IKeysplitting interface {
@@ -38,12 +30,12 @@ type IKeysplitting interface {
 }
 
 type DataChannel struct {
-	websocket *websocket.Websocket
+	websocket websocket.IWebsocket
 	logger    *logger.Logger
 	tmb       tomb.Tomb
 	id        string
 
-	plugin       plugin.IPlugin
+	plugin       plgn.IPlugin
 	keysplitting IKeysplitting
 
 	// incoming and outgoing message channels
@@ -52,16 +44,10 @@ type DataChannel struct {
 
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
-	websocket *websocket.Websocket,
+	websocket websocket.IWebsocket,
 	id string,
 	syn []byte,
-	ksConfig keysplitting.IKeysplittingConfig) (*DataChannel, error) {
-
-	// Init keysplitter
-	keysplitter, err := keysplitting.New(ksConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init keysplitter: %w", err)
-	}
+	keysplitter IKeysplitting) (*DataChannel, error) {
 
 	datachannel := &DataChannel{
 		websocket:    websocket,
@@ -164,7 +150,7 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 	case am.Keysplitting:
 		var ksMessage ksmsg.KeysplittingMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
-			rerr := fmt.Errorf("malformed Keysplitting message")
+			rerr := fmt.Errorf("malformed Keysplitting message: %s", err)
 			d.sendError(rrr.KeysplittingValidationError, rerr)
 		} else {
 			d.handleKeysplittingMessage(&ksMessage)
@@ -198,7 +184,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 
 				// Start plugin based on action
 				actionPrefix := parsedAction[0]
-				if err := d.startPlugin(PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
+				if err := d.startPlugin(bzplugin.PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
 					d.sendError(rrr.ComponentStartupError, err)
 					return
 				}
@@ -209,6 +195,12 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 		}
 	case ksmsg.Data:
 		dataPayload := keysplittingMessage.KeysplittingPayload.(ksmsg.DataPayload)
+
+		if d.plugin == nil { // Can't process data message if no plugin created
+			rerr := fmt.Errorf("plugin does not exist")
+			d.sendError(rrr.ComponentProcessingError, rerr)
+			return
+		}
 
 		// Send message to plugin and catch response action payload
 		// TODO: if we're ignoring the action we should really not be sending it up here
@@ -226,7 +218,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	}
 }
 
-func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload []byte) error {
+func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string, payload []byte) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	// create channel and listener and pass it to the new plugin
@@ -237,7 +229,7 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 			case <-d.tmb.Dying():
 				return
 			case streamMessage := <-streamOutputChan:
-				d.logger.Infof("Sending %s/%s/%v stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
+				d.logger.Infof("Sending %s - %s - %v stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
 				d.send(am.Stream, streamMessage)
 			}
 		}
@@ -245,16 +237,18 @@ func (d *DataChannel) startPlugin(pluginName PluginName, action string, payload 
 
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
 
-	var plugin plugin.IPlugin
+	var plugin plgn.IPlugin
 	var err error
 
 	switch pluginName {
-	case Kube:
+	case bzplugin.Kube:
 		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
-	case Db:
+	case bzplugin.Db:
 		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
-	case Web:
+	case bzplugin.Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+	case bzplugin.Shell:
+		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")
 	}

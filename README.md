@@ -30,3 +30,24 @@ cd bctl/daemon && go build daemon.go
 You can then run the agent and daemon by running the executable.
 
 Where {version} is the version that is defined in the `package.json` file. This means older versions are still accessible but the `latest` folder will always overwritten by the codebuild job.
+
+## Testing
+
+Unit tests are written using the [go testing package](https://pkg.go.dev/testing) for both the agent and daemon projects as well as for the common bzerolib library code. Tests should be written as close to the component they are testing (in the same directory as the files they test) and should have a `_test` filename suffix.
+
+To find and run all unit tests within a go project first `cd` into the root directory of the project (or a subdirectory) and run the command `go test -v ./...`.
+
+To run all daemon/agent unit tests:
+
+```
+cd bctl // you can also run more specific tests by cd'ing into a more specific directory like bctl/daemon
+go test -v ./...
+```
+
+To run bzerolib unit tests:
+
+```
+cd bzerolib
+go test -v ./...
+```
+
