@@ -15,7 +15,6 @@ import (
 
 type IShellAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
-	// Ready() bool
 }
 
 type ShellPlugin struct {
