@@ -44,7 +44,7 @@ func (k *KeysplittingMessage) VerifySignature(publicKey string) error {
 
 	hashBits, ok := util.HashPayload(k.KeysplittingPayload)
 	if !ok {
-		return fmt.Errorf("could not hash the keysplitting payload")
+		return fmt.Errorf("failed to hash the keysplitting payload")
 	}
 
 	sigBits, _ := base64.StdEncoding.DecodeString(k.Signature)
@@ -54,7 +54,7 @@ func (k *KeysplittingMessage) VerifySignature(publicKey string) error {
 	if ok := ed.Verify(pubkey, hashBits, sigBits); ok {
 		return nil
 	} else {
-		return fmt.Errorf("failed to verify signature")
+		return fmt.Errorf("invalid signature: signature: %s payload: %+v", k.Signature, k.KeysplittingPayload)
 	}
 }
 

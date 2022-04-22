@@ -167,6 +167,7 @@ func (h *WebServer) newWebsocket(wsId string) error {
 func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websocket) (*datachannel.DataChannel, error) {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
+	attach := false
 	subLogger := w.logger.GetDatachannelLogger(dcId)
 
 	w.logger.Infof("Creating new datachannel for web with id: %v", dcId)
@@ -184,7 +185,7 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 	}
 
 	action = "web/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, w.refreshTokenCommand, w.configPath, action, actionParamsMarshalled, w.agentPubKey); err != nil {
+	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, w.refreshTokenCommand, w.configPath, action, actionParamsMarshalled, w.agentPubKey, attach); err != nil {
 		w.logger.Error(err)
 		return datachannel, err
 	} else {
