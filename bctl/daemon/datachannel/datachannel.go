@@ -126,8 +126,13 @@ func New(logger *logger.Logger,
 		dc.sendSyn(action)
 	}
 
+	pluginName, err := getPluginNameFromAction(action)
+	if err != nil {
+		return nil, &tomb.Tomb{}, err
+	}
+
 	// start our plugin
-	if err := dc.startPlugin(action, actionParams); err != nil {
+	if err := dc.startPlugin(pluginName, actionParams); err != nil {
 		logger.Error(err)
 		return nil, &tomb.Tomb{}, err
 	}
@@ -141,6 +146,15 @@ func New(logger *logger.Logger,
 				return errors.New("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
 				dc.logger.Infof("Killing datachannel and its subsidiaries because %s", dc.tmb.Err())
+				// Don't sleep in the case of the shell plugin because it will
+				// cause the daemon to not exit right away and the zli connect
+				// command will hang. This shouldnt be an issue for shell
+				// because each shell connection starts a separate daemon
+				// process and the datachannel will be killed on the agent side
+				// when the daemon websocket disconnects
+				if pluginName != bzplugin.Shell {
+					time.Sleep(10 * time.Second) // give datachannel time to close correctly
+				}
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
 
@@ -213,17 +227,10 @@ func (d *DataChannel) openDataChannel(action string, actionParams []byte) error 
 	return nil
 }
 
-func (d *DataChannel) startPlugin(action string, actionParams []byte) error {
-	// parse our plugin name
-	parsedAction := strings.Split(action, "/")
-	if len(parsedAction) == 0 {
-		return fmt.Errorf("malformed action: %s", action)
-	}
-	pluginName := parsedAction[0]
-
+func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams []byte) error {
 	// start plugin based on name
-	subLogger := d.logger.GetPluginLogger(pluginName)
-	switch bzplugin.PluginName(pluginName) {
+	subLogger := d.logger.GetPluginLogger(string(pluginName))
+	switch pluginName {
 	case bzplugin.Kube:
 		// Deserialize the action params
 		var kubeParams bzkube.KubeActionParams
@@ -322,6 +329,18 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 	// Push message to websocket channel output
 	d.websocket.Send(agentMessage)
 	return nil
+}
+
+func getPluginNameFromAction(action string) (bzplugin.PluginName, error) {
+	// parse our plugin name
+	parsedAction := strings.Split(action, "/")
+
+	if len(parsedAction) == 0 {
+		return "", fmt.Errorf("malformed action: %s", action)
+	}
+	pluginName := parsedAction[0]
+
+	return bzplugin.PluginName(pluginName), nil
 }
 
 func (d *DataChannel) sendSyn(action string) error {
