@@ -23,10 +23,11 @@ const (
 )
 
 type WebDial struct {
-	logger    *logger.Logger
 	tmb       *tomb.Tomb
-	closed    bool
+	logger    *logger.Logger
 	requestId string
+
+	doneChan chan struct{}
 
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan     chan smsg.StreamMessage
@@ -41,25 +42,27 @@ type WebDial struct {
 }
 
 func New(logger *logger.Logger,
+	ch chan smsg.StreamMessage,
 	remoteHost string,
-	remotePort int,
-	pluginTmb *tomb.Tomb,
-	ch chan smsg.StreamMessage) (*WebDial, error) {
+	remotePort int) (*WebDial, error) {
 
 	return &WebDial{
 		logger:           logger,
-		tmb:              pluginTmb,
-		closed:           false,
+		doneChan:         make(chan struct{}),
 		streamOutputChan: ch,
 		remoteHost:       remoteHost,
 		remotePort:       remotePort,
-		interruptChan:    make(chan bool),
 		requestBody:      []byte{},
 	}, nil
 }
 
-func (w *WebDial) Closed() bool {
-	return w.closed
+func (w *WebDial) Done() <-chan struct{} {
+	return w.doneChan
+}
+
+func (w *WebDial) Stop() {
+	w.tmb.Killf("we've been told to stop")
+	w.tmb.Wait()
 }
 
 func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, error) {
@@ -144,94 +147,93 @@ func (w *WebDial) handleNewHttpRequest(requestPayload bzwebdial.WebInputActionPa
 			}
 			return rerr
 		} else {
-			go w.listenAndProcessStreamMessages(response)
+
+			// listen and process stream messages
+			w.tmb.Go(func() error {
+				defer response.Body.Close()
+				defer close(w.doneChan)
+
+				// Build the header response
+				header := make(map[string][]string)
+				for key, value := range response.Header {
+					header[key] = value
+				}
+
+				sequenceNumber := 0
+				buf := make([]byte, chunkSize)
+				var responsePayload *bzwebdial.WebOutputActionPayload
+
+				for {
+					select {
+					case <-w.tmb.Dying():
+						return nil
+					default:
+
+						// golang does the chunking for us, here. We just need to read from the body in the chunk size we want
+						// "The response body is streamed on demand as the Body field is read"
+						// ref: https://go.dev/src/net/http/response.go
+						numBytes, err := response.Body.Read(buf)
+
+						// check for error and if it's serious then report it
+						if err != nil && err != io.EOF {
+							w.logger.Errorf("error reading response body: %s", err)
+
+							// Do not quit, just return the user the api request info
+							responsePayload = &bzwebdial.WebOutputActionPayload{
+								StatusCode: http.StatusBadGateway,
+								RequestId:  w.requestId,
+								Headers:    map[string][]string{},
+								Content:    buf[:numBytes],
+							}
+
+							switch w.streamMessageVersion {
+							// prior to 202204
+							case "":
+								w.sendStreamMessage(sequenceNumber, smsg.WebError, false, responsePayload)
+							default:
+								w.sendStreamMessage(sequenceNumber, smsg.Error, false, responsePayload)
+							}
+						}
+
+						w.logger.Tracef("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
+
+						// Now we need to send that data back to the client
+						responsePayload = &bzwebdial.WebOutputActionPayload{
+							StatusCode: response.StatusCode,
+							RequestId:  w.requestId,
+							Headers:    header,
+							Content:    buf[:numBytes],
+						}
+
+						// we get io.EOFs on whichever read call processes the final byte
+						if err == io.EOF {
+							// this is the final message so let the daemon know
+							switch w.streamMessageVersion {
+							// prior to 202204
+							case "":
+								w.sendStreamMessage(sequenceNumber, smsg.WebStreamEnd, false, responsePayload)
+							default:
+								w.sendStreamMessage(sequenceNumber, smsg.Stream, false, responsePayload)
+							}
+							return nil
+						} else {
+							switch w.streamMessageVersion {
+							// prior to 202204
+							case "":
+								w.sendStreamMessage(sequenceNumber, smsg.WebStream, true, responsePayload)
+							default:
+								w.sendStreamMessage(sequenceNumber, smsg.Stream, true, responsePayload)
+							}
+						}
+
+						sequenceNumber += 1
+					}
+				}
+			})
 		}
 	}
 
 	return nil
-}
-
-func (w *WebDial) listenAndProcessStreamMessages(response *http.Response) {
-	defer response.Body.Close()
-
-	// Build the header response
-	header := make(map[string][]string)
-	for key, value := range response.Header {
-		header[key] = value
-	}
-
-	sequenceNumber := 0
-	buf := make([]byte, chunkSize)
-	var responsePayload *bzwebdial.WebOutputActionPayload
-
-	for {
-		select {
-		case <-w.tmb.Dying():
-			return
-		case <-w.interruptChan:
-			return
-		default:
-
-			// golang does the chunking for us, here. We just need to read from the body in the chunk size we want
-			// "The response body is streamed on demand as the Body field is read"
-			// ref: https://go.dev/src/net/http/response.go
-			numBytes, err := response.Body.Read(buf)
-
-			// check for error and if it's serious then report it
-			if err != nil && err != io.EOF {
-				w.logger.Errorf("error reading response body: %s", err)
-
-				// Do not quit, just return the user the api request info
-				responsePayload = &bzwebdial.WebOutputActionPayload{
-					StatusCode: http.StatusBadGateway,
-					RequestId:  w.requestId,
-					Headers:    map[string][]string{},
-					Content:    buf[:numBytes],
-				}
-
-				switch w.streamMessageVersion {
-				// prior to 202204
-				case "":
-					w.sendStreamMessage(sequenceNumber, smsg.WebError, false, responsePayload)
-				default:
-					w.sendStreamMessage(sequenceNumber, smsg.Error, false, responsePayload)
-				}
-			}
-
-			w.logger.Tracef("Building response for chunk #%d of size %d", sequenceNumber, numBytes)
-
-			// Now we need to send that data back to the client
-			responsePayload = &bzwebdial.WebOutputActionPayload{
-				StatusCode: response.StatusCode,
-				RequestId:  w.requestId,
-				Headers:    header,
-				Content:    buf[:numBytes],
-			}
-
-			// we get io.EOFs on whichever read call processes the final byte
-			if err == io.EOF {
-				// this is the final message so let the daemon know
-				switch w.streamMessageVersion {
-				// prior to 202204
-				case "":
-					w.sendStreamMessage(sequenceNumber, smsg.WebStreamEnd, false, responsePayload)
-				default:
-					w.sendStreamMessage(sequenceNumber, smsg.Stream, false, responsePayload)
-				}
-				return
-			} else {
-				switch w.streamMessageVersion {
-				// prior to 202204
-				case "":
-					w.sendStreamMessage(sequenceNumber, smsg.WebStream, true, responsePayload)
-				default:
-					w.sendStreamMessage(sequenceNumber, smsg.Stream, true, responsePayload)
-				}
-			}
-
-			sequenceNumber += 1
-		}
-	}
 }
 
 func (w *WebDial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, payload *bzwebdial.WebOutputActionPayload) {

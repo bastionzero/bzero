@@ -10,10 +10,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/agent/keysplitting"
-	plgn "bastionzero.com/bctl/v1/bctl/agent/plugin"
 	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
-	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -29,17 +26,24 @@ type IKeysplitting interface {
 	BuildAck(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error)
 }
 
+type IPlugin interface {
+	Receive(action string, actionPayload []byte) (string, []byte, error)
+	Done() <-chan struct{}
+	Stop() // Kill()?
+}
+
 type DataChannel struct {
 	websocket websocket.IWebsocket
 	logger    *logger.Logger
 	tmb       tomb.Tomb
 	id        string
 
-	plugin       plgn.IPlugin
+	plugin       IPlugin
 	keysplitting IKeysplitting
 
 	// incoming and outgoing message channels
-	inputChan chan am.AgentMessage
+	inputChan  chan am.AgentMessage
+	outputChan chan am.AgentMessage
 }
 
 func New(parentTmb *tomb.Tomb,
@@ -56,46 +60,65 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	datachannel := &DataChannel{
-		websocket:    websocket,
 		logger:       logger,
+		websocket:    websocket,
+		id:           id,
 		keysplitting: keysplitter,
 		inputChan:    make(chan am.AgentMessage, 50),
-		id:           id,
+		outputChan:   make(chan am.AgentMessage, 10),
 	}
 
 	// register with websocket so datachannel can send a receive messages
 	websocket.Subscribe(id, datachannel)
 
+	// validate the Syn message
+	var synPayload ksmsg.KeysplittingMessage
+	if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
+		return nil, fmt.Errorf("malformed Keysplitting message: %s", err)
+	} else if synPayload.Type != ksmsg.Syn {
+		return nil, fmt.Errorf("datachannel must be started with a SYN message")
+	}
+
+	// process our syn to startup the plugin
+	datachannel.handleKeysplittingMessage(&synPayload)
+
 	// listener for incoming messages
 	datachannel.tmb.Go(func() error {
 		defer websocket.Unsubscribe(id) // causes decoupling from websocket
+
+		datachannel.tmb.Go(func() error {
+			for {
+				select {
+				case <-datachannel.tmb.Dying():
+					return nil
+				case agentMessage := <-datachannel.inputChan: // receive messages
+					datachannel.processInput(agentMessage)
+				}
+			}
+		})
+
 		for {
 			select {
 			case <-parentTmb.Dying(): // control channel is dying
 				return errors.New("agent was orphaned too young and can't be batman :'(")
 			case <-datachannel.tmb.Dying():
-				time.Sleep(10 * time.Second) // allow the datachannel to close gracefully TODO: Figure out a better way to gracefully die
+				datachannel.plugin.Stop()
 				return nil
-			case agentMessage := <-datachannel.inputChan: // receive messages
-				datachannel.processInput(agentMessage)
+			case <-datachannel.plugin.Done():
+				// FIXME: on this side, I do think this strategy is legit
+				select {
+				case agentMessage := <-datachannel.outputChan: // send messages
+					// Push message to websocket channel output
+					datachannel.websocket.Send(agentMessage)
+				case <-time.After(1 * time.Second):
+					return fmt.Errorf("datachannel's sole plugin is closed")
+				}
+			case agentMessage := <-datachannel.outputChan: // send messages
+				// Push message to websocket channel output
+				datachannel.websocket.Send(agentMessage)
 			}
 		}
 	})
-
-	// validate the Syn message
-	var synPayload ksmsg.KeysplittingMessage
-	if err := json.Unmarshal([]byte(syn), &synPayload); err != nil {
-		rerr := fmt.Errorf("malformed Keysplitting message")
-		logger.Error(rerr)
-		return nil, rerr
-	} else if synPayload.Type != ksmsg.Syn {
-		err := fmt.Errorf("datachannel must be started with a SYN message")
-		logger.Error(err)
-		return nil, err
-	}
-
-	// process our syn to startup the plugin
-	datachannel.handleKeysplittingMessage(&synPayload)
 
 	return datachannel, nil
 }
@@ -116,8 +139,7 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 		MessagePayload: messageBytes,
 	}
 
-	// Push message to websocket channel output
-	d.websocket.Send(agentMessage)
+	d.outputChan <- agentMessage
 }
 
 func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMessage, action string, payload []byte) error {
@@ -127,7 +149,6 @@ func (d *DataChannel) sendKeysplitting(keysplittingMessage *ksmsg.KeysplittingMe
 		d.logger.Error(rerr)
 		return rerr
 	} else {
-		d.logger.Infof("SENDING %s!", keysplittingMessage.Signature)
 		d.send(am.Keysplitting, respKSMessage)
 		return nil
 	}
@@ -265,14 +286,14 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 	// var plugin plgn.IPlugin
 	var err error
 	switch pluginName {
-	case bzplugin.Kube:
-		d.plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
+	// case bzplugin.Kube:
+	// 	d.plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
 	case bzplugin.Db:
-		d.plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+		d.plugin, err = db.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Web:
-		d.plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
-	case bzplugin.Shell:
-		d.plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+		d.plugin, err = web.New(subLogger, streamOutputChan, action, payload)
+	// case bzplugin.Shell:
+	// 	d.plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")
 	}

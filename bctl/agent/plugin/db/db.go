@@ -9,17 +9,16 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 type IDbAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
-	Closed() bool
+	Done() <-chan struct{}
+	Stop()
 }
 
 type DbPlugin struct {
 	logger *logger.Logger
-	tmb    *tomb.Tomb // datachannel's tomb
 
 	action           IDbAction
 	streamOutputChan chan smsg.StreamMessage
@@ -29,8 +28,7 @@ type DbPlugin struct {
 	remoteHost string
 }
 
-func New(parentTmb *tomb.Tomb,
-	logger *logger.Logger,
+func New(logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	action string,
 	payload []byte) (*DbPlugin, error) {
@@ -43,11 +41,10 @@ func New(parentTmb *tomb.Tomb,
 
 	// Create our plugin
 	plugin := &DbPlugin{
+		logger:           logger,
+		streamOutputChan: ch,
 		remotePort:       synPayload.RemotePort,
 		remoteHost:       synPayload.RemoteHost,
-		logger:           logger,
-		tmb:              parentTmb, // if datachannel dies, so should we
-		streamOutputChan: ch,
 	}
 
 	// Start up the action for this plugin
@@ -59,7 +56,7 @@ func New(parentTmb *tomb.Tomb,
 
 		switch parsedAction {
 		case db.Dial:
-			plugin.action, rerr = dial.New(subLogger, plugin.tmb, plugin.streamOutputChan, synPayload.RemoteHost, synPayload.RemotePort)
+			plugin.action, rerr = dial.New(subLogger, plugin.streamOutputChan, synPayload.RemoteHost, synPayload.RemotePort)
 		default:
 			rerr = fmt.Errorf("unhandled DB action")
 		}
@@ -70,6 +67,22 @@ func New(parentTmb *tomb.Tomb,
 			plugin.logger.Infof("DB plugin started with %v action", action)
 			return plugin, nil
 		}
+	}
+}
+
+func (d *DbPlugin) Done() <-chan struct{} {
+	if d.action != nil {
+		return d.action.Done()
+	} else {
+		doneChan := make(chan struct{})
+		close(doneChan)
+		return doneChan
+	}
+}
+
+func (d *DbPlugin) Stop() {
+	if d.action != nil {
+		d.action.Stop()
 	}
 }
 

@@ -10,16 +10,15 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 type IWebAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
-	Closed() bool
+	Done() <-chan struct{}
+	Stop()
 }
 
 type WebPlugin struct {
-	tmb    *tomb.Tomb // datachannel's tomb
 	logger *logger.Logger
 
 	action           IWebAction
@@ -30,8 +29,7 @@ type WebPlugin struct {
 	remoteHost string
 }
 
-func New(parentTmb *tomb.Tomb,
-	logger *logger.Logger,
+func New(logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	action string,
 	payload []byte) (*WebPlugin, error) {
@@ -43,7 +41,6 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	plugin := &WebPlugin{
-		tmb:    parentTmb, // if datachannel dies, so should we
 		logger: logger,
 
 		streamOutputChan: ch,
@@ -61,9 +58,9 @@ func New(parentTmb *tomb.Tomb,
 	} else {
 		switch parsedAction {
 		case bzweb.Dial:
-			plugin.action, rerr = webdial.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+			plugin.action, rerr = webdial.New(subLogger, plugin.streamOutputChan, plugin.remoteHost, plugin.remotePort)
 		case bzweb.Websocket:
-			plugin.action, rerr = webwebsocket.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+			plugin.action, rerr = webwebsocket.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.streamOutputChan)
 		default:
 			rerr = fmt.Errorf("unhandled Web action")
 		}
@@ -75,6 +72,22 @@ func New(parentTmb *tomb.Tomb,
 	} else {
 		plugin.logger.Infof("Web plugin started with %v action", action)
 		return plugin, nil
+	}
+}
+
+func (w *WebPlugin) Done() <-chan struct{} {
+	if w.action != nil {
+		return w.action.Done()
+	} else {
+		doneChan := make(chan struct{})
+		close(doneChan)
+		return doneChan
+	}
+}
+
+func (w *WebPlugin) Stop() {
+	if w.action != nil {
+		w.action.Stop()
 	}
 }
 

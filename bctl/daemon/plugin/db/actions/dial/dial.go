@@ -125,7 +125,7 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 						// since there's no more stream coming, close the local connection
 						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
 						d.closed = true
-						return
+						return nil
 
 						// again, might have gotten an old or new message depending on what we asked for
 					} else if streamMessage.Type == smsg.DbStream || streamMessage.Type == smsg.Stream {

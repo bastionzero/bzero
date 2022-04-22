@@ -30,7 +30,7 @@ const (
 
 	// maximum amount of time we want to keep this datachannel alive after
 	// neither receiving nor sending anything
-	datachannelLifetime = 7 * 24 * time.Hour
+	datachannelLifetime = 8 * 24 * time.Hour
 )
 
 type OpenDataChannelPayload struct {
@@ -54,7 +54,7 @@ type IPlugin interface {
 	Feed(food interface{}) error
 	Outbox() <-chan bzplugin.ActionWrapper
 	Done() <-chan struct{}
-	Stop()
+	Stop() // Kill()?
 }
 
 type DataChannel struct {
@@ -170,7 +170,7 @@ func New(logger *logger.Logger,
 				return nil
 			case <-dc.plugin.Done():
 
-				// this is my dumb way of waiting for all incoming messages to process before dying
+				// FIXME: this is my dumb way of waiting for all incoming messages to process before dying
 				select {
 				case agentMessage := <-dc.inputChan: // receive messages
 					if err := dc.processInput(agentMessage); err != nil {
@@ -345,7 +345,6 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 	// 		return fmt.Errorf("could not start kube daemon plugin: %s", err)
 	// 	}
 	case bzplugin.Db:
-		// Deserialize the action params
 		var dbParams bzdb.DbActionParams
 		if err := json.Unmarshal(actionParams, &dbParams); err != nil {
 			return fmt.Errorf("error deserializing db params")
@@ -353,7 +352,6 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 			return fmt.Errorf("could not start db daemon plugin: %s", err)
 		}
 	case bzplugin.Web:
-		// Deserialize the action params
 		var webParams bzweb.WebActionParams
 		if err := json.Unmarshal(actionParams, &webParams); err != nil {
 			return fmt.Errorf("error deserializing web params")

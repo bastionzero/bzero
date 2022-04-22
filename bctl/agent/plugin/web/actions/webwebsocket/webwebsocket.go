@@ -18,7 +18,8 @@ import (
 type WebWebsocket struct {
 	logger *logger.Logger
 	tmb    *tomb.Tomb
-	closed bool
+
+	doneChan chan struct{}
 
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan     chan smsg.StreamMessage
@@ -35,21 +36,24 @@ type WebWebsocket struct {
 func New(logger *logger.Logger,
 	remoteHost string,
 	remotePort int,
-	pluginTmb *tomb.Tomb,
 	ch chan smsg.StreamMessage) (*WebWebsocket, error) {
 
 	return &WebWebsocket{
 		logger:           logger,
-		tmb:              pluginTmb,
-		closed:           false,
+		doneChan:         make(chan struct{}),
 		streamOutputChan: ch,
 		remoteHost:       remoteHost,
 		remotePort:       remotePort,
 	}, nil
 }
 
-func (w *WebWebsocket) Closed() bool {
-	return w.closed
+func (w *WebWebsocket) Done() <-chan struct{} {
+	return w.doneChan
+}
+
+func (w *WebWebsocket) Stop() {
+	w.tmb.Killf("we've been told to stop")
+	w.tmb.Wait()
 }
 
 func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []byte, error) {
@@ -153,12 +157,18 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 		return action, []byte{}, nil
 	}
 
+	// set our class variable so we can close it later
+	w.ws = ws
+
 	// Keep reading messages in a go function in the background
 	sequenceNumber := 0
-	go func() {
+	w.tmb.Go(func() error {
+		defer close(w.doneChan)
+
 		for {
-			mt, message, err := ws.ReadMessage()
-			if err != nil {
+			if mt, message, err := ws.ReadMessage(); w.tmb.Err() != tomb.ErrStillAlive {
+				return nil
+			} else if err != nil {
 				w.logger.Infof("Read websocket error: %s", err)
 				// We have to let the daemon know the websocket has ended
 				switch w.streamMessageVersion {
@@ -168,34 +178,32 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 				default:
 					w.sendStreamMessage(sequenceNumber, smsg.Stop, false, []byte{})
 				}
+				return nil
+			} else {
+				// Forward this message along to the daemon
+				toSend := webwebsocket.WebWebsocketStreamDataOut{
+					Message:     base64.StdEncoding.EncodeToString(message),
+					MessageType: mt,
+				}
+				contentBytes, err := json.Marshal(toSend)
+				if err != nil {
+					rerr := fmt.Errorf("json marshall error: %s", err)
+					w.logger.Error(rerr)
+					return rerr
+				}
+				switch w.streamMessageVersion {
+				// prior to 202204
+				case "":
+					w.sendStreamMessage(sequenceNumber, smsg.DataOut, true, contentBytes)
+				default:
+					w.sendStreamMessage(sequenceNumber, smsg.Data, true, contentBytes)
+				}
 				sequenceNumber += 1
-				return
-			}
 
-			// Forward this message along to the daemon
-			toSend := webwebsocket.WebWebsocketStreamDataOut{
-				Message:     base64.StdEncoding.EncodeToString(message),
-				MessageType: mt,
+				w.logger.Tracef("Received websocket message: %s", message)
 			}
-			contentBytes, err := json.Marshal(toSend)
-			if err != nil {
-				w.logger.Infof("Json marshell error: %s", err)
-				return
-			}
-			switch w.streamMessageVersion {
-			// prior to 202204
-			case "":
-				w.sendStreamMessage(sequenceNumber, smsg.DataOut, true, contentBytes)
-			default:
-				w.sendStreamMessage(sequenceNumber, smsg.Data, true, contentBytes)
-			}
-			sequenceNumber += 1
-
-			w.logger.Infof("Received websocket message: %s", message)
 		}
-	}()
-
-	w.ws = ws
+	})
 
 	return action, []byte{}, nil
 }
