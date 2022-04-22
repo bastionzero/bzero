@@ -10,11 +10,13 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
+	"bastionzero.com/bctl/v1/bctl/daemon/servers/shellserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 )
 
 // Declaring flags as package-accessible variables
@@ -23,14 +25,21 @@ var (
 	sessionToken, logPath, refreshTokenCommand, localPort, localHost string
 	agentPubKey                                                      string
 
-	// Kube server specifc values
-	targetGroupsRaw, targetUser, certPath, keyPath string
-	localhostToken, configPath                     string
-	targetGroups                                   []string
+	// Common/shared plugin arguments
+	targetUser string
 
-	// Db and web specifc values
+	// Kube server specifc arguments
+	targetGroupsRaw, certPath, keyPath string
+	localhostToken, configPath         string
+	targetGroups                       []string
+
+	// Db and web specifc arguments
 	remoteHost string
 	remotePort int
+
+	// Shell specific arguments
+	connectionId  string
+	dataChannelId string
 )
 
 const (
@@ -42,7 +51,15 @@ func main() {
 	flagErr := parseFlags()
 
 	// Setup our loggers
-	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logPath); err != nil {
+	writeToConsole := true
+
+	// For shell plugin we read/write directly from Stdin/Stdout so we dont want
+	// our logs to show up there
+	if plugin == "shell" {
+		writeToConsole = false
+	}
+
+	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logPath, writeToConsole); err != nil {
 		reportError(logger, err)
 	} else {
 		logger.AddDaemonVersion(daemonVersion)
@@ -96,19 +113,41 @@ func reportError(logger *logger.Logger, errorReport error) {
 func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	logger.Infof("Opening websocket to Bastion: %s for plugin %s", serviceUrl, plugin)
 
-	switch plugin {
-	case "kube":
+	switch bzplugin.PluginName(plugin) {
+	case bzplugin.Kube:
 		params["websocketType"] = "cluster"
 		return startKubeServer(logger, headers, params)
-	case "db":
+	case bzplugin.Db:
 		params["websocketType"] = "db"
 		return startDbServer(logger, headers, params)
-	case "web":
+	case bzplugin.Web:
 		params["websocketType"] = "web"
 		return startWebServer(logger, headers, params)
+	case bzplugin.Shell:
+		params["websocketType"] = "shell"
+		return startShellServer(logger, headers, params)
 	default:
 		return fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
+}
+
+func startShellServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+	subLogger := logger.GetComponentLogger("shellserver")
+
+	params["connection_id"] = connectionId
+
+	return shellserver.StartShellServer(
+		subLogger,
+		targetUser,
+		dataChannelId,
+		refreshTokenCommand,
+		configPath,
+		serviceUrl,
+		params,
+		headers,
+		agentPubKey,
+		targetSelectHandler,
+	)
 }
 
 func startWebServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
@@ -215,6 +254,10 @@ func parseFlags() error {
 	flag.IntVar(&remotePort, "remotePort", -1, "Remote target port to connect to")
 	flag.StringVar(&remoteHost, "remoteHost", "", "Remote target host to connect to")
 
+	// Shell plugin variables
+	flag.StringVar(&connectionId, "connectionId", "", "The bzero connection id for the shell connection")
+	flag.StringVar(&dataChannelId, "dataChannelId", "", "The datachannel id to attach to an existing shell connection")
+
 	flag.Parse()
 
 	// Make sure our service url is correctly formatted
@@ -228,13 +271,15 @@ func parseFlags() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requiredFlags := []string{"sessionId", "sessionToken", "authHeader", "logPath", "configPath", "localPort", "agentPubKey"}
+	requiredFlags := []string{"sessionId", "sessionToken", "authHeader", "logPath", "configPath", "agentPubKey"}
 	switch plugin {
 	case "kube":
-		requiredFlags = append(requiredFlags, "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
+		requiredFlags = append(requiredFlags, "localPort", "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
 	case "db":
 	case "web":
-		requiredFlags = append(requiredFlags, "remoteHost", "remotePort")
+		requiredFlags = append(requiredFlags, "localPort", "remoteHost", "remotePort")
+	case "shell":
+		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

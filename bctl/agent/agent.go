@@ -122,7 +122,8 @@ func setupLogger() (*logger.Logger, error) {
 	}
 
 	// setup our loggers
-	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile); err != nil {
+	writeToConsole := true
+	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile, writeToConsole); err != nil {
 		return logger, err
 	} else {
 		logger.AddAgentVersion(getAgentVersion())
@@ -219,7 +220,7 @@ func ccTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	}
 }
 
-// data channel's function to select SignalR hubs base on agent message message type
+// datachannel's function to select SignalR hubs base on agent message message type
 func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.CloseDaemonWebsocket:

@@ -118,16 +118,18 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 			// Create a new action and update our map
 			subLogger := p.logger.GetActionLogger("kube/portforward/agent/request")
 			subLogger.AddRequestId(p.requestId)
-			newRequest := &PortForwardRequest{
-				logger:                    subLogger,
-				streamOutputChan:          p.streamOutputChan,
-				streamMessageVersion:      p.streamMessageVersion,
-				portforwardDataInChannel:  make(chan []byte),
-				portforwardErrorInChannel: make(chan []byte),
-				tmb:                       p.tmb,
-				doneChan:                  make(chan bool),
-			}
-			if err := newRequest.openPortForwardStream(dataInputAction.PortForwardRequestId, p.DataHeaders, p.ErrorHeaders, p.targetUser, p.logId, p.requestId, p.Endpoint, dataInputAction.PodPort, p.targetGroups, p.streamConn); err != nil {
+			newRequest := createPortForwardRequest(
+				subLogger,
+				p.tmb,
+				p.streamOutputChan,
+				p.streamMessageVersion,
+				p.requestId,
+				p.logId,
+				dataInputAction.PortForwardRequestId,
+			)
+
+			p.logger.Infof("Starting port forward connection for: %s on port: %d. PortforwardRequestId: %ss", p.Endpoint, dataInputAction.PodPort, dataInputAction.PortForwardRequestId)
+			if err := newRequest.openPortForwardStream(p.DataHeaders, p.ErrorHeaders, dataInputAction.PodPort, p.streamConn); err != nil {
 				rerr := fmt.Errorf("error opening stream for new portforward request: %s", err)
 				p.logger.Error(rerr)
 				return "", []byte{}, rerr
