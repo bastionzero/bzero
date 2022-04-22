@@ -18,26 +18,19 @@ import (
 )
 
 type PortForwardRequest struct {
-	tmb    *tomb.Tomb
-	logger *logger.Logger
+	tmb                  *tomb.Tomb
+	logger               *logger.Logger
+	streamOutputChan     chan smsg.StreamMessage // output channel to send all of our stream messages directly to datachannel
+	streamMessageVersion smsg.SchemaVersion
 
 	requestId            string
-	portForwardRequestId string
 	logId                string
-
-	dataHeaders  map[string]string
-	errorHeaders map[string]string
+	portForwardRequestId string
 
 	// To send data/error to our portforward sessions
 	portforwardDataInChannel  chan []byte
 	portforwardErrorInChannel chan []byte
-
-	// output channel to send all of our stream messages directly to datachannel
-	streamOutputChan     chan smsg.StreamMessage
-	streamMessageVersion smsg.SchemaVersion
-
-	// Done channel so the go routines can communicate with eachother
-	doneChan chan bool
+	doneChan                  chan bool // Done channel so the go routines can communicate with eachother
 }
 
 func createPortForwardRequest(
@@ -48,39 +41,36 @@ func createPortForwardRequest(
 	requestId string,
 	logId string,
 	portForwardRequestId string,
-	podPort int64,
-	dataHeaders map[string]string,
-	errorHeaders map[string]string,
 ) *PortForwardRequest {
 	p := &PortForwardRequest{
-		logger:                    logger,
-		streamOutputChan:          streamOutputChan,
-		streamMessageVersion:      version,
+		logger:               logger,
+		tmb:                  tmb,
+		streamOutputChan:     streamOutputChan,
+		streamMessageVersion: version,
+
+		requestId:            requestId,
+		logId:                logId,
+		portForwardRequestId: portForwardRequestId,
+
 		portforwardDataInChannel:  make(chan []byte),
 		portforwardErrorInChannel: make(chan []byte),
-		tmb:                       tmb,
 		doneChan:                  make(chan bool),
-		requestId:                 requestId,
-		logId:                     logId,
-		portForwardRequestId:      portForwardRequestId,
-		dataHeaders:               dataHeaders,
-		errorHeaders:              errorHeaders,
 	}
 
-	// Update our error headers to include the podPort
-	p.errorHeaders[kubeutils.PortHeader] = fmt.Sprintf("%d", podPort)
-	p.errorHeaders[kubeutils.PortForwardRequestIDHeader] = p.portForwardRequestId
 	return p
 }
 
-func (p *PortForwardRequest) openPortForwardStream(streamConn httpstream.Connection) error {
+func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string, errorHeaders map[string]string, podPort int64, streamConn httpstream.Connection) error {
 
 	// Create our two streams with the provided headers
 	// We purposely share the header object for data and error stream
 	headers := http.Header{}
-	for name, value := range p.errorHeaders {
+	for name, value := range errorHeaders {
 		headers.Add(name, value)
 	}
+	headers.Add(kubeutils.PortHeader, fmt.Sprintf("%d", podPort))
+	headers.Add(kubeutils.PortForwardRequestIDHeader, p.portForwardRequestId)
+
 	// Create our http.Header
 	errorStream, err := streamConn.CreateStream(headers)
 	if err != nil {
@@ -89,7 +79,7 @@ func (p *PortForwardRequest) openPortForwardStream(streamConn httpstream.Connect
 		return rerr
 	}
 
-	for name, value := range p.dataHeaders {
+	for name, value := range dataHeaders {
 		// Set so we override any error headers that were set
 		headers.Set(name, value)
 	}

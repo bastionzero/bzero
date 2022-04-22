@@ -117,12 +117,10 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 				p.requestId,
 				p.logId,
 				dataInputAction.PortForwardRequestId,
-				dataInputAction.PodPort,
-				p.DataHeaders,
-				p.ErrorHeaders,
 			)
+
 			p.logger.Infof("Starting port forward connection for: %s on port: %d. PortforwardRequestId: %ss", p.Endpoint, dataInputAction.PodPort, dataInputAction.PortForwardRequestId)
-			if err := newRequest.openPortForwardStream(p.streamConn); err != nil {
+			if err := newRequest.openPortForwardStream(p.DataHeaders, p.ErrorHeaders, dataInputAction.PodPort, p.streamConn); err != nil {
 				rerr := fmt.Errorf("error opening stream for new portforward request: %s", err)
 				p.logger.Error(rerr)
 				return "", []byte{}, rerr
