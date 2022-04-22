@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 
 	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
@@ -49,15 +48,14 @@ type PortForwardAction struct {
 	doneChan chan bool
 
 	// Map of portforardId <-> PortForwardSubAction
-	requestMap     map[string]*PortForwardRequest
-	requestMapLock sync.Mutex
+	requestMap map[string]*PortForwardRequest
 
 	// So we can recreate the port forward
 	Endpoint        string
 	DataHeaders     map[string]string
 	ErrorHeaders    map[string]string
 	CommandBeingRun string
-	streamCh        httpstream.Connection
+	streamConn      httpstream.Connection
 }
 
 func New(logger *logger.Logger,
@@ -114,7 +112,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		}
 
 		// See if we already have a session for this portforwardRequestId, else create it
-		if oldRequest, ok := p.getRequestMap(dataInputAction.PortForwardRequestId); ok {
+		if oldRequest, ok := p.requestMap[dataInputAction.PortForwardRequestId]; ok {
 			oldRequest.portforwardDataInChannel <- dataInputAction.Data
 		} else {
 			// Create a new action and update our map
@@ -129,12 +127,12 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 				tmb:                       p.tmb,
 				doneChan:                  make(chan bool),
 			}
-			if err := newRequest.openPortForwardStream(dataInputAction.PortForwardRequestId, p.DataHeaders, p.ErrorHeaders, p.targetUser, p.logId, p.requestId, p.Endpoint, dataInputAction.PodPort, p.targetGroups, p.streamCh); err != nil {
+			if err := newRequest.openPortForwardStream(dataInputAction.PortForwardRequestId, p.DataHeaders, p.ErrorHeaders, p.targetUser, p.logId, p.requestId, p.Endpoint, dataInputAction.PodPort, p.targetGroups, p.streamConn); err != nil {
 				rerr := fmt.Errorf("error opening stream for new portforward request: %s", err)
 				p.logger.Error(rerr)
 				return "", []byte{}, rerr
 			}
-			p.updateRequestMap(newRequest, dataInputAction.PortForwardRequestId)
+			p.requestMap[dataInputAction.PortForwardRequestId] = newRequest
 			newRequest.portforwardDataInChannel <- dataInputAction.Data
 		}
 
@@ -154,12 +152,12 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		}
 
 		// Alert on the done channel
-		if portForwardRequest, ok := p.getRequestMap(stopRequestAction.PortForwardRequestId); ok {
+		if portForwardRequest, ok := p.requestMap[stopRequestAction.PortForwardRequestId]; ok {
 			portForwardRequest.doneChan <- true
 		}
 
 		// Else update our requestMap
-		p.deleteRequestMap(stopRequestAction.PortForwardRequestId)
+		delete(p.requestMap, stopRequestAction.PortForwardRequestId)
 
 		return string(portforward.StopPortForwardRequest), []byte{}, nil
 	case portforward.StopPortForward:
@@ -180,9 +178,9 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		// Alert on our done channel
 		p.doneChan <- true
 
-		// Stop the streamch
-		if p.streamCh != nil {
-			p.streamCh.Close()
+		// close the connection
+		if p.streamConn != nil {
+			p.streamConn.Close()
 		}
 
 		// Set ourselves to closed so this object will get dereferenced
@@ -245,7 +243,7 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "https", Path: p.Endpoint, Host: hostIP})
 
 	var readyMessageErr string
-	streamCh, protocolSelected, err := doDial(dialer, kubeutils.PortForwardProtocolV1Name)
+	streamConn, protocolSelected, err := doDial(dialer, kubeutils.PortForwardProtocolV1Name)
 	if err != nil {
 		rerr := fmt.Errorf("error dialing portforward spdy stream: %s", err)
 		p.logger.Error(rerr)
@@ -262,8 +260,8 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 		p.sendReadyMessage(smsg.Ready, readyMessageErr)
 	}
 
-	// Save the streamCh to use later
-	p.streamCh = streamCh
+	// Save the connection to use later
+	p.streamConn = streamConn
 
 	return string(portforward.StartPortForward), []byte{}, nil
 }
@@ -278,24 +276,4 @@ func (p *PortForwardAction) sendReadyMessage(streamType smsg.StreamType, errorMe
 		Type:           streamType,
 		Content:        errorMessage,
 	}
-}
-
-// Helper function so we avoid writing to this map at the same time
-func (p *PortForwardAction) updateRequestMap(newPortForwardRequest *PortForwardRequest, key string) {
-	p.requestMapLock.Lock()
-	p.requestMap[key] = newPortForwardRequest
-	p.requestMapLock.Unlock()
-}
-
-func (p *PortForwardAction) deleteRequestMap(key string) {
-	p.requestMapLock.Lock()
-	delete(p.requestMap, key)
-	p.requestMapLock.Unlock()
-}
-
-func (p *PortForwardAction) getRequestMap(key string) (*PortForwardRequest, bool) {
-	p.requestMapLock.Lock()
-	defer p.requestMapLock.Unlock()
-	act, ok := p.requestMap[key]
-	return act, ok
 }

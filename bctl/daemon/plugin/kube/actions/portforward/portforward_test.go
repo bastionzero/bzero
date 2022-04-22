@@ -21,12 +21,14 @@ import (
 	"k8s.io/apimachinery/pkg/util/httpstream"
 )
 
+// let the action call a dummy handshake
 func setPerformHandshake() {
 	performHandshake = func(req *http.Request, w http.ResponseWriter, serverProtocols []string) (string, error) {
 		return "", nil
 	}
 }
 
+// inject a mock stream pair that sends data / error messages so that portforward can establish a complete connection
 func setGetUpgradedConnection(mockConnection *mocks.MockStreamConnection) (http.Header, http.Header) {
 	dataHeaders := http.Header{}
 	dataHeaders.Set(kubeutils.StreamType, kubeutils.StreamTypeData)
@@ -105,19 +107,22 @@ func TestPortForward(t *testing.T) {
 	mockStreamConnection.On("CreateStream", dataHeaders).Return(mockDataStream, nil)
 	mockStreamConnection.On("CreateStream", errorHeaders).Return(mockErrorStream, nil)
 
+	t.Logf("Test that we can create a new PortForward action")
 	p, outputChan := New(logger, requestId, logId, command)
 
 	go func() {
-		// get initial payload from output channel
-		reqMessage := <-outputChan
-		assert.Equal(string(portforward.StartPortForward), reqMessage.Action)
+		startMessage := <-outputChan
+
+		t.Logf("Test that it sends a PortForward payload to the agent")
+		assert.Equal(string(portforward.StartPortForward), startMessage.Action)
 		var payload portforward.KubePortForwardStartActionPayload
-		err := json.Unmarshal(reqMessage.ActionPayload, &payload)
+		err := json.Unmarshal(startMessage.ActionPayload, &payload)
 		assert.Nil(err)
 		assert.Equal(command, payload.CommandBeingRun)
 		assert.Equal(requestId, payload.RequestId)
 		assert.Equal(logId, payload.LogId)
 
+		t.Logf("Test that it listens for data and error streams upon receiving the ready message")
 		p.ReceiveStream(smsg.StreamMessage{
 			Type:    smsg.Ready,
 			Content: "",
@@ -147,6 +152,7 @@ func TestPortForward(t *testing.T) {
 		assert.True(receivedDataIn)
 		assert.True(receivedError)
 
+		t.Logf("Test that it processes data and error messages in the correct order")
 		streamMessageToSend := portforward.KubePortForwardStreamMessageContent{
 			PortForwardRequestId: requestId,
 			Content:              []byte(testData),
@@ -184,6 +190,7 @@ func TestPortForward(t *testing.T) {
 
 		time.Sleep(time.Second)
 
+		t.Logf("Test that we can kill its tomb and make it stop")
 		tmb.Kill(errors.New("test kill"))
 
 		time.Sleep(time.Second)
@@ -205,6 +212,7 @@ func TestPortForward(t *testing.T) {
 		writer.AssertExpectations(t)
 	}()
 
+	t.Logf("Test that we can start the action")
 	err := p.Start(&tmb, &writer, &request)
 	assert.Nil(err)
 }
@@ -219,7 +227,6 @@ func TestPortForwardError(t *testing.T) {
 	sendData := "send data"
 	urlPath := "test-path"
 	errorStr := "test error"
-	p, outputChan := New(logger, requestId, logId, command)
 
 	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
@@ -236,30 +243,27 @@ func TestPortForwardError(t *testing.T) {
 
 	writer.On("Write", errorJson).Return(len(errorJson), nil)
 
-	go func() {
-		// get initial payload from output channel
-		reqMessage := <-outputChan
-		assert.Equal(string(portforward.StartPortForward), reqMessage.Action)
-		var payload portforward.KubePortForwardStartActionPayload
-		err := json.Unmarshal(reqMessage.ActionPayload, &payload)
-		assert.Nil(err)
-		assert.Equal(command, payload.CommandBeingRun)
-		assert.Equal(requestId, payload.RequestId)
-		assert.Equal(logId, payload.LogId)
+	p, outputChan := New(logger, requestId, logId, command)
 
+	go func() {
+		// can ignore this since we're not testing it
+		<-outputChan
+
+		t.Logf("Test that it stop if the ready message contains an error")
 		p.ReceiveStream(smsg.StreamMessage{
 			Type:    smsg.Ready,
 			Content: errorStr,
 		})
 
-		reqMessage = <-outputChan
-		assert.Equal(string(portforward.StopPortForward), reqMessage.Action)
+		stopMessage := <-outputChan
+		assert.Equal(string(portforward.StopPortForward), stopMessage.Action)
 		var stopPayload portforward.KubePortForwardStopActionPayload
-		err = json.Unmarshal(reqMessage.ActionPayload, &stopPayload)
+		err := json.Unmarshal(stopMessage.ActionPayload, &stopPayload)
 		assert.Nil(err)
 		assert.Equal(requestId, stopPayload.RequestId)
 		assert.Equal(logId, stopPayload.LogId)
 
+		// give it time to run
 		time.Sleep(time.Second)
 		writer.AssertExpectations(t)
 	}()

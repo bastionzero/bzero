@@ -155,7 +155,7 @@ func (p *PortForwardRequest) openPortForwardStream(portforwardRequestId string, 
 	return nil
 }
 
-// NOTE: we don't need to use TypeV2 here because Portforward is broken on previous versions of bzero
+// NOTE: we don't need to check version here because Portforward is broken on previous versions of bzero
 // thus, anyone using it at all is using the new version
 func (p *PortForwardRequest) forwardStream(
 	streamType smsg.StreamType,

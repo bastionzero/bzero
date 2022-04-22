@@ -37,8 +37,6 @@ func TestStream(t *testing.T) {
 	receiveData4 := "receive data 4"
 	urlPath := "test-path"
 
-	s, outputChan := New(logger, requestId, logId, command)
-
 	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
 	writer := mocks.MockResponseWriter{}
@@ -46,18 +44,23 @@ func TestStream(t *testing.T) {
 	writer.On("Write", []byte(receiveData2)).Return(14, nil)
 	writer.On("Header").Return(make(map[string][]string))
 
+	t.Logf("Test that we can create a new Stream action")
+	s, outputChan := New(logger, requestId, logId, command)
+
 	go func() {
-		// get initial payload from output channel
-		reqMessage := <-outputChan
-		assert.Equal(string(stream.StreamStart), reqMessage.Action)
+		startMessage := <-outputChan
+
+		t.Logf("Test that it sends a Stream payload to the agent")
+		assert.Equal(string(stream.StreamStart), startMessage.Action)
 		var payload stream.KubeStreamActionPayload
-		err := json.Unmarshal(reqMessage.ActionPayload, &payload)
+		err := json.Unmarshal(startMessage.ActionPayload, &payload)
 		assert.Nil(err)
 		assert.Equal(sendData, payload.Body)
 		assert.Equal(command, payload.CommandBeingRun)
 		assert.Equal(requestId, payload.RequestId)
 		assert.Equal(logId, payload.LogId)
 
+		t.Logf("Test that it will not process a stream received before the header message")
 		// send early streams (msgs 1 and 4)
 		message1 := smsg.StreamMessage{
 			Type:           smsg.Data,
@@ -72,7 +75,10 @@ func TestStream(t *testing.T) {
 			More:           true,
 			Content:        base64.StdEncoding.EncodeToString([]byte(receiveData4)),
 		}
-		// implicit assertion that this call never happens
+
+		// this functions as an implicit assertion because there is no On() call accounting for it
+		// so if the message were processed, we'd panic
+		t.Logf("Test that it will not process a stream with an out-of-order sequence number if it never reaches that number")
 		s.ReceiveStream(message4)
 
 		// send header message
@@ -93,17 +99,20 @@ func TestStream(t *testing.T) {
 		// upon receiving this, message 1 will also be processed
 		s.ReceiveStream(message0)
 
+		t.Logf("Test that we can end the stream listener")
 		message2 := smsg.StreamMessage{
 			Type:           smsg.Data,
 			SequenceNumber: 2,
 			More:           true,
 			Content:        base64.StdEncoding.EncodeToString([]byte(receiveData2)),
 		}
-		// this should be processed immediately
+
+		t.Logf("Test that it processes in-order messages immediately")
 		s.ReceiveStream(message2)
 		// send this again -- still shouldn't be processed
 		s.ReceiveStream(message4)
 
+		t.Logf("Test that we can end the stream listener")
 		// send a stream end message
 		endMessage := smsg.StreamMessage{
 			Type:           smsg.Data,
@@ -113,11 +122,11 @@ func TestStream(t *testing.T) {
 		}
 		s.ReceiveStream(endMessage)
 
-		// FIXME: address race condition here
 		time.Sleep(1 * time.Second)
 		writer.AssertExpectations(t)
 	}()
 
+	t.Logf("Test that we can start the action")
 	err := s.Start(&tmb, &writer, &request)
 	assert.Nil(err)
 }

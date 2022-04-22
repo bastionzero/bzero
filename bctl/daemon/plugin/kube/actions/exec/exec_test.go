@@ -18,6 +18,7 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
+// inject our mock object
 func setNewSPDYService(mockSpdy *SPDYService) {
 	NewSPDYService = func(logger *logger.Logger, writer http.ResponseWriter, request *http.Request) (*SPDYService, error) {
 		return mockSpdy, nil
@@ -46,7 +47,6 @@ func TestExec(t *testing.T) {
 	receiveData := "receive data"
 	streamData := "stream data"
 	urlPath := "test-path"
-	e, outputChan := New(logger, requestId, logId, command)
 
 	mockStdinStream := mocks.MockStream{MyStreamData: streamData}
 	mockStdinStream.On("Read", make([]byte, kubeutils.ExecChunkSize)).Return(len(streamData), nil)
@@ -78,33 +78,39 @@ func TestExec(t *testing.T) {
 
 	writer := mocks.MockResponseWriter{}
 
+	t.Logf("Test that we can create a new Exec action")
+	e, outputChan := New(logger, requestId, logId, command)
+
+	t.Logf("Test that we can start the action")
 	err := e.Start(&tmb, &writer, &request)
 	assert.Nil(err)
-	reqMessage := <-outputChan
+	startMessage := <-outputChan
 
-	assert.Equal(string(exec.ExecStart), reqMessage.Action)
+	t.Logf("Test that it sends an exec payload to the agent")
+	assert.Equal(string(exec.ExecStart), startMessage.Action)
 	var payload exec.KubeExecStartActionPayload
-	err = json.Unmarshal(reqMessage.ActionPayload, &payload)
+	err = json.Unmarshal(startMessage.ActionPayload, &payload)
 	assert.Nil(err)
 	assert.Equal(command, payload.CommandBeingRun)
 	assert.Equal(requestId, payload.RequestId)
 	assert.Equal(logId, payload.LogId)
 
+	t.Logf("Test that it writes stdout data received from the agent to user's stdout")
 	message0 := smsg.StreamMessage{
 		SequenceNumber: 0,
 		Content:        base64.StdEncoding.EncodeToString([]byte(receiveData)),
 	}
 	e.ReceiveStream(message0)
 
+	t.Logf("Test that it exits upon receiving the escape character")
 	messageEnd := smsg.StreamMessage{
 		SequenceNumber: 1,
 		Content:        base64.StdEncoding.EncodeToString([]byte(exec.EscChar)),
 	}
 	e.ReceiveStream(messageEnd)
 
-	// FIXME: race, need to give the code time to run
+	// give it time to finish
 	time.Sleep(time.Second)
 
 	writer.AssertExpectations(t)
-
 }
