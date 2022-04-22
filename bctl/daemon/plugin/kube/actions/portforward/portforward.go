@@ -45,8 +45,7 @@ type PortForwardAction struct {
 	endpoint              string
 
 	// Map of portforardId <-> PortForwardSubAction
-	requestMap     map[string]chan RequestMapStruct
-	requestMapLock sync.Mutex
+	requestMap map[string]chan RequestMapStruct
 }
 
 // httpStreamPair represents the error and data streams for a port
@@ -103,7 +102,7 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 	}
 
 	// First get the stream
-	streamChan, ok := p.getRequestMap(kubePortforwardStreamMessageContent.PortForwardRequestId)
+	streamChan, ok := p.requestMap[kubePortforwardStreamMessageContent.PortForwardRequestId]
 	if !ok {
 		p.logger.Error(fmt.Errorf("unable to find stream chan for request: %s", kubePortforwardStreamMessageContent.PortForwardRequestId))
 		return
@@ -283,7 +282,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	doneChan := make(chan bool, 5)
 
 	// Make and update the stream channel for this requestId
-	p.updateRequestMap(make(chan RequestMapStruct), portforwardSession.requestID)
+	p.requestMap[portforwardSession.requestID] = make(chan RequestMapStruct)
 
 	// Set up the go routine to push error data to Bastion
 	go func() {
@@ -381,7 +380,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	}
 
 	// Get our chan
-	requestMapChannel, ok := p.getRequestMap(portforwardSession.requestID)
+	requestMapChannel, ok := p.requestMap[portforwardSession.requestID]
 	if !ok {
 		p.logger.Error(fmt.Errorf("error getting stream for request: %s", portforwardSession.requestID))
 		return errors.New("unable to find stream channel")
@@ -392,7 +391,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		select {
 		case <-doneChan:
 			// Delete the stream pair from our mapping
-			p.deleteRequestMap(portforwardSession.requestID)
+			delete(p.requestMap, portforwardSession.requestID)
 
 			// Return
 			return nil
@@ -451,29 +450,6 @@ func (p *PortForwardAction) requestID(stream httpstream.Stream) (string, error) 
 		return "", errors.New("port forwarding is not supported")
 	}
 	return requestID, nil
-}
-
-// Helper function so we avoid writing to this map at the same time
-func (p *PortForwardAction) updateRequestMap(newStreamChan chan RequestMapStruct, key string) {
-	defer p.requestMapLock.Unlock()
-
-	p.requestMapLock.Lock()
-	p.requestMap[key] = newStreamChan
-}
-
-func (p *PortForwardAction) deleteRequestMap(key string) {
-	defer p.requestMapLock.Unlock()
-
-	p.requestMapLock.Lock()
-	delete(p.requestMap, key)
-}
-
-func (p *PortForwardAction) getRequestMap(key string) (chan RequestMapStruct, bool) {
-	defer p.requestMapLock.Unlock()
-
-	p.requestMapLock.Lock()
-	act, ok := p.requestMap[key]
-	return act, ok
 }
 
 func bubbleUpError(writer http.ResponseWriter, content string) {
