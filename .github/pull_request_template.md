@@ -7,7 +7,7 @@ Description here (why is it needed, what does it do)....
 Describe how to test this PR....
 
 **backend branch:** 
-**bzero branch:** 
+**zli branch:** 
 
 #### Ready to run system tests?
 
