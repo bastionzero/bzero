@@ -11,17 +11,17 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/mocks"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube"
-	execaction "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
+	bzexec "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"gopkg.in/tomb.v2"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-func buildStartActionPayload(headers map[string][]string, requestId string, version smsg.SchemaVersion) execaction.KubeExecStartActionPayload {
-	return execaction.KubeExecStartActionPayload{
+// what exec action will receive from "bastion"
+func buildStartActionPayload(headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
+	payloadBytes, _ := json.Marshal(bzexec.KubeExecStartActionPayload{
 		Endpoint:             "test/endpoint",
 		RequestId:            requestId,
 		StreamMessageVersion: version,
@@ -29,45 +29,28 @@ func buildStartActionPayload(headers map[string][]string, requestId string, vers
 		IsTty:                true,
 		Command:              []string{"command"},
 		CommandBeingRun:      "command",
-	}
+	})
+	return payloadBytes
 }
 
-func buildStdinActionPayload(requestId string, data []byte) execaction.KubeStdinActionPayload {
-	return execaction.KubeStdinActionPayload{
+// what exec will receive from "stdin"
+func buildStdinActionPayload(requestId string, data []byte) []byte {
+	payloadBytes, _ := json.Marshal(bzexec.KubeStdinActionPayload{
 		RequestId: requestId,
 		LogId:     "lid",
 		Stdin:     data,
-	}
+	})
+	return payloadBytes
 }
 
-type MockExecutor struct {
-	mock.Mock
-	remotecommand.Executor
-}
-
-func (m MockExecutor) Stream(options remotecommand.StreamOptions) error {
-	var data = make([]byte, 7)
-	go func() {
-		for {
-			options.Stdin.Read(data)
-			options.Stdout.Write(data)
-			options.Stderr.Write([]byte(fmt.Sprintf("error: %s", data)))
-		}
-	}()
-
-	// NOTE: using Called() with the entire options object is infeasible
-	// because the action creates some of its own pointers
-	// it's enough to check that stdwriter has the right members
-	args := m.Called(options.Stdout)
-	return args.Error(0)
-}
-
+// inject our mocked object
 func setGetExecutor(mockExec MockExecutor) {
 	getExecutor = func(config *rest.Config, method string, url *url.URL) (remotecommand.Executor, error) {
 		return mockExec, nil
 	}
 }
 
+// save exec action the trouble of trying to read a nonexsitent config
 func setGetConfig() {
 	getConfig = func() (*rest.Config, error) {
 		return &rest.Config{}, nil
@@ -105,36 +88,40 @@ func TestExec(t *testing.T) {
 	setGetExecutor(mockExec)
 	setGetConfig()
 
+	t.Logf("Test that we can create a new Exec action")
 	e, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
 	assert.Nil(err)
 
 	// test start
-	startPayload := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
-	startPayloadBytes, err := json.Marshal(startPayload)
-	assert.Nil(err)
+	startPayloadBytes := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
 
-	action, responsePayload, err := e.Receive(string(execaction.ExecStart), startPayloadBytes)
+	t.Logf("Test that we can initiate an exec session")
+	action, responsePayload, err := e.Receive(string(bzexec.ExecStart), startPayloadBytes)
 	assert.Nil(err)
-	assert.Equal(string(execaction.ExecStart), action)
+	assert.Equal(string(bzexec.ExecStart), action)
 	assert.Equal([]byte{}, responsePayload)
 
 	readyMessage := <-outputChan
 	readyContent, err := base64.StdEncoding.DecodeString(readyMessage.Content)
+	t.Logf("Test that the action has started the exec interaction with the kube server")
 	assert.Nil(err)
-	assert.Equal([]byte(execaction.EscChar), readyContent)
+	assert.Equal([]byte(bzexec.EscChar), readyContent)
 
 	// test stdin/stdout
-	stdinPayload := buildStdinActionPayload(requestId, []byte(testString))
-	stdinPayloadBytes, err := json.Marshal(stdinPayload)
-	assert.Nil(err)
+	stdinPayloadBytes := buildStdinActionPayload(requestId, []byte(testString))
 
-	action, responsePayload, err = e.Receive(string(execaction.ExecInput), stdinPayloadBytes)
+	action, responsePayload, err = e.Receive(string(bzexec.ExecInput), stdinPayloadBytes)
 	assert.Nil(err)
-	assert.Equal(string(execaction.ExecInput), action)
+	t.Logf("Test that the action can accept input from stdin")
+	assert.Equal(string(bzexec.ExecInput), action)
 	assert.Equal([]byte{}, responsePayload)
 
+	t.Logf("Test that the action reports output from stdout and stderr")
 	mocks.AssertNextMessageHasContent(assert, outputChan, testString)
 	mocks.AssertNextMessageHasContent(assert, outputChan, fmt.Sprintf("error: %s", testString))
+
+	t.Logf("Test that the action is closed")
+	assert.True(e.Closed())
 
 	mockExec.AssertExpectations(t)
 }

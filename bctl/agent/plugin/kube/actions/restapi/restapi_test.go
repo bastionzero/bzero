@@ -15,6 +15,31 @@ import (
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
 )
 
+// what restapi action will receive from "bastion"
+func buildActionPayload(headers map[string][]string, requestId string) []byte {
+	payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionPayload{
+		Endpoint:        "test/endpoint",
+		Headers:         headers,
+		Method:          "GET",
+		Body:            "",
+		RequestId:       requestId,
+		LogId:           "lid",
+		CommandBeingRun: "command",
+	})
+	return payloadBytes
+}
+
+// what restapi action will receive from "kube"
+func buildExpectedResponsePayload(statusCode int, headers map[string][]string, requestId string, bodyText string) []byte {
+	payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
+		StatusCode: statusCode,
+		RequestId:  requestId,
+		Headers:    headers,
+		Content:    []byte(bodyText),
+	})
+	return payloadBytes
+}
+
 // inject logic for what happens when restapi makes an HTTP request
 func setMakeRequest(statusCode int, headers map[string][]string, bodyText string) {
 	makeRequest = func(req *http.Request) (*http.Response, error) {
@@ -24,29 +49,6 @@ func setMakeRequest(statusCode int, headers map[string][]string, bodyText string
 			Body:       ioutil.NopCloser(bytes.NewBufferString(bodyText)),
 		}, nil
 	}
-}
-
-func buildActionPayload(headers map[string][]string, requestId string) kuberest.KubeRestApiActionPayload {
-	return kuberest.KubeRestApiActionPayload{
-		Endpoint:        "test/endpoint",
-		Headers:         headers,
-		Method:          "GET",
-		Body:            "",
-		RequestId:       requestId,
-		LogId:           "lid",
-		CommandBeingRun: "command",
-	}
-}
-
-func buildExpectedResponsePayload(statusCode int, headers map[string][]string, requestId string, bodyText string, assert *assert.Assertions) []byte {
-	resultBytes, err := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
-		StatusCode: statusCode,
-		RequestId:  requestId,
-		Headers:    headers,
-		Content:    []byte(bodyText),
-	})
-	assert.Nil(err)
-	return resultBytes
 }
 
 func TestMain(m *testing.M) {
@@ -74,21 +76,20 @@ func TestRestApi(t *testing.T) {
 
 	setMakeRequest(statusCode, headers, testString)
 
+	t.Logf("Test that we can create a new RestApi action")
 	r, err := New(logger, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
 	assert.Nil(err)
 
-	payload := buildActionPayload(make(map[string][]string), requestId)
-	payloadBytes, err := json.Marshal(payload)
-	assert.Nil(err)
-
+	payloadBytes := buildActionPayload(make(map[string][]string), requestId)
+	t.Logf("Test that we can ask the action to make an API request")
 	action, responsePayload, err := r.Receive("restapi", payloadBytes)
 	assert.Nil(err)
 	assert.Equal(string(kuberest.RestResponse), action)
 
-	// restapi should return the response it got from the kube API
-	expectedResponse := buildExpectedResponsePayload(statusCode, headers, requestId, testString, assert)
+	t.Logf("Test that it returns the expected response to that request")
+	expectedResponse := buildExpectedResponsePayload(statusCode, headers, requestId, testString)
 	assert.Equal(expectedResponse, responsePayload)
 
-	// restapi should have closed
+	t.Logf("Test that the action has closed")
 	assert.Equal(true, r.Closed())
 }

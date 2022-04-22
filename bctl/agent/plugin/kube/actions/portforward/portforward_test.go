@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// what portforward action will receive from "bastion"
 func buildStartActionPayload(assert *assert.Assertions, headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
 	payload := portforward.KubePortForwardStartActionPayload{
 		Endpoint:             "test/endpoint",
@@ -34,24 +35,45 @@ func buildStartActionPayload(assert *assert.Assertions, headers map[string][]str
 	return payloadBytes
 }
 
-func buildActionPayload(assert *assert.Assertions, bodyText string, requestId string) []byte {
-	payload := portforward.KubePortForwardActionPayload{
+// what portforward action will receive from "bastion"
+func buildActionPayload(bodyText string, requestId string, portForwardRequestId string) []byte {
+	payloadBytes, _ := json.Marshal(portforward.KubePortForwardActionPayload{
 		RequestId:            requestId,
 		LogId:                "lid",
 		Data:                 []byte(bodyText),
-		PortForwardRequestId: "", // TODO: could make this better
+		PortForwardRequestId: portForwardRequestId,
 		PodPort:              5000,
-	}
-	payloadBytes, err := json.Marshal(payload)
-	assert.Nil(err)
+	})
 	return payloadBytes
 }
 
+// what portforward action will receive from "bastion"
+func buildStopRequestActionPayload(requestId string, portForwardRequestId string) []byte {
+	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStopRequestActionPayload{
+		RequestId:            requestId,
+		LogId:                "lid",
+		PortForwardRequestId: portForwardRequestId,
+	})
+	return payloadBytes
+}
+
+// what portforward action will receive from "bastion"
+func buildStopActionPayload(requestId string) []byte {
+	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStopActionPayload{
+		RequestId: requestId,
+		LogId:     "lid",
+	})
+	return payloadBytes
+}
+
+// inject our mocked object
 func setDoDial(streamConnection *mocks.MockStreamConnection) {
 	doDial = func(dialer httpstream.Dialer, protocolName string) (httpstream.Connection, string, error) {
 		return streamConnection, "", nil
 	}
 }
+
+// save portforward action the trouble of trying to read a nonexsitent config
 func setGetConfig() {
 	getConfig = func() (*rest.Config, error) {
 		return &rest.Config{}, nil
@@ -76,6 +98,7 @@ func TestPortforward(t *testing.T) {
 	outputChan := make(chan smsg.StreamMessage, 1)
 
 	requestId := "rid"
+	portForwardRequestId := "pid"
 	testData := "test data"
 
 	mockStream := mocks.MockStream{MyStreamData: testData}
@@ -86,30 +109,31 @@ func TestPortforward(t *testing.T) {
 	mockStreamConnection := new(mocks.MockStreamConnection)
 	mockStreamConnection.On("CreateStream", http.Header{
 		"Port":      []string{"5000"},
-		"Requestid": []string{""},
+		"Requestid": []string{portForwardRequestId},
 	}).Return(mockStream, nil)
+	mockStreamConnection.On("Close").Return(nil)
 
 	setDoDial(mockStreamConnection)
 	setGetConfig()
 
-	// test new
+	t.Logf("Test that we can create a new PortForward action")
 	p, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
 	assert.Nil(err)
 
-	// test start
+	t.Logf("Test that we can initiate a portforward session")
 	payload := buildStartActionPayload(assert, make(map[string][]string), requestId, smsg.CurrentSchema)
 	action, responsePayload, err := p.Receive(string(portforward.StartPortForward), payload)
 	assert.Nil(err)
 	assert.Equal(string(portforward.StartPortForward), action)
 	assert.Equal([]byte{}, responsePayload)
 
-	// ready message should come back
 	readyMessage := <-outputChan
+	t.Logf("Test that the action has started the portforward interaction with the kube server")
 	assert.Equal(requestId, readyMessage.RequestId)
 	assert.Equal("", readyMessage.Content)
 
-	// test dataIn
-	payload = buildActionPayload(assert, testData, requestId)
+	payload = buildActionPayload(testData, requestId, portForwardRequestId)
+	t.Logf("Test that the action can accept input from the remote port")
 	action, responsePayload, err = p.Receive(string(portforward.DataInPortForward), payload)
 	assert.Nil(err)
 	assert.Equal(string(portforward.DataInPortForward), action)
@@ -117,6 +141,7 @@ func TestPortforward(t *testing.T) {
 
 	dataMessage := <-outputChan
 
+	t.Logf("Test that the action forwards that data")
 	wrappedContent, err := base64.StdEncoding.DecodeString(dataMessage.Content)
 	assert.Nil(err)
 	var content portforward.KubePortForwardStreamMessageContent
@@ -124,6 +149,22 @@ func TestPortforward(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(testData, string(content.Content))
 
+	t.Logf("Test that we can end a portforward request")
+	stopRequestPayload := buildStopRequestActionPayload(requestId, portForwardRequestId)
+	action, responsePayload, err = p.Receive(string(portforward.StopPortForwardRequest), stopRequestPayload)
+	assert.Nil(err)
+	assert.Equal(string(portforward.StopPortForwardRequest), action)
+	assert.Equal([]byte{}, responsePayload)
+
+	t.Logf("Test that we can close the portforward action")
+	stopPayload := buildStopActionPayload(requestId)
+	action, responsePayload, err = p.Receive(string(portforward.StopPortForward), stopPayload)
+	assert.Nil(err)
+	assert.Equal(string(portforward.StopPortForward), action)
+	assert.Equal([]byte{}, responsePayload)
+	assert.True(p.Closed())
+
+	t.Logf("Test that we can kill the action's tomb and stop it")
 	tmb.Kill(errors.New("test kill"))
 
 	time.Sleep(time.Second)

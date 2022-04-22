@@ -219,7 +219,6 @@ func TestPortForwardError(t *testing.T) {
 	sendData := "send data"
 	urlPath := "test-path"
 	errorStr := "test error"
-	// TODO: check validity
 	p, outputChan := New(logger, requestId, logId, command)
 
 	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)

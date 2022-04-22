@@ -18,8 +18,9 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
-func buildActionPayload(assert *assert.Assertions, headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
-	payload := stream.KubeStreamActionPayload{
+// what stream action will receive from "bastion"
+func buildActionPayload(headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
+	payloadBytes, _ := json.Marshal(stream.KubeStreamActionPayload{
 		Endpoint:             "test/endpoint",
 		Headers:              headers,
 		Method:               "GET",
@@ -28,13 +29,11 @@ func buildActionPayload(assert *assert.Assertions, headers map[string][]string, 
 		StreamMessageVersion: version,
 		LogId:                "lid",
 		CommandBeingRun:      "command",
-	}
-	payloadBytes, err := json.Marshal(payload)
-	assert.Nil(err)
+	})
 	return payloadBytes
 }
 
-// inject logic for what happens when restapi makes an HTTP request
+// inject logic for what happens when stream makes an HTTP request
 func setMakeRequest(statusCode int, headers map[string][]string, bodyText string) {
 	makeRequest = func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -70,10 +69,12 @@ func TestStream(t *testing.T) {
 	// resopnd with a 4kB string
 	setMakeRequest(200, headers, strings.Repeat(testString, 1024))
 
+	t.Logf("Test that we can create a new Stream action")
 	s, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
 	assert.Nil(err)
 
-	payload := buildActionPayload(assert, make(map[string][]string), requestId, smsg.CurrentSchema)
+	payload := buildActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
+	t.Logf("Test that we can ask the action to start streaming")
 	action, responsePayload, err := s.Receive(string(stream.StreamStart), payload)
 	assert.Nil(err)
 	assert.Equal(string(stream.StreamStart), action)
@@ -86,6 +87,7 @@ func TestStream(t *testing.T) {
 	contentBytes, err := base64.StdEncoding.DecodeString(headerMessage.Content)
 	assert.Nil(err)
 
+	t.Logf("Test that the action first returns a message with the stream's headers")
 	err = json.Unmarshal(contentBytes, &kubestreamHeadersPayload)
 	assert.Nil(err)
 	assert.Equal(requestId, headerMessage.RequestId)
@@ -93,7 +95,7 @@ func TestStream(t *testing.T) {
 		Headers: headers,
 	}, kubestreamHeadersPayload)
 
-	// read the content messages
+	t.Logf("Test that the 4kb of content that were streamed are returned in 1kb chunks")
 	for n := 0; n < 4; n++ {
 		bodyMessage := <-outputChan
 		contentBytes, err = base64.StdEncoding.DecodeString(bodyMessage.Content)
@@ -102,7 +104,8 @@ func TestStream(t *testing.T) {
 		assert.Equal(strings.Repeat(testString, 256), string(contentBytes))
 		assert.Equal(true, bodyMessage.More)
 	}
-	// expect stream to tell us when it's done
+
 	finalMessage := <-outputChan
+	t.Logf("Test that the action informs us that the stream has ended")
 	assert.Equal(false, finalMessage.More)
 }

@@ -84,7 +84,7 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			return "", []byte{}, rerr
 		}
 
-		return e.StartExec(startExecRequest)
+		return e.startExec(startExecRequest)
 
 	case bzexec.ExecInput:
 		var execInputAction bzexec.KubeStdinActionPayload
@@ -131,7 +131,7 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 	}
 }
 
-func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayload) (string, []byte, error) {
+func (e *ExecAction) startExec(startExecRequest bzexec.KubeExecStartActionPayload) (string, []byte, error) {
 	// keep track of who we're talking to
 	e.requestId = startExecRequest.RequestId
 	e.logger.Infof("Setting request id: %s", e.requestId)
