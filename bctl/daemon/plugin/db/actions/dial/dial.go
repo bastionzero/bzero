@@ -86,7 +86,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
-							lconn.Write(contentBytes)
+							go lconn.Write(contentBytes)
 						}
 
 					} else {
