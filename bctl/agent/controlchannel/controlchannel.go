@@ -27,12 +27,12 @@ const (
 )
 
 type wsMeta struct {
-	Client       *websocket.Websocket
+	Client       websocket.IWebsocket
 	DataChannels map[string]websocket.IChannel
 }
 
 type ControlChannel struct {
-	websocket *websocket.Websocket
+	websocket websocket.IWebsocket
 	logger    *logger.Logger
 	tmb       tomb.Tomb
 	id        string
@@ -58,7 +58,7 @@ type ControlChannel struct {
 
 func Start(logger *logger.Logger,
 	id string,
-	websocket *websocket.Websocket, // control channel websocket
+	websocket websocket.IWebsocket, // control channel websocket
 	serviceUrl string,
 	targetType string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
@@ -197,21 +197,20 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
 	connectionId := message.ConnectionId
 	dcId := message.DataChannelId
-
 	subLogger := c.logger.GetDatachannelLogger(dcId)
 
 	// grab the websocket
 	if websocketMeta, ok := c.getConnectionMap(connectionId); !ok {
 		return fmt.Errorf("agent does not have a websocket associated with id %s", connectionId)
+	} else if keysplitter, err := keysplitting.New(c.ksConfig); err != nil {
+		return err
+	} else if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn, keysplitter); err != nil {
+		return err
 	} else {
-		if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn, c.ksConfig); err != nil {
-			return err
-		} else {
-			// add our new datachannel to our connections dictionary
-			websocketMeta.DataChannels[dcId] = datachannel
-		}
+		// add our new datachannel to our connections dictionary
+		websocketMeta.DataChannels[dcId] = datachannel
+		return nil
 	}
-	return nil
 }
 
 // This is our main process function where incoming messages from the websocket will be processed
