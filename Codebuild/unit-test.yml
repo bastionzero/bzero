@@ -39,7 +39,19 @@ phases:
       # Install Bzero-QA
       - git clone git@github.com:bastionzero/cwc-infra.git --branch feat/testing-overhaul /cwc-infra/
       - pip3 install -e /cwc-infra/Bzero-Common/. && pip3 install -e /cwc-infra/Bzero-QA/.
+      # Install gocov-xml to push our coverage reports
+      - go install github.com/axw/gocov/gocov@latest
+      - go install github.com/AlekSi/gocov-xml@latest
   build:
     commands:
       - echo Build started on `date`
       - bzero-qa test -unit-tests
+reports:
+  bzerolib-unittest-report:
+    files:
+      - 'bzerolib/bzerolibcoverage.xml'
+    file-format: 'COBERTURAXML'
+  bctl-unittest-report:
+    files:
+      - 'bctl/bctlcoverage.xml'
+    file-format: 'COBERTURAXML'
