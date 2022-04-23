@@ -61,7 +61,7 @@ func (d *Dial) Done() <-chan struct{} {
 	return d.doneChan
 }
 
-func (d *Dial) Stop() {
+func (d *Dial) Kill() {
 	d.remoteConnection.Close()
 	d.tmb.Wait()
 }

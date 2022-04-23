@@ -165,7 +165,7 @@ func (d *DialAction) Done() <-chan struct{} {
 	return d.doneChan
 }
 
-func (d *DialAction) Stop() {
+func (d *DialAction) Kill() {
 	d.tmb.Kill(fmt.Errorf("received stop request from higher ups")) // kills all datachannel, plugin, and action goroutines
 	d.tmb.Wait()
 }

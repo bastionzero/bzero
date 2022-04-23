@@ -1,13 +1,13 @@
 package webserver
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -182,9 +182,10 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 	}
 	action = "web/" + action
 
-	if actionParamsMarshalled, err := json.Marshal(actionParams); err != nil {
-		return nil, fmt.Errorf("error marshalling action params for web")
-	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, w.refreshTokenCommand, w.configPath, action, actionParamsMarshalled, w.agentPubKey, attach); err != nil {
+	ksLogger := w.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(ksLogger, w.agentPubKey, w.configPath, w.refreshTokenCommand); err != nil {
+		return nil, err
+	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, action, actionParams, attach); err != nil {
 		return nil, err
 	} else {
 

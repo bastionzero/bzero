@@ -14,7 +14,7 @@ import (
 type IDbAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
 	Done() <-chan struct{}
-	Stop()
+	Kill()
 }
 
 type DbPlugin struct {
@@ -80,9 +80,9 @@ func (d *DbPlugin) Done() <-chan struct{} {
 	}
 }
 
-func (d *DbPlugin) Stop() {
+func (d *DbPlugin) Kill() {
 	if d.action != nil {
-		d.action.Stop()
+		d.action.Kill()
 	}
 }
 

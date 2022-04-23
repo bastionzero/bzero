@@ -60,7 +60,7 @@ func (w *WebDial) Done() <-chan struct{} {
 	return w.doneChan
 }
 
-func (w *WebDial) Stop() {
+func (w *WebDial) Kill() {
 	w.tmb.Killf("we've been told to stop")
 	w.tmb.Wait()
 }

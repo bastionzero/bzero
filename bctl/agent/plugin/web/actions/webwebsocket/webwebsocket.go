@@ -51,7 +51,7 @@ func (w *WebWebsocket) Done() <-chan struct{} {
 	return w.doneChan
 }
 
-func (w *WebWebsocket) Stop() {
+func (w *WebWebsocket) Kill() {
 	w.tmb.Killf("we've been told to stop")
 	w.tmb.Wait()
 }

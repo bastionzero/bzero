@@ -15,7 +15,7 @@ import (
 type IWebAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
 	Done() <-chan struct{}
-	Stop()
+	Kill()
 }
 
 type WebPlugin struct {
@@ -85,9 +85,9 @@ func (w *WebPlugin) Done() <-chan struct{} {
 	}
 }
 
-func (w *WebPlugin) Stop() {
+func (w *WebPlugin) Kill() {
 	if w.action != nil {
-		w.action.Stop()
+		w.action.Kill()
 	}
 }
 

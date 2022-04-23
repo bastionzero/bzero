@@ -8,8 +8,8 @@ import (
 
 	tomb "gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
+	shell "bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -17,7 +17,6 @@ import (
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
-	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -54,18 +53,19 @@ type IPlugin interface {
 	Feed(food interface{}) error
 	Outbox() <-chan bzplugin.ActionWrapper
 	Done() <-chan struct{}
-	Stop() // Kill()?
+	Kill()
 }
 
 type DataChannel struct {
-	logger       *logger.Logger
-	tmb          tomb.Tomb
-	websocket    *websocket.Websocket
-	id           string // DataChannel's ID
-	handshook    bool
-	plugin       IPlugin
+	tmb    tomb.Tomb
+	logger *logger.Logger
+	id     string // DataChannel's ID
+
+	websocket    websocket.IWebsocket
 	keysplitting IKeysplitting
-	attach       bool // bool to indicate if we are attaching to an existing datachannel
+	plugin       IPlugin
+	handshook    bool
+	// attach       bool // bool to indicate if we are attaching to an existing datachannel
 	// handshook    bool // bool to indicate if we have received a valid syn ack (initally set to false)
 
 	// channels for incoming messages
@@ -83,31 +83,17 @@ type DataChannel struct {
 	// onDeck      bzplugin.ActionWrapper
 	// lastMessage bzplugin.ActionWrapper
 	errorRecoveryAttempt int
-
-	// locks for our ondeck and lastmessage
-	// TODO: Requiring these mutexes is probably indicative of a design/architecture failure
-	// onDeckLock      sync.Mutex
-	// lastMessageLock sync.Mutex
 }
 
 func New(logger *logger.Logger,
 	id string,
 	parentTmb *tomb.Tomb, // daemon has ability to rage quit and take everything down with it
-	websocket *websocket.Websocket,
-	refreshTokenCommand string,
-	configPath string,
+	websocket websocket.IWebsocket,
+	keysplitter IKeysplitting,
 	action string,
-	actionParams []byte,
-	agentPubKey string,
+	actionParams interface{},
 	attach bool,
 ) (*DataChannel, *tomb.Tomb, error) {
-
-	ksLogger := logger.GetComponentLogger("mrzap")
-	keysplitter, err := keysplitting.New(ksLogger, agentPubKey, configPath, refreshTokenCommand)
-	if err != nil {
-		logger.Error(err)
-		return nil, &tomb.Tomb{}, err
-	}
 
 	dc := &DataChannel{
 		websocket: websocket,
@@ -115,23 +101,22 @@ func New(logger *logger.Logger,
 		id:        id,
 
 		keysplitting: keysplitter,
-		attach:       attach,
-		// handshook:    false,
-		handshook: false,
+		handshook:    false,
 
 		inputChan:   make(chan am.AgentMessage, 25),
 		ksInputChan: make(chan am.AgentMessage, 25),
 		ignoreMrZAP: false,
 
 		errorRecoveryAttempt: 0,
-
-		// onDeck:      bzplugin.ActionWrapper{},
-		// lastMessage: bzplugin.ActionWrapper{},
-		// retry:       0,
 	}
 
 	// register with websocket so datachannel can send and receive messages
 	websocket.Subscribe(id, dc)
+
+	// start our plugin
+	if err := dc.startPlugin(action, actionParams, attach); err != nil {
+		return nil, &tomb.Tomb{}, err
+	}
 
 	if !attach {
 		// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
@@ -144,15 +129,17 @@ func New(logger *logger.Logger,
 		// dc.sendSyn(action)
 	}
 
-	pluginName, err := getPluginNameFromAction(action)
-	if err != nil {
-		return nil, &tomb.Tomb{}, err
-	}
-
-	// start our plugin
-	if err := dc.startPlugin(pluginName, actionParams); err != nil {
-		return nil, &tomb.Tomb{}, err
-	}
+	// // our datachannel start message changes if we're creating a new datachannel or attaching to an old one
+	// if shellParams, ok := actionParams.(bzshell.ShellActionParams); ok && shellParams.Attach {
+	// 	logger.Infof("Sending SYN on existing datachannel %s with actions %s.", dc.id, action)
+	// 	// dc.sendSyn(action)
+	// } else {
+	// 	// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
+	// 	logger.Info("Sending request to agent to open a new datachannel")
+	// 	if err := dc.openDataChannel(action, actionParams); err != nil {
+	// 		return nil, &tomb.Tomb{}, err
+	// 	}
+	// }
 
 	dc.tmb.Go(func() error {
 		defer websocket.Unsubscribe(id) // causes decoupling from websocket
@@ -166,7 +153,7 @@ func New(logger *logger.Logger,
 			case <-parentTmb.Dying(): // daemon is dying
 				return fmt.Errorf("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
-				dc.plugin.Stop()
+				dc.plugin.Kill()
 				return nil
 			case <-dc.plugin.Done():
 
@@ -184,8 +171,7 @@ func New(logger *logger.Logger,
 					dc.logger.Error(err)
 				}
 			case <-time.After(datachannelLifetime):
-				dc.logger.Info("cleaning up stale datachannel")
-				return nil
+				return fmt.Errorf("cleaning up stale datachannel")
 			}
 		}
 	})
@@ -296,8 +282,9 @@ func (d *DataChannel) Close(reason error) {
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
 }
 
-func (d *DataChannel) openDataChannel(action string, actionParams []byte) error {
-	synMessage, err := d.keysplitting.BuildSyn(action, actionParams)
+func (d *DataChannel) openDataChannel(action string, actionParams interface{}) error {
+	actionParamsJson, _ := json.Marshal(actionParams)
+	synMessage, err := d.keysplitting.BuildSyn(action, actionParamsJson)
 	if err != nil {
 		return fmt.Errorf("error building syn: %s", err)
 	}
@@ -330,14 +317,14 @@ func (d *DataChannel) openDataChannel(action string, actionParams []byte) error 
 	return nil
 }
 
-func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams []byte) error {
+func (d *DataChannel) startPlugin(action string, actionParams interface{}, attach bool) error {
 	// start plugin based on name
-	// pluginName := parsePluginName(action)
+	pluginName := parsePluginName(action)
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
 
+	var err error
 	switch pluginName {
 	// case Kube:
-	// 	// Deserialize the action params
 	// 	var kubeParams bzkube.KubeActionParams
 	// 	if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
 	// 		return fmt.Errorf("error deserializing kube params")
@@ -345,32 +332,17 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 	// 		return fmt.Errorf("could not start kube daemon plugin: %s", err)
 	// 	}
 	case bzplugin.Db:
-		var dbParams bzdb.DbActionParams
-		if err := json.Unmarshal(actionParams, &dbParams); err != nil {
-			return fmt.Errorf("error deserializing db params")
-		} else if d.plugin, err = db.New(subLogger, dbParams); err != nil {
+		if d.plugin, err = db.New(subLogger, actionParams); err != nil {
 			return fmt.Errorf("could not start db daemon plugin: %s", err)
 		}
 	case bzplugin.Web:
-		var webParams bzweb.WebActionParams
-		if err := json.Unmarshal(actionParams, &webParams); err != nil {
-			return fmt.Errorf("error deserializing web params")
-		} else if d.plugin, err = web.New(subLogger, webParams); err != nil {
+		if d.plugin, err = web.New(subLogger, actionParams); err != nil {
 			return fmt.Errorf("could not start web daemon plugin: %s", err)
 		}
-	// case bzplugin.Shell:
-	// 	// Deserialize the action params
-	// 	var shellParams bzshell.ShellActionParams
-	// 	if err := json.Unmarshal(actionParams, &shellParams); err != nil {
-	// 		return fmt.Errorf("error deserializing actions params")
-	// 	}
-
-	// 	// start shell plugin
-	// 	if plugin, err := shell.New(&d.tmb, subLogger, shellParams, d.attach); err != nil {
-	// 		return fmt.Errorf("could not start shell daemon plugin: %s", err)
-	// 	} else {
-	// 		d.plugin = plugin
-	// 	}
+	case bzplugin.Shell:
+		if d.plugin, err = shell.New(subLogger, actionParams, attach); err != nil {
+			return fmt.Errorf("could not start shell daemon plugin: %s", err)
+		}
 	default:
 		return fmt.Errorf("unrecognized plugin: %s", pluginName)
 	}
@@ -488,7 +460,7 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) error {
 	case am.Stream:
 		return d.handleStream(agentMessage)
 	default:
-		return fmt.Errorf("unhandled Message type: %v", agentMessage.MessageType)
+		return fmt.Errorf("unhandled message type: %s", agentMessage.MessageType)
 	}
 	return nil
 }
@@ -500,15 +472,15 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 	}
 
 	// if d.ignoreMrZAP || !d.handshook {
-	if d.keysplitting.Recovering() {
-		// if we're already recovering, then ignore the error
+	switch {
+	case d.keysplitting.Recovering():
 		d.logger.Debugf("ignoring error message because we're already in recovery")
 		return nil
-	} else if d.errorRecoveryAttempt >= maxErrorRecoveryTries {
+	case d.errorRecoveryAttempt >= maxErrorRecoveryTries:
 		return fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
-	} else if !d.handshook {
+	case !d.handshook:
 		return fmt.Errorf("daemon cannot recover from an error on the initial syn")
-	} else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError {
+	case rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError:
 		// stop processing keysplitting messages until we start recovery with a syn
 		d.ignoreMrZAP = true
 
@@ -520,9 +492,32 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 			d.logger.Infof("Attempting to recover from error, attempt #%d", d.errorRecoveryAttempt)
 			return nil
 		}
-	} else {
+	default:
 		return fmt.Errorf("received fatal error from agent: %s", errMessage.Message)
 	}
+	// if d.keysplitting.Recovering() {
+	// 	// if we're already recovering, then ignore the error
+	// 	d.logger.Debugf("ignoring error message because we're already in recovery")
+	// 	return nil
+	// } else if d.errorRecoveryAttempt >= maxErrorRecoveryTries {
+	// 	return fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
+	// } else if !d.handshook {
+	// 	return fmt.Errorf("daemon cannot recover from an error on the initial syn")
+	// } else if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError {
+	// 	// stop processing keysplitting messages until we start recovery with a syn
+	// 	d.ignoreMrZAP = true
+
+	// 	if err := d.keysplitting.Recover(errMessage); err != nil {
+	// 		d.logger.Debugf("ignoring error because %s", err)
+	// 		return nil
+	// 	} else {
+	// 		d.errorRecoveryAttempt++
+	// 		d.logger.Infof("Attempting to recover from error, attempt #%d", d.errorRecoveryAttempt)
+	// 		return nil
+	// 	}
+	// } else {
+	// 	return fmt.Errorf("received fatal error from agent: %s", errMessage.Message)
+	// }
 }
 
 // 	var errMessage rrr.ErrorMessage
@@ -642,32 +637,4 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 // 		d.send(am.Keysplitting, respKSMessage)
 // 		return nil
 // 	}
-// }
-
-// func (d *DataChannel) getOnDeck() bzplugin.ActionWrapper {
-// 	d.onDeckLock.Lock()
-// 	defer d.onDeckLock.Unlock()
-
-// 	return d.onDeck
-// }
-
-// func (d *DataChannel) setOnDeck(msg bzplugin.ActionWrapper) {
-// 	d.onDeckLock.Lock()
-// 	defer d.onDeckLock.Unlock()
-
-// 	d.onDeck = msg
-// }
-
-// func (d *DataChannel) getLastMessage() bzplugin.ActionWrapper {
-// 	d.lastMessageLock.Lock()
-// 	defer d.lastMessageLock.Unlock()
-
-// 	return d.lastMessage
-// }
-
-// func (d *DataChannel) setLastMessage(msg bzplugin.ActionWrapper) {
-// 	d.lastMessageLock.Lock()
-// 	defer d.lastMessageLock.Unlock()
-
-// 	d.lastMessage = msg
 // }

@@ -20,12 +20,11 @@ const (
 )
 
 type ShellActionParams struct {
+	Attach     bool   `json:"attach"`
 	TargetUser string `json:"targetUser"`
 }
 
-type ShellOpenMessage struct {
-	TargetUser string `json:"targetUser"`
-}
+type ShellOpenMessage struct{}
 
 type ShellCloseMessage struct{}
 

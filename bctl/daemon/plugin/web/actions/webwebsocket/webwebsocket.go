@@ -155,8 +155,8 @@ func (w *WebWebsocketAction) Done() <-chan struct{} {
 	return w.doneChan
 }
 
-func (w *WebWebsocketAction) Stop() {
-	w.tmb.Kill(fmt.Errorf("stop requested by higher ups"))
+func (w *WebWebsocketAction) Kill() {
+	w.tmb.Kill(fmt.Errorf("death requested by higher ups"))
 	<-w.doneChan
 }
 

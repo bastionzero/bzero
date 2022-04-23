@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web/actions/webdial"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web/actions/webwebsocket"
@@ -20,18 +19,14 @@ type IWebDaemonAction interface {
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(Writer http.ResponseWriter, Request *http.Request) error //TODO: should not be capitals
 	Done() <-chan struct{}
-	Stop()
+	Kill()
 }
 
 type WebDaemonPlugin struct {
-	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	// keysplitting output
 	outputQueue chan plugin.ActionWrapper
-
-	// Channel for letting the datachannel know we're done
-	doneChan chan struct{}
 
 	action IWebDaemonAction
 
@@ -43,21 +38,24 @@ type WebDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(logger *logger.Logger, actionParams bzweb.WebActionParams) (*WebDaemonPlugin, error) {
-	plugin := WebDaemonPlugin{
-		logger: logger,
+func New(logger *logger.Logger, actionParams interface{}) (*WebDaemonPlugin, error) {
+	if webActionParams, ok := actionParams.(bzweb.WebActionParams); !ok {
+		return nil, fmt.Errorf("malformed webaction params")
+	} else {
+		plugin := WebDaemonPlugin{
+			logger: logger,
 
-		outputQueue: make(chan plugin.ActionWrapper, 1),
+			outputQueue: make(chan plugin.ActionWrapper, 1),
 
-		doneChan: make(chan struct{}),
+			remoteHost: webActionParams.RemoteHost,
+			remotePort: webActionParams.RemotePort,
 
-		remoteHost: actionParams.RemoteHost,
-		remotePort: actionParams.RemotePort,
+			sequenceNumber: 0,
+		}
 
-		sequenceNumber: 0,
+		return &plugin, nil
 	}
 
-	return &plugin, nil
 }
 
 func (w *WebDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
@@ -65,15 +63,18 @@ func (w *WebDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
 }
 
 func (w *WebDaemonPlugin) Done() <-chan struct{} {
-	return w.doneChan
+	if w.action != nil {
+		return w.action.Done()
+	} else {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
 }
 
-func (w *WebDaemonPlugin) Stop() {
+func (w *WebDaemonPlugin) Kill() {
 	if w.action != nil {
-		w.tmb.Kill(fmt.Errorf("we were told to stop"))
-		w.tmb.Wait()
-
-		w.action.Stop()
+		w.action.Kill()
 	}
 }
 
@@ -117,16 +118,6 @@ func (w *WebDaemonPlugin) Feed(food interface{}) error {
 		w.logger.Error(rerr)
 		return rerr
 	}
-
-	w.tmb.Go(func() error {
-		select {
-		case <-w.tmb.Dying():
-			return nil
-		case <-w.action.Done():
-			close(w.doneChan)
-			return fmt.Errorf("action closed so web plugin is closing")
-		}
-	})
 
 	w.logger.Infof("Web plugin created a %s action", string(webFood.Action))
 

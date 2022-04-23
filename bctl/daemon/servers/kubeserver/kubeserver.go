@@ -11,6 +11,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -165,16 +166,12 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 		TargetGroups: h.targetGroups,
 	}
 
-	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
-	if marshalErr != nil {
-		h.logger.Error(fmt.Errorf("error marshalling action params for kube"))
-		return nil, marshalErr
-	}
-
 	action = "kube/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey, attach); err != nil {
-		h.logger.Error(err)
-		return datachannel, err
+	ksLogger := h.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(ksLogger, h.agentPubKey, h.configPath, h.refreshTokenCommand); err != nil {
+		return nil, err
+	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, keysplitter, action, actionParams, attach); err != nil {
+		return nil, err
 	} else {
 
 		// create a function to listen to the datachannel dying and then laugh

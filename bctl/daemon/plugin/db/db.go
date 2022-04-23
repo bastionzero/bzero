@@ -5,7 +5,6 @@ import (
 	"net"
 
 	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db/actions/dial"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -20,18 +19,14 @@ type IDbDaemonAction interface {
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(lconn *net.TCPConn) error
 	Done() <-chan struct{}
-	Stop()
+	Kill()
 }
 
 type DbDaemonPlugin struct {
-	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	// outbox
 	outputQueue chan plugin.ActionWrapper
-
-	// Channel for letting the datachannel know we're done
-	doneChan chan struct{}
 
 	action IDbDaemonAction
 
@@ -39,28 +34,30 @@ type DbDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(logger *logger.Logger, actionParams bzdb.DbActionParams) (*DbDaemonPlugin, error) {
+func New(logger *logger.Logger, actionParams interface{}) (*DbDaemonPlugin, error) {
 	plugin := DbDaemonPlugin{
 		logger:         logger,
 		outputQueue:    make(chan plugin.ActionWrapper, 5),
-		doneChan:       make(chan struct{}),
 		sequenceNumber: 0,
 	}
 
 	return &plugin, nil
 }
 
-func (d *DbDaemonPlugin) Stop() {
+func (d *DbDaemonPlugin) Kill() {
 	if d.action != nil {
-		d.tmb.Kill(fmt.Errorf("we were told to stop"))
-		d.tmb.Wait()
-
-		d.action.Stop()
+		d.action.Kill()
 	}
 }
 
 func (d *DbDaemonPlugin) Done() <-chan struct{} {
-	return d.doneChan
+	if d.action != nil {
+		return d.action.Done()
+	} else {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
 }
 
 func (d *DbDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
@@ -102,16 +99,6 @@ func (d *DbDaemonPlugin) Feed(food interface{}) error {
 	default:
 		return fmt.Errorf("unrecognized db action: %v", string(dbFood.Action))
 	}
-
-	d.tmb.Go(func() error {
-		select {
-		case <-d.tmb.Dying():
-			return nil
-		case <-d.action.Done():
-			close(d.doneChan)
-			return fmt.Errorf("action closed so db plugin is closing")
-		}
-	})
 
 	d.logger.Infof("db plugin created %s action", string(dbFood.Action))
 

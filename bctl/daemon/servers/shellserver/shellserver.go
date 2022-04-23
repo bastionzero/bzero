@@ -1,11 +1,11 @@
 package shellserver
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -73,8 +73,7 @@ func StartShellServer(
 	}
 
 	// create our new datachannel
-	if _, err := shellServer.newDataChannel(string(bzshell.DefaultShell), shellServer.websocket); err == nil {
-	} else {
+	if _, err := shellServer.newDataChannel(string(bzshell.DefaultShell), shellServer.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 
@@ -108,14 +107,15 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	subLogger := ss.logger.GetDatachannelLogger(ss.dataChannelId)
 
 	// Build the action payload to send in the syn message when opening the datachannel
-	actionParams := bzshell.ShellOpenMessage{
+	actionParams := bzshell.ShellActionParams{
 		TargetUser: ss.targetUser,
 	}
-	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
 	action = "shell/" + action
-	if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, ss.refreshTokenCommand, ss.configPath, action, actionParamsMarshalled, ss.agentPubKey, attach); err != nil {
-		ss.logger.Error(err)
+	ksLogger := ss.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(ksLogger, ss.agentPubKey, ss.configPath, ss.refreshTokenCommand); err != nil {
+		return nil, err
+	} else if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, action, actionParams, attach); err != nil {
 		return nil, err
 	} else {
 

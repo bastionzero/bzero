@@ -1,12 +1,12 @@
 package dbserver
 
 import (
-	"encoding/json"
 	"errors"
 	"net"
 	"os"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -150,10 +150,12 @@ func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 		RemotePort: d.remotePort,
 		RemoteHost: d.remoteHost,
 	}
-	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
 	action = "db/" + action
-	if dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, d.refreshTokenCommand, d.configPath, action, actionParamsMarshalled, d.agentPubKey, attach); err != nil {
+	ksLogger := d.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(ksLogger, d.agentPubKey, d.configPath, d.refreshTokenCommand); err != nil {
+		return nil, err
+	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, action, actionParams, attach); err != nil {
 		return nil, err
 	} else {
 

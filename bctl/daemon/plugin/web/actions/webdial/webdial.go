@@ -61,8 +61,8 @@ func (w *WebDialAction) Done() <-chan struct{} {
 	return w.doneChan
 }
 
-func (w *WebDialAction) Stop() {
-	w.logger.Info("Stopping")
+func (w *WebDialAction) Kill() {
+	w.logger.Info("we were told to die")
 	close(w.stopChan)
 	<-w.doneChan
 }
