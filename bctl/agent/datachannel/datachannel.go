@@ -98,9 +98,10 @@ func New(parentTmb *tomb.Tomb,
 				datachannel.plugin.Kill()
 				return nil
 			case <-datachannel.plugin.Done():
-				// FIXME: on this side, I do think this strategy is legit
+				// LUCIE: on this side, I do think this strategy is legit
 				select {
-				case agentMessage := <-datachannel.outputChan: // send messages
+				// LUCIE: do we only want to send keysplitting messages?
+				case agentMessage := <-datachannel.outputChan:
 					// Push message to websocket channel output
 					datachannel.websocket.Send(agentMessage)
 				case <-time.After(1 * time.Second):
