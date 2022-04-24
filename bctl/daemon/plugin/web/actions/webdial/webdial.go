@@ -68,17 +68,13 @@ func (w *WebDialAction) Kill() {
 }
 
 func (w *WebDialAction) Start(writer http.ResponseWriter, request *http.Request) error {
-	// Build the action payload to start the web action dial
-	payload := bzwebdial.WebDialActionPayload{
-		RequestId:            w.requestId,
-		StreamMessageVersion: smsg.CurrentSchema,
-	}
-
 	// Send payload to plugin output queue
-	payloadBytes, _ := json.Marshal(payload)
 	w.outputChan <- plugin.ActionWrapper{
-		Action:        string(bzwebdial.WebDialStart),
-		ActionPayload: payloadBytes,
+		Action: string(bzwebdial.WebDialStart),
+		ActionPayload: bzwebdial.WebDialActionPayload{
+			RequestId:            w.requestId,
+			StreamMessageVersion: smsg.CurrentSchema,
+		},
 	}
 
 	return w.handleHttpRequest(writer, request)
@@ -114,15 +110,12 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 			w.logger.Info("HTTP request cancelled. Sending interrupt signal to agent.")
 
-			returnPayload := bzwebdial.WebInterruptActionPayload{
-				RequestId: w.requestId,
-			}
-			payloadBytes, _ := json.Marshal(returnPayload)
-
 			// send the agent our interrupt message
 			w.outputChan <- plugin.ActionWrapper{
-				Action:        string(bzwebdial.WebDialInterrupt),
-				ActionPayload: payloadBytes,
+				Action: string(bzwebdial.WebDialInterrupt),
+				ActionPayload: bzwebdial.WebInterruptActionPayload{
+					RequestId: w.requestId,
+				},
 			}
 
 			// now that we've recieved the interrupt, we should process any more stream message from the agent
@@ -193,15 +186,12 @@ func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, h
 		} else if err != nil {
 			w.logger.Errorf("error chunking http request: %s", err)
 
-			returnPayload := bzwebdial.WebInterruptActionPayload{
-				RequestId: w.requestId,
-			}
-			payloadBytes, _ := json.Marshal(returnPayload)
-
 			// send the agent our interrupt message
 			w.outputChan <- plugin.ActionWrapper{
-				Action:        string(bzwebdial.WebDialInterrupt),
-				ActionPayload: payloadBytes,
+				Action: string(bzwebdial.WebDialInterrupt),
+				ActionPayload: bzwebdial.WebInterruptActionPayload{
+					RequestId: w.requestId,
+				},
 			}
 			return
 		}
@@ -218,10 +208,9 @@ func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, h
 		}
 
 		// Send payload to plugin output queue
-		dataInPayloadBytes, _ := json.Marshal(dataInPayload)
 		w.outputChan <- plugin.ActionWrapper{
 			Action:        string(bzwebdial.WebDialInput),
-			ActionPayload: dataInPayloadBytes,
+			ActionPayload: dataInPayload,
 		}
 
 		sequenceNumber++

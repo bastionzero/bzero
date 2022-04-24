@@ -135,10 +135,9 @@ func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, re
 		Endpoint:             p.endpoint,
 		CommandBeingRun:      p.commandBeingRun,
 	}
-	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{
 		Action:        string(portforward.StartPortForward),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 
 	// Now wait for the ready message, incase we need to bubble up an error to the user
@@ -254,10 +253,9 @@ func (p *PortForwardAction) sendCloseRequestMessage(portforwardingRequestId stri
 		LogId:                p.logId,
 		PortForwardRequestId: portforwardingRequestId,
 	}
-	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{
 		Action:        string(portforward.StopPortForwardRequest),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 }
 
@@ -267,10 +265,9 @@ func (p *PortForwardAction) sendCloseMessage() {
 		RequestId: p.requestId,
 		LogId:     p.logId,
 	}
-	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{
 		Action:        string(portforward.StopPortForward),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 }
 
@@ -306,10 +303,9 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 					Data:                 buf[:n],
 					PortForwardRequestId: portforwardSession.requestID,
 				}
-				payloadBytes, _ := json.Marshal(payload)
 				p.outputChan <- plugin.ActionWrapper{
 					Action:        string(portforward.ErrorPortForward),
-					ActionPayload: payloadBytes,
+					ActionPayload: payload,
 				}
 			}
 		}
@@ -342,10 +338,9 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 					PortForwardRequestId: portforwardSession.requestID,
 					PodPort:              remotePort,
 				}
-				payloadBytes, _ := json.Marshal(payload)
 				p.outputChan <- plugin.ActionWrapper{
 					Action:        string(portforward.DataInPortForward),
-					ActionPayload: payloadBytes,
+					ActionPayload: payload,
 				}
 			}
 		}

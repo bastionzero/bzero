@@ -186,15 +186,12 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 				return
 			case <-closeChan:
 				// Send message to agent to close the stream
-				payload := exec.KubeExecStopActionPayload{
-					RequestId: e.requestId,
-					LogId:     e.logId,
-				}
-
-				payloadBytes, _ := json.Marshal(payload)
 				e.outputChan <- plugin.ActionWrapper{
-					Action:        string(exec.ExecStop),
-					ActionPayload: payloadBytes,
+					Action: string(exec.ExecStop),
+					ActionPayload: exec.KubeExecStopActionPayload{
+						RequestId: e.requestId,
+						LogId:     e.logId,
+					},
 				}
 
 				return
@@ -206,47 +203,38 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 }
 
 func wrapStartPayload(isTty bool, requestId string, logId string, command []string, endpoint string) plugin.ActionWrapper {
-	payload := exec.KubeExecStartActionPayload{
-		RequestId:            requestId,
-		StreamMessageVersion: smsg.CurrentSchema,
-		LogId:                logId,
-		IsTty:                isTty,
-		Command:              command,
-		Endpoint:             endpoint,
-	}
-
-	payloadBytes, _ := json.Marshal(payload)
 	return plugin.ActionWrapper{
-		Action:        string(exec.ExecStart),
-		ActionPayload: payloadBytes,
+		Action: string(exec.ExecStart),
+		ActionPayload: exec.KubeExecStartActionPayload{
+			RequestId:            requestId,
+			StreamMessageVersion: smsg.CurrentSchema,
+			LogId:                logId,
+			IsTty:                isTty,
+			Command:              command,
+			Endpoint:             endpoint,
+		},
 	}
 }
 
 func wrapResizePayload(requestId string, logId string, width uint16, height uint16) plugin.ActionWrapper {
-	payload := exec.KubeExecResizeActionPayload{
-		RequestId: requestId,
-		LogId:     logId,
-		Width:     width,
-		Height:    height,
-	}
-
-	payloadBytes, _ := json.Marshal(payload)
 	return plugin.ActionWrapper{
-		Action:        string(exec.ExecResize),
-		ActionPayload: payloadBytes,
+		Action: string(exec.ExecResize),
+		ActionPayload: exec.KubeExecResizeActionPayload{
+			RequestId: requestId,
+			LogId:     logId,
+			Width:     width,
+			Height:    height,
+		},
 	}
 }
 
 func wrapStdinPayload(requestId string, logId string, stdin []byte) plugin.ActionWrapper {
-	payload := exec.KubeStdinActionPayload{
-		RequestId: requestId,
-		LogId:     logId,
-		Stdin:     stdin,
-	}
-
-	payloadBytes, _ := json.Marshal(payload)
 	return plugin.ActionWrapper{
-		Action:        string(exec.ExecInput),
-		ActionPayload: payloadBytes,
+		Action: string(exec.ExecInput),
+		ActionPayload: exec.KubeStdinActionPayload{
+			RequestId: requestId,
+			LogId:     logId,
+			Stdin:     stdin,
+		},
 	}
 }

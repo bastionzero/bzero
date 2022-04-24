@@ -1,7 +1,6 @@
 package restapi
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -75,10 +74,9 @@ func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 		CommandBeingRun: r.commandBeingRun,
 	}
 	// send action payload to plugin to be sent to agent
-	payloadBytes, _ := json.Marshal(payload)
 	r.outputChan <- plugin.ActionWrapper{
 		Action:        kuberest.RestRequest,
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 
 	// wait for response to our sent message
@@ -87,8 +85,8 @@ func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 		return nil
 	case rsp := <-r.inputChan:
 		// unmarshall response in rest api payload object
-		var apiResponse kuberest.KubeRestApiActionResponsePayload
-		if err := json.Unmarshal(rsp.ActionPayload, &apiResponse); err != nil {
+		apiResponse, ok := rsp.ActionPayload.(kuberest.KubeRestApiActionResponsePayload)
+		if !ok {
 			rerr := fmt.Errorf("could not unmarshal Action Response Payload: %s", err)
 			r.logger.Error(rerr)
 			return rerr

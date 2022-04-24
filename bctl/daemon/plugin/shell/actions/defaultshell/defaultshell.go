@@ -2,7 +2,6 @@ package defaultshell
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -244,10 +243,9 @@ func (d *DefaultShell) sendTerminalSize() {
 
 func (d *DefaultShell) sendOutputMessage(action bzshell.ShellSubAction, payload interface{}) {
 	// Send payload to plugin output queue
-	payloadBytes, _ := json.Marshal(payload)
 	d.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 }
 

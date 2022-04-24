@@ -181,10 +181,7 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 				case <-h.tmb.Dying():
 					datachannel.Close(errors.New("kube server closing"))
 					return
-				case <-dcTmb.Dying():
-					// Wait until everything is dead and any close processes are sent before killing the datachannel
-					dcTmb.Wait()
-
+				case <-dcTmb.Dead():
 					// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
 					if err := dcTmb.Err(); err != nil {
 						h.exitMessage = dcTmb.Err().Error()

@@ -196,10 +196,7 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 				case <-w.tmb.Dying():
 					datachannel.Close(errors.New("web server closing"))
 					return
-				case <-dcTmb.Dying():
-					// Wait until everything is dead and any close processes are sent before killing the datachannel
-					dcTmb.Wait()
-
+				case <-dcTmb.Dead():
 					// notify agent to close the datachannel
 					w.logger.Info("Sending DataChannel Close")
 					cdMessage := am.AgentMessage{

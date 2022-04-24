@@ -96,10 +96,9 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	}
 
 	// Send payload to plugin output queue
-	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
 		Action:        string(stream.StreamStart),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 
 	// Wait for our initial message to determine what headers to use
@@ -153,10 +152,9 @@ outOfOrderMessageHandler:
 				LogId:     s.logId,
 			}
 
-			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
 				Action:        string(stream.StreamStop),
-				ActionPayload: payloadBytes,
+				ActionPayload: payload,
 			}
 
 			return nil

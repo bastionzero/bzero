@@ -68,10 +68,9 @@ func (w *WebWebsocketAction) Start(writer http.ResponseWriter, request *http.Req
 	}
 
 	// Send payload to plugin output queue
-	payloadBytes, _ := json.Marshal(payload)
 	w.outputChan <- plugin.ActionWrapper{
 		Action:        string(webwebsocket.Start),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 
 	return w.handleWebsocketRequest(writer, request)
@@ -115,18 +114,12 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 		if err != nil {
 			w.logger.Infof("Read failed: %s", err)
 
-			// Build our stop message
-			payload := webwebsocket.WebWebsocketDaemonStopActionPayload{
-				RequestId: w.requestId,
-			}
-
-			// Send payload to plugin output queue
-			payloadBytes, _ := json.Marshal(payload)
-
 			// Let the agent know to close the websocket
 			w.outputChan <- plugin.ActionWrapper{
-				Action:        string(webwebsocket.DaemonStop),
-				ActionPayload: payloadBytes,
+				Action: string(webwebsocket.DaemonStop),
+				ActionPayload: webwebsocket.WebWebsocketDaemonStopActionPayload{
+					RequestId: w.requestId,
+				},
 			}
 			break
 		}
@@ -134,18 +127,14 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 		// Convert the message to a string
 		messageBase64 := base64.StdEncoding.EncodeToString(message)
 
-		// Send the input along with mt to our agent
-		payload := webwebsocket.WebWebsocketDataInActionPayload{
-			RequestId:   w.requestId,
-			Message:     messageBase64,
-			MessageType: mt,
-		}
-
 		// Send payload to plugin output queue
-		payloadBytes, _ := json.Marshal(payload)
 		w.outputChan <- plugin.ActionWrapper{
-			Action:        string(webwebsocket.DataIn),
-			ActionPayload: payloadBytes,
+			Action: string(webwebsocket.DataIn),
+			ActionPayload: webwebsocket.WebWebsocketDataInActionPayload{
+				RequestId:   w.requestId,
+				Message:     messageBase64,
+				MessageType: mt,
+			},
 		}
 	}
 	return nil

@@ -126,10 +126,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 				case <-ss.tmb.Dying():
 					dc.Close(errors.New("shell server exiting...closing datachannel"))
 					return
-				case <-dcTmb.Dying():
-					// Wait until everything is dead and any close processes are sent before killing the datachannel
-					dcTmb.Wait()
-
+				case <-dcTmb.Dead():
 					errorCode := 1
 					os.Exit(errorCode)
 				}
