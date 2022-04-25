@@ -37,7 +37,7 @@ phases:
       - ssh-add ~/.ssh/*.pem
       - git submodule update --init --recursive --depth 50
       # Install Bzero-QA
-      - git clone git@github.com:bastionzero/cwc-infra.git --branch feat/testing-overhaul /cwc-infra/
+      - git clone git@github.com:bastionzero/cwc-infra.git --branch develop /cwc-infra/
       - pip3 install -e /cwc-infra/Bzero-Common/. && pip3 install -e /cwc-infra/Bzero-QA/.
       # Install gocov-xml to push our coverage reports
       - go install github.com/axw/gocov/gocov@latest

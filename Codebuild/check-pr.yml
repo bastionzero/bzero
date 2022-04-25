@@ -25,7 +25,7 @@ phases:
       - eval `ssh-agent -s`
       - ssh-add ~/.ssh/*.pem
       # Install Bzero-QA
-      - git clone git@github.com:bastionzero/cwc-infra.git --branch feat/testing-overhaul /cwc-infra/
+      - git clone git@github.com:bastionzero/cwc-infra.git --branch develop /cwc-infra/
       - pip3 install -e /cwc-infra/Bzero-Common/. && pip3 install -e /cwc-infra/Bzero-QA/.
   build:
     commands:
