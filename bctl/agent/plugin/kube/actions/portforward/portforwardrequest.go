@@ -42,7 +42,7 @@ func createPortForwardRequest(
 	logId string,
 	portForwardRequestId string,
 ) *PortForwardRequest {
-	p := &PortForwardRequest{
+	return &PortForwardRequest{
 		logger:               logger,
 		tmb:                  tmb,
 		streamOutputChan:     streamOutputChan,
@@ -56,8 +56,6 @@ func createPortForwardRequest(
 		portforwardErrorInChannel: make(chan []byte),
 		doneChan:                  make(chan bool),
 	}
-
-	return p
 }
 
 func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string, errorHeaders map[string]string, podPort int64, streamConn httpstream.Connection) error {
