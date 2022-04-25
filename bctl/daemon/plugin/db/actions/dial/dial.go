@@ -17,7 +17,7 @@ import (
 
 const (
 	chunkSize     = 64 * 1024
-	writeDeadline = 5 // In ms
+	writeDeadline = 5 * time.Millisecond
 )
 
 type DialAction struct {
@@ -89,8 +89,9 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
 							// Set a deadline for the write so we don't block forever
-							lconn.SetWriteDeadline(time.Now().Add(time.Millisecond * writeDeadline))
+							lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
 							if _, err := lconn.Write(contentBytes); err != nil {
+								d.logger.Errorf("Error writing to local TCP connection: %s", err)
 								d.closed = true
 								return
 							}
