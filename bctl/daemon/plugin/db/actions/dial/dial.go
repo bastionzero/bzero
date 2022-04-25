@@ -90,8 +90,7 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 						} else {
 							// Set a deadline for the write so we don't block forever
 							lconn.SetWriteDeadline(time.Now().Add(time.Millisecond * writeDeadline))
-							_, err := lconn.Write(contentBytes)
-							if err != nil {
+							if _, err := lconn.Write(contentBytes); err != nil {
 								d.closed = true
 								return
 							}
