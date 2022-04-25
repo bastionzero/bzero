@@ -1,0 +1,76 @@
+# spec:
+# https://docs.aws.amazon.com/codebuild/latest/userguide/build-spec-ref.html
+version: 0.2
+env:
+  variables:
+    TZ: "America/New_York date"
+    ReleaseDir: "release"
+    AWS_ENV: "dev"
+    BZERO_IN_CI: 1
+  parameter-store:
+    # The SSH RSA Key used by our machine user
+    build_ssh_key: "/cwc/ssh/rolandfrank"
+    BZERO_AGENT_VERSION: /webshell/development/bzero-agent-version
+    BCTL_QUICKSTART_VERSION: /development/infra/bctl-quickstart-version
+  secrets-manager:
+    DO_API_KEY: development/infra/system-test-secret:DO_API_KEY
+    GITHUB_API_KEY: arn:aws:secretsmanager:us-east-1:238681891460:secret:development/infra/roleandfrank-github-api-key-1Cok4j:Token
+  git-credential-helper: yes
+phases:
+  install:
+    runtime-versions:
+      nodejs: 14
+    # due to a limitation of AWS CodePipeline not including the submodules when
+    # cloning the source repo, we'll use the workaround from here: https://stackoverflow.com/a/54318204
+    commands:
+      - echo Install started on `date`
+      # Add the "machine user's" ssh key and activate it - this allows us to get private (sub) repositories
+      - mkdir -p ~/.ssh                         # Ensure the .ssh directory exists
+      - echo "$build_ssh_key" > ~/.ssh/ssh_key  # Save the machine user's private key
+      - chmod 600 ~/.ssh/ssh_key                # Adjust the private key permissions (avoids a critical error)
+      - eval "$(ssh-agent -s)"                  # Initialize the ssh agent
+      - ssh-add ~/.ssh/ssh_key                  # Add the machine user's key to the ssh "keychain"
+      # SSH Credentials have been set up. Check for a .git directory to determine if we need to set up our git package
+      - |
+        if [ ! -d ".git" ]; then
+          git init                                              # Initialize Git
+          git remote add origin "$remote_origin"                # Add the remote origin so we can fetch
+          git fetch --quiet                                     # Get all the things
+          git config --global advice.detachedHead false         # turn the detached message off
+          git checkout -f "$CODEBUILD_RESOLVED_SOURCE_VERSION"  # Checkout the specific commit we are building
+        fi
+      # Now that setup is complete, get submodules
+      - git submodule init
+      - git submodule update --recursive
+      # Install Bzero-QA
+      - git clone git@github.com:bastionzero/cwc-infra.git  --branch develop /cwc-infra/
+      - pip3 install -e /cwc-infra/Bzero-Common/. && pip3 install -e /cwc-infra/Bzero-QA/.
+      # Install npm dependencies
+      - apt-get update -y && apt-get install build-essential cmake -y
+      # We need to 1.16 and this isnt in yum
+      - wget https://dl.google.com/go/go1.16.4.linux-amd64.tar.gz -q
+      - tar -C /usr/local -xzf go1.16.4.linux-amd64.tar.gz
+      - echo 'export PATH=/usr/local/go/bin:$PATH' >>~/.bash_profile
+      - export PATH=/usr/local/go/bin:$PATH
+      # Update npm 
+      - npm install -g npm@7
+      - # Install system-test dependencies
+      - # Install helm (ref: https://helm.sh/docs/intro/install/#from-apt-debianubuntu)
+      - curl https://baltocdn.com/helm/signing.asc | apt-key add -
+      - apt-get install apt-transport-https -y
+      - echo "deb https://baltocdn.com/helm/stable/debian/ all main" | tee /etc/apt/sources.list.d/helm-stable-debian.list
+      - apt-get update -y && apt-get install helm
+      # Install docker
+      - apt-get install -y docker
+      # Install docker buildx binary
+      # Ref: https://stackoverflow.com/questions/64749850/how-to-build-arm-64-docker-image-with-yaml-in-aws-for-graviton2-processors
+      - wget https://github.com/docker/buildx/releases/download/v0.5.1/buildx-v0.5.1.linux-amd64 -q
+      - chmod a+x buildx-v0.5.1.linux-amd64
+      - mkdir -p ~/.docker/cli-plugins
+      - mv buildx-v0.5.1.linux-amd64 ~/.docker/cli-plugins/docker-buildx
+      # Authenticate our docker with our doctl API token
+      - echo "$DO_API_KEY" | docker login --username "$DO_API_KEY" --password-stdin registry.digitalocean.com
+  build:
+    commands:
+      - echo Build started `date`
+      - bzero-qa test -sys-tests --allSuites

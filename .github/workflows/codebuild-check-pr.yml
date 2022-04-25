@@ -1,0 +1,29 @@
+name: PR Check PR
+
+on:
+  pull_request:
+    branches:
+      # Run CI on PRs to master, develop or feature branches
+      - master
+      - develop
+      - 'feat/**'
+
+jobs:
+  build:
+    name: PR Check PR
+    runs-on: ubuntu-latest
+    steps:
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.CI_AWS_ACCESS_KEY_SECRET }}
+        aws-region: us-east-1
+    - name: Run CodeBuild
+      uses: aws-actions/aws-codebuild-run-build@v1.0.3
+      with:
+        project-name: check-pr
+        env-vars-for-codebuild: |
+          version_check_branch
+      env:
+        version_check_branch: ${{ github.base_ref }}
