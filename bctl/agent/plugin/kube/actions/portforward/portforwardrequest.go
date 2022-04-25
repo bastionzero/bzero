@@ -28,9 +28,9 @@ type PortForwardRequest struct {
 	portForwardRequestId string
 
 	// To send data/error to our portforward sessions
-	portforwardDataInChannel  chan []byte
-	portforwardErrorInChannel chan []byte
-	doneChan                  chan bool // Done channel so the go routines can communicate with eachother
+	dataInChannel  chan []byte
+	errorInChannel chan []byte
+	doneChan       chan bool // Done channel so the go routines can communicate with eachother
 }
 
 func createPortForwardRequest(
@@ -52,9 +52,9 @@ func createPortForwardRequest(
 		logId:                logId,
 		portForwardRequestId: portForwardRequestId,
 
-		portforwardDataInChannel:  make(chan []byte),
-		portforwardErrorInChannel: make(chan []byte),
-		doneChan:                  make(chan bool),
+		dataInChannel:  make(chan []byte),
+		errorInChannel: make(chan []byte),
+		doneChan:       make(chan bool),
 	}
 }
 
@@ -99,7 +99,7 @@ func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string
 				errorStream.Close()
 				dataStream.Close()
 				return
-			case dataInMessage := <-p.portforwardDataInChannel:
+			case dataInMessage := <-p.dataInChannel:
 				// Make this request locally, and then return that info to the user
 				if _, err := io.Copy(dataStream, bytes.NewReader(dataInMessage)); err != nil {
 					p.logger.Error(fmt.Errorf("error writing to data stream: %s", err))
@@ -107,7 +107,7 @@ func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string
 					dataStream.Close()
 					return
 				}
-			case errorInMessage := <-p.portforwardErrorInChannel:
+			case errorInMessage := <-p.errorInChannel:
 				// Make this request locally, and then return that info to the user
 				if _, err := io.Copy(errorStream, bytes.NewReader(errorInMessage)); err != nil {
 					p.logger.Error(fmt.Errorf("error writing to error stream: %s", err))
