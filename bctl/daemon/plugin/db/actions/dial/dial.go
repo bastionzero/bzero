@@ -17,7 +17,7 @@ import (
 
 const (
 	chunkSize     = 64 * 1024
-	writeDeadline = 5 * time.Millisecond
+	writeDeadline = 5 * time.Second
 )
 
 type DialAction struct {
