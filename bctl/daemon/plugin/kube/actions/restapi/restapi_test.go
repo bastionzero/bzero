@@ -32,7 +32,7 @@ var _ = Describe("Daemon RestApi action", func() {
 	receiveData := "receive data"
 	urlPath := "test-path"
 
-	Describe("Receiving a successful API response", func() {
+	Context("Receiving a successful API response", func() {
 		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 		writer := tests.MockResponseWriter{}
 		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
@@ -42,7 +42,7 @@ var _ = Describe("Daemon RestApi action", func() {
 		It("sends the correct RestApi payload to the agent, writes the API response to the user, and returns without error", func() {
 			go func() {
 				reqMessage := <-outputChan
-				Expect(string(kuberest.RestRequest)).To(Equal(string(kuberest.RestRequest)))
+				Expect(string(reqMessage.Action)).To(Equal(string(kuberest.RestRequest)))
 
 				// payload should contain the user's request
 				var payload kuberest.KubeRestApiActionPayload
@@ -70,7 +70,7 @@ var _ = Describe("Daemon RestApi action", func() {
 		})
 	})
 
-	Describe("Receiving an API error", func() {
+	Context("Receiving an API error", func() {
 		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 		writer := tests.MockResponseWriter{}
 		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
