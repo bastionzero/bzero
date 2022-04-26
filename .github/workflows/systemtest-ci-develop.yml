@@ -4,6 +4,7 @@ on:
     branches:
       # Run System Tests on PRs to develop or PRs to feature branches (should be based on develop)
       - master
+      - develop
       - "feat/**"
 jobs:
   build:
