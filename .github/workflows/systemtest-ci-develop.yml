@@ -4,8 +4,8 @@ on:
     branches:
       # Run System Tests on PRs to develop or PRs to feature branches (should be based on develop)
       - master
+      - develop
       - "feat/**"
-      - "fix/**"
 jobs:
   build:
     name: System Test Develop Branch CI (cloud-dev.bastionzero.com)
