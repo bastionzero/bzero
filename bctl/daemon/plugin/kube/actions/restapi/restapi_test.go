@@ -2,32 +2,27 @@ package restapi
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net/http"
-	"os"
 	"testing"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
 
-func TestMain(m *testing.M) {
-	flag.Parse()
-
-	exitCode := m.Run()
-
-	// Exit
-	os.Exit(exitCode)
+func TestRestApi(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Books Suite")
 }
 
-func TestRestApiOK(t *testing.T) {
-	assert := assert.New(t)
+var _ = Describe("Daemon RestApi action", func() {
 	var tmb tomb.Tomb
 	logger := logger.MockLogger()
 	requestId := "rid"
@@ -37,95 +32,78 @@ func TestRestApiOK(t *testing.T) {
 	receiveData := "receive data"
 	urlPath := "test-path"
 
-	request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+	Describe("Receiving a successful API response", func() {
+		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+		writer := tests.MockResponseWriter{}
+		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
+		r, outputChan := New(logger, requestId, logId, command)
 
-	writer := tests.MockResponseWriter{}
-	writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
+		// NOTE: because Start() doesn't return until its work is done, we can't make extensive use of the DSL
+		It("sends the correct RestApi payload to the agent, writes the API response to the user, and returns without error", func() {
+			go func() {
+				reqMessage := <-outputChan
+				Expect(string(kuberest.RestRequest)).To(Equal(string(kuberest.RestRequest)))
 
-	t.Logf("Test that we can create a new RestApi action")
-	r, outputChan := New(logger, requestId, logId, command)
+				// payload should contain the user's request
+				var payload kuberest.KubeRestApiActionPayload
+				err := json.Unmarshal(reqMessage.ActionPayload, &payload)
+				Expect(err).To(BeNil())
+				Expect(payload.Body).To(Equal(sendData))
 
-	// need a goroutine because Start won't return until we've received the message
-	go func() {
-		reqMessage := <-outputChan
+				payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
+					Headers:    make(map[string][]string),
+					Content:    []byte(receiveData),
+					StatusCode: http.StatusOK,
+				})
 
-		t.Logf("Test that it sends a RestApi payload to the agent")
-		assert.Equal(string(kuberest.RestRequest), reqMessage.Action)
-		var payload kuberest.KubeRestApiActionPayload
-		err := json.Unmarshal(reqMessage.ActionPayload, &payload)
-		assert.Nil(err)
-		assert.Equal(sendData, payload.Body)
-		assert.Equal(command, payload.CommandBeingRun)
-		assert.Equal(requestId, payload.RequestId)
-		assert.Equal(logId, payload.LogId)
+				r.ReceiveKeysplitting(plugin.ActionWrapper{
+					ActionPayload: payloadBytes,
+				})
 
-		payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
-			Headers:    make(map[string][]string),
-			Content:    []byte(receiveData),
-			StatusCode: http.StatusOK,
+				// this checks that the Write function was called as expected
+				time.Sleep(1 * time.Second)
+				writer.AssertExpectations(GinkgoT())
+			}()
+
+			err := r.Start(&tmb, &writer, &request)
+			Expect(err).To(BeNil())
 		})
+	})
 
-		t.Logf("Test that it writes out a response to the user")
-		r.ReceiveKeysplitting(plugin.ActionWrapper{
-			ActionPayload: payloadBytes,
+	Describe("Receiving an API error", func() {
+		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+		writer := tests.MockResponseWriter{}
+		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
+		writer.On("Header").Return(make(map[string][]string))
+		writer.On("WriteHeader", http.StatusInternalServerError).Return()
+		r, outputChan := New(logger, requestId, logId, command)
+
+		// NOTE: because Start() doesn't return until its work is done, we can't make extensive use of the DSL
+		It("sends the correct RestApi payload to the agent, writes the error to the user, and returns the error", func() {
+			go func() {
+				// we can ignore this since we're not testing it
+				<-outputChan
+
+				payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
+					Headers: map[string][]string{
+						"Content-Length": {"12"},
+						"Origin":         {"val1", "val2"},
+					},
+					Content:    []byte(receiveData),
+					StatusCode: http.StatusNotFound,
+				})
+
+				r.ReceiveKeysplitting(plugin.ActionWrapper{
+					ActionPayload: payloadBytes,
+				})
+
+				// this checks that the Write function was called as expected
+				time.Sleep(1 * time.Second)
+				writer.AssertExpectations(GinkgoT())
+			}()
+
+			err := r.Start(&tmb, &writer, &request)
+			Expect(err).To(Equal(fmt.Errorf("request failed with status code %v: %v", http.StatusNotFound, receiveData)))
 		})
-
-		// give it time to process
-		time.Sleep(1 * time.Second)
-		writer.AssertExpectations(t)
-	}()
-
-	t.Logf("Test that we can start the action")
-	err := r.Start(&tmb, &writer, &request)
-	assert.Nil(err)
-}
-
-func TestRestApiNotFound(t *testing.T) {
-	assert := assert.New(t)
-	var tmb tomb.Tomb
-	logger := logger.MockLogger()
-	requestId := "rid"
-	logId := "lid"
-	command := "get pods"
-	sendData := "send data"
-	receiveData := "not found"
-	urlPath := "test-path"
-
-	t.Logf("Test that we can create a new RestApi action")
-	r, outputChan := New(logger, requestId, logId, command)
-
-	request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
-
-	writer := tests.MockResponseWriter{}
-	writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
-	writer.On("Header").Return(make(map[string][]string))
-	writer.On("WriteHeader", http.StatusInternalServerError).Return()
-
-	// need a goroutine because Start won't return until we've received the message
-	go func() {
-		// can ignore this since we're not testing it
-		<-outputChan
-
-		payloadBytes, _ := json.Marshal(kuberest.KubeRestApiActionResponsePayload{
-			Headers: map[string][]string{
-				"Content-Length": {"12"},
-				"Origin":         {"val1", "val2"},
-			},
-			Content:    []byte(receiveData),
-			StatusCode: http.StatusNotFound,
-		})
-
-		r.ReceiveKeysplitting(plugin.ActionWrapper{
-			ActionPayload: payloadBytes,
-		})
-
-		// give it time to process
-		time.Sleep(1 * time.Second)
-		writer.AssertExpectations(t)
-	}()
-
-	t.Logf("Test that we can start the action")
-	err := r.Start(&tmb, &writer, &request)
-	t.Logf("Test that it returns an error if it receives one from the agent")
-	assert.Equal(fmt.Errorf("request failed with status code %v: %v", http.StatusNotFound, receiveData), err)
-}
+	})
+})
