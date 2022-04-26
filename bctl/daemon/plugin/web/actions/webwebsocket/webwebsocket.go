@@ -110,8 +110,9 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 
 	// Continuosly read
 	for {
-		mt, message, err := conn.ReadMessage()
-		if err != nil {
+		if mt, message, err := conn.ReadMessage(); w.tmb.Err() != tomb.ErrStillAlive {
+			return nil
+		} else if err != nil {
 			w.logger.Infof("Read failed: %s", err)
 
 			// Let the agent know to close the websocket
@@ -122,19 +123,19 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 				},
 			}
 			break
-		}
+		} else {
+			// Convert the message to a string
+			messageBase64 := base64.StdEncoding.EncodeToString(message)
 
-		// Convert the message to a string
-		messageBase64 := base64.StdEncoding.EncodeToString(message)
-
-		// Send payload to plugin output queue
-		w.outputChan <- plugin.ActionWrapper{
-			Action: string(webwebsocket.DataIn),
-			ActionPayload: webwebsocket.WebWebsocketDataInActionPayload{
-				RequestId:   w.requestId,
-				Message:     messageBase64,
-				MessageType: mt,
-			},
+			// Send payload to plugin output queue
+			w.outputChan <- plugin.ActionWrapper{
+				Action: string(webwebsocket.DataIn),
+				ActionPayload: webwebsocket.WebWebsocketDataInActionPayload{
+					RequestId:   w.requestId,
+					Message:     messageBase64,
+					MessageType: mt,
+				},
+			}
 		}
 	}
 	return nil

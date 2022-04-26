@@ -15,7 +15,6 @@ import (
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IDbDaemonAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
 	Start(lconn *net.TCPConn) error
 	Done() <-chan struct{}

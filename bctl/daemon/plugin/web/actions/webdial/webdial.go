@@ -30,9 +30,6 @@ type WebDialAction struct {
 	// done channel for letting the plugin know we're done
 	doneChan chan struct{}
 
-	// channel for telling the action to stop
-	stopChan chan struct{}
-
 	// keep track of our expected streams
 	expectedSequenceNumber int
 	streamMessages         map[int]smsg.StreamMessage
@@ -63,8 +60,7 @@ func (w *WebDialAction) Done() <-chan struct{} {
 
 func (w *WebDialAction) Kill() {
 	w.logger.Info("we were told to die")
-	close(w.stopChan)
-	<-w.doneChan
+	close(w.doneChan)
 }
 
 func (w *WebDialAction) Start(writer http.ResponseWriter, request *http.Request) error {
@@ -90,24 +86,17 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 
 	// First extract the headers out of the request
 	headers := bzhttp.GetHeaders(request.Header)
+	headerSet := false
 
 	// Send our request, in chunks if the body > chunksize
 	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
 
-	processInput := true
-	headerSet := false
-
 	// Listen to stream messages coming from bastion, and forward to our local connection
 	for {
 		select {
-		case <-w.stopChan:
+		case <-w.doneChan:
 			return nil
 		case <-request.Context().Done():
-			// only send one interrupt message to the agent
-			if !processInput {
-				continue
-			}
-
 			w.logger.Info("HTTP request cancelled. Sending interrupt signal to agent.")
 
 			// send the agent our interrupt message
@@ -118,18 +107,8 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				},
 			}
 
-			// now that we've recieved the interrupt, we should process any more stream message from the agent
-			// but the agent has been sending us messages in the meantime and we need to quietly consume and ignore those
-			// that's why we stop processing input (processInput = false) and only return once we recieve the ack
-			// for our interrupt message
-			processInput = false
-
 			return nil
 		case data := <-w.streamInputChan:
-			if !processInput {
-				continue
-			}
-
 			// may have gotten an old-fashioned or newfangled message type, depending on what we asked for
 			if data.Type == smsg.WebStream || data.Type == smsg.WebStreamEnd || data.Type == smsg.Stream {
 				w.streamMessages[data.SequenceNumber] = data
@@ -215,9 +194,6 @@ func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, h
 
 		sequenceNumber++
 	}
-}
-
-func (w *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
 }
 
 func (w *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {

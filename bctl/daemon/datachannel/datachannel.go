@@ -264,25 +264,20 @@ func (d *DataChannel) startPlugin(action string, actionParams interface{}, attac
 	var err error
 	switch pluginName {
 	// case Kube:
-	// 	if d.plugin, err = kube.New(subLogger, kubeParams); err != nil {
-	// 		return fmt.Errorf("could not start kube daemon plugin: %s", err)
-	// 	}
+	// 	d.plugin, err = kube.New(subLogger, kubeParams)
 	case bzplugin.Db:
-		if d.plugin, err = db.New(subLogger, actionParams); err != nil {
-			return fmt.Errorf("failed to start db daemon plugin: %s", err)
-		}
+		d.plugin, err = db.New(subLogger, actionParams)
 	case bzplugin.Web:
-		if d.plugin, err = web.New(subLogger, actionParams); err != nil {
-			return fmt.Errorf("failed to start web daemon plugin: %s", err)
-		}
+		d.plugin, err = web.New(subLogger, actionParams)
 	case bzplugin.Shell:
-		if d.plugin, err = shell.New(subLogger, actionParams, attach); err != nil {
-			return fmt.Errorf("failed to start shell daemon plugin: %s", err)
-		}
+		d.plugin, err = shell.New(subLogger, actionParams, attach)
 	default:
 		return fmt.Errorf("unrecognized plugin: %s", pluginName)
 	}
 
+	if err != nil {
+		return fmt.Errorf("failed to start %s daemon plugin: %s", pluginName, err)
+	}
 	d.logger.Infof("Started %v plugin", pluginName)
 	return nil
 }

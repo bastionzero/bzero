@@ -31,8 +31,6 @@ type DialAction struct {
 
 	// done channel for letting the plugin know we're done
 	doneChan chan struct{}
-
-	closed bool
 }
 
 func New(logger *logger.Logger, requestId string, outputQueue chan plugin.ActionWrapper) *DialAction {
@@ -70,7 +68,7 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 
 			for {
 				if n, err := lconn.Read(buf); err != nil {
-					if d.closed {
+					if d.tmb.Err() != tomb.ErrStillAlive {
 						return nil
 					}
 
@@ -112,7 +110,7 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 			case <-d.tmb.Dying():
 				return nil
 			case data := <-d.streamInputChan:
-				if d.closed {
+				if d.tmb.Err() != tomb.ErrStillAlive {
 					return nil
 				}
 				streamMessages[data.SequenceNumber] = data
@@ -122,9 +120,7 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 					// if we got an old-fashioned end message or a newfangled one
 					if streamMessage.Type == smsg.DbStreamEnd || (streamMessage.Type == smsg.Stream && !streamMessage.More) {
 						// since there's no more stream coming, close the local connection
-						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-						d.closed = true
-						return nil
+						return fmt.Errorf("remote tcp connection has been closed, closing local tcp connection")
 
 						// again, might have gotten an old or new message depending on what we asked for
 					} else if streamMessage.Type == smsg.DbStream || streamMessage.Type == smsg.Stream {
@@ -134,18 +130,14 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 							// Set a deadline for the write so we don't block forever
 							lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
 							if _, err := lconn.Write(contentBytes); err != nil {
-								d.logger.Errorf("Error writing to local TCP connection: %s", err)
-								d.closed = true
-								return
+								return fmt.Errorf("error writing to local TCP connection: %s", err)
 							}
 						}
 
 						// since there's no more stream coming, close the local connection
-						d.logger.Info("remote tcp connection has been closed, closing local tcp connection")
-						d.closed = true
-						return nil
+						return fmt.Errorf("remote tcp connection has been closed, closing local tcp connection")
 					} else {
-						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
+						d.logger.Debugf("unhandled stream type: %s", streamMessage.Type)
 					}
 
 					// remove the message we've already processed
@@ -175,12 +167,6 @@ func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interf
 	d.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
 		ActionPayload: payload,
-	}
-}
-
-func (d *DialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	if wrappedAction.Action == string(dial.DialStop) {
-		d.closed = true
 	}
 }
 
