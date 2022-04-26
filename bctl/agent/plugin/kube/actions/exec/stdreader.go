@@ -1,4 +1,4 @@
-package stdreader
+package exec
 
 import (
 	"bytes"

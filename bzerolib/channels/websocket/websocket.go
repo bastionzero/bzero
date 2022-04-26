@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -661,7 +661,7 @@ func (w *Websocket) negotiate() error {
 		return fmt.Errorf("error on negotiation: %s. Response: %+v", err, response)
 	}
 	// Extract out the connection token
-	bodyBytes, _ := ioutil.ReadAll(response.Body)
+	bodyBytes, _ := io.ReadAll(response.Body)
 	var m map[string]interface{}
 
 	if err := json.Unmarshal(bodyBytes, &m); err != nil {

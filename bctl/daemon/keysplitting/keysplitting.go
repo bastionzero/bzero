@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"time"
 
@@ -199,7 +199,7 @@ func (k *Keysplitting) buildBZCert() (bzcrt.BZCert, error) {
 	if configFile, err := os.Open(k.configPath); err != nil {
 		return bzcrt.BZCert{}, fmt.Errorf("could not open config file: %v", err.Error())
 	} else {
-		configFileBytes, _ := ioutil.ReadAll(configFile)
+		configFileBytes, _ := io.ReadAll(configFile)
 
 		var config Config
 		err := json.Unmarshal(configFileBytes, &config)

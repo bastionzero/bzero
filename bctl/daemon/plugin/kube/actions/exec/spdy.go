@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	kubeutilsdaemon "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/apimachinery/pkg/util/httpstream/spdy"
@@ -76,7 +76,7 @@ func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *
 
 	// Set our idle timeout, set to 4 hours as that is what the kubelet uses by default
 	// Ref: https://github.com/kubernetes/kubernetes/issues/66661#issuecomment-411324031
-	conn.SetIdleTimeout(kubeutilsdaemon.DefaultIdleTimeout)
+	conn.SetIdleTimeout(kubeutils.DefaultIdleTimeout)
 
 	service := &SPDYService{
 		conn:   conn,
@@ -84,7 +84,7 @@ func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *
 	}
 
 	// Wait for our streams to come in
-	expired := time.NewTimer(kubeutilsdaemon.DefaultStreamCreationTimeout)
+	expired := time.NewTimer(kubeutils.DefaultStreamCreationTimeout)
 	defer expired.Stop()
 
 	// Wait for streams to come in and return SPDY service
@@ -113,25 +113,25 @@ WaitForStreams:
 		// Loop over all incoming strems until we see all expected steams
 		case stream := <-streams:
 			// Extract the stream type from the header
-			streamType := stream.Headers().Get(kubeutilsdaemon.StreamType)
+			streamType := stream.Headers().Get(kubeutils.StreamType)
 			s.logger.Infof("Saw stream type: " + streamType)
 
 			// Save the stream
 			switch streamType {
-			case kubeutilsdaemon.StreamTypeError:
+			case kubeutils.StreamTypeError:
 				s.writeStatus = v4WriteStatusFunc(stream)
 				// Send to a buffer to wait, we will wait on replyChan until we see the expected number of streams
 				go waitStreamReply(stopCtx, stream.replySent, replyChan)
-			case kubeutilsdaemon.StreamTypeStdin:
+			case kubeutils.StreamTypeStdin:
 				s.stdinStream = stream
 				go waitStreamReply(stopCtx, stream.replySent, replyChan)
-			case kubeutilsdaemon.StreamTypeStdout:
+			case kubeutils.StreamTypeStdout:
 				s.stdoutStream = stream
 				go waitStreamReply(stopCtx, stream.replySent, replyChan)
-			case kubeutilsdaemon.StreamTypeStderr:
+			case kubeutils.StreamTypeStderr:
 				s.stderrStream = stream
 				go waitStreamReply(stopCtx, stream.replySent, replyChan)
-			case kubeutilsdaemon.StreamTypeResize:
+			case kubeutils.StreamTypeResize:
 				s.resizeStream = stream
 				go waitStreamReply(stopCtx, stream.replySent, replyChan)
 			default:
@@ -175,10 +175,10 @@ func waitStreamReply(ctx context.Context, replySent <-chan struct{}, notify chan
 }
 
 func extractExecOptions(r *http.Request) Options {
-	tty := r.FormValue(kubeutilsdaemon.ExecTTYParam) == "true"
-	stdin := r.FormValue(kubeutilsdaemon.ExecStdinParam) == "true"
-	stdout := r.FormValue(kubeutilsdaemon.ExecStdoutParam) == "true"
-	stderr := r.FormValue(kubeutilsdaemon.ExecStderrParam) == "true"
+	tty := r.FormValue(kubeutils.ExecTTYParam) == "true"
+	stdin := r.FormValue(kubeutils.ExecStdinParam) == "true"
+	stdout := r.FormValue(kubeutils.ExecStdoutParam) == "true"
+	stderr := r.FormValue(kubeutils.ExecStderrParam) == "true"
 
 	// count the streams client asked for, starting with 1
 	expectedStreams := 1
