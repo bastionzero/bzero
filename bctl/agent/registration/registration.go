@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
@@ -147,7 +146,7 @@ func (r *Registration) getActivationToken(apiKey string) (string, error) {
 	}
 
 	// read our activation token request body
-	respBytes, err := ioutil.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
@@ -216,7 +215,7 @@ func (r *Registration) getRegistrationResponse(activationToken string, targetId 
 		return regResponse, fmt.Errorf("error registering agent with bastion: %s. {Endpoint: %s, Request: %+v, Response: %+v}", err, registrationEndpoint, req, resp)
 	}
 
-	if respBytes, err := ioutil.ReadAll(resp.Body); err != nil {
+	if respBytes, err := io.ReadAll(resp.Body); err != nil {
 		return regResponse, fmt.Errorf("could not read http response: %s", err)
 	} else {
 		if err := json.Unmarshal(respBytes, &regResponse); err != nil {
@@ -265,7 +264,7 @@ func (r *Registration) getConnectionServiceUrlFromServiceUrl() (string, error) {
 	}
 
 	// read the response
-	respBytes, err := ioutil.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("error reading body on get connection service url requets")
 	}

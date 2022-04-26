@@ -3,12 +3,12 @@ package restapi
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
-	kubeutils "bastionzero.com/bctl/v1/bctl/agent/plugin/kube/utils"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
+	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 )
 
 type RestApiAction struct {
@@ -70,7 +70,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 	}
 
 	// Parse out the body
-	bodyBytes, err := ioutil.ReadAll(res.Body)
+	bodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return action, []byte{}, err
 	}

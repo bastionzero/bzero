@@ -229,7 +229,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 			case <-d.tmb.Dying():
 				return
 			case streamMessage := <-streamOutputChan:
-				d.logger.Infof("Sending %s - %s - %v stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
+				d.logger.Infof("Sending %s - %s - %t stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
 				d.send(am.Stream, streamMessage)
 			}
 		}
@@ -241,14 +241,14 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 	var err error
 
 	switch pluginName {
-	case bzplugin.Kube:
-		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
 	case bzplugin.Db:
 		plugin, err = db.New(&d.tmb, subLogger, streamOutputChan, action, payload)
-	case bzplugin.Web:
-		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+	case bzplugin.Kube:
+		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case bzplugin.Shell:
 		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+	case bzplugin.Web:
+		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")
 	}

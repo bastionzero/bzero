@@ -231,19 +231,6 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 	// start plugin based on name
 	subLogger := d.logger.GetPluginLogger(string(pluginName))
 	switch pluginName {
-	case bzplugin.Kube:
-		// Deserialize the action params
-		var kubeParams bzkube.KubeActionParams
-		if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
-			return fmt.Errorf("error deserializing actions params")
-		}
-
-		// start kube plugin
-		if plugin, err := kube.New(&d.tmb, subLogger, kubeParams); err != nil {
-			return fmt.Errorf("could not start kube daemon plugin: %s", err)
-		} else {
-			d.plugin = plugin
-		}
 	case bzplugin.Db:
 		// Deserialize the action params
 		var dbParams bzdb.DbActionParams
@@ -257,16 +244,16 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 		} else {
 			d.plugin = plugin
 		}
-	case bzplugin.Web:
+	case bzplugin.Kube:
 		// Deserialize the action params
-		var webParams bzweb.WebActionParams
-		if err := json.Unmarshal(actionParams, &webParams); err != nil {
+		var kubeParams bzkube.KubeActionParams
+		if err := json.Unmarshal(actionParams, &kubeParams); err != nil {
 			return fmt.Errorf("error deserializing actions params")
 		}
 
-		// start web plugin
-		if plugin, err := web.New(&d.tmb, subLogger, webParams); err != nil {
-			return fmt.Errorf("could not start web daemon plugin: %s", err)
+		// start kube plugin
+		if plugin, err := kube.New(&d.tmb, subLogger, kubeParams); err != nil {
+			return fmt.Errorf("could not start kube daemon plugin: %s", err)
 		} else {
 			d.plugin = plugin
 		}
@@ -280,6 +267,19 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 		// start shell plugin
 		if plugin, err := shellplugin.New(&d.tmb, subLogger, shellParams, d.attach); err != nil {
 			return fmt.Errorf("could not start shell daemon plugin: %s", err)
+		} else {
+			d.plugin = plugin
+		}
+	case bzplugin.Web:
+		// Deserialize the action params
+		var webParams bzweb.WebActionParams
+		if err := json.Unmarshal(actionParams, &webParams); err != nil {
+			return fmt.Errorf("error deserializing actions params")
+		}
+
+		// start web plugin
+		if plugin, err := web.New(&d.tmb, subLogger, webParams); err != nil {
+			return fmt.Errorf("could not start web daemon plugin: %s", err)
 		} else {
 			d.plugin = plugin
 		}
@@ -464,7 +464,6 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 			return d.sendKeysplitting(&ksMessage, next.Action, next.ActionPayload)
 		}
 	case ksmsg.DataAck:
-
 		// If we had something on deck, then this was the ack for it and we can remove it
 		d.setOnDeck(bzplugin.ActionWrapper{})
 

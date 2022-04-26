@@ -56,17 +56,20 @@ func New(parentTmb *tomb.Tomb,
 	if parsedAction, err := parseAction(action); err != nil {
 		return nil, err
 	} else {
+		var rerr error
+
 		switch parsedAction {
 		case db.Dial:
-			if act, err := dial.New(subLogger, plugin.tmb, plugin.streamOutputChan, synPayload.RemoteHost, synPayload.RemotePort); err != nil {
-				return nil, fmt.Errorf("could not start new action: %s", err)
-			} else {
-				plugin.logger.Infof("DB plugin started %v action", action)
-				plugin.action = act
-				return plugin, nil
-			}
+			plugin.action, rerr = dial.New(subLogger, plugin.tmb, plugin.streamOutputChan, synPayload.RemoteHost, synPayload.RemotePort)
 		default:
-			return nil, fmt.Errorf("could not start unhandled db action: %v", action)
+			rerr = fmt.Errorf("unhandled DB action")
+		}
+
+		if rerr != nil {
+			return nil, fmt.Errorf("failed to start DB plugin with action %s: %s", action, rerr)
+		} else {
+			plugin.logger.Infof("DB plugin started with %v action", action)
+			return plugin, nil
 		}
 	}
 }

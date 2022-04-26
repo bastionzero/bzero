@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -14,6 +15,39 @@ func MatchRequestId(requestIdPassed string, requestIdSaved string) error {
 		return rerr
 	}
 	return nil
+}
+
+func WriteToHttpRequest(contentBytes []byte, writer http.ResponseWriter) error {
+	src := bytes.NewReader(contentBytes)
+	_, err := io.Copy(writer, src)
+	if err != nil {
+		rerr := fmt.Errorf("error streaming data to kubectl: %s", err)
+		return rerr
+	}
+	// This is required to flush the data to the client
+	flush, ok := writer.(http.Flusher)
+	if ok {
+		flush.Flush()
+	}
+	return nil
+}
+
+func IsQueryParamPresent(request *http.Request, paramArg string) bool {
+	// Get the param from the query
+	param, ok := request.URL.Query()[paramArg]
+
+	// First check if we got any query returned
+	if !ok || len(param[0]) < 1 {
+		return false
+	}
+
+	// Now check if param is a valid value
+	if param[0] == "true" || param[0] == "1" {
+		return true
+	}
+
+	// Else return false
+	return false
 }
 
 func BuildHttpRequest(kubeHost string, endpoint string, body string, method string, headers map[string][]string, serviceAccountToken string, targetUser string, targetGroups []string) (*http.Request, error) {
@@ -70,7 +104,6 @@ func cleanHeaders(headers map[string][]string) map[string][]string {
 		if strings.ToLower(headerName) == "impersonate-uid" {
 			delete(headers, headerName)
 		}
-
 	}
 
 	// Once we are all done, return the updated headers

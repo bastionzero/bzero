@@ -12,11 +12,11 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
-	kubeutils "bastionzero.com/bctl/v1/bctl/daemon/plugin/kube/utils"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
+	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 )
 
 const (
@@ -39,10 +39,6 @@ type KubeServer struct {
 	websocket   *websocket.Websocket // TODO: This will need to be a dictionary for when we have multiple
 	tmb         tomb.Tomb
 	exitMessage string
-
-	// RestApi is a special case where we want to be able to constantly retrieve it so we can feed any new RestApi
-	// requests that come in and skip the overhead of asking for a new datachannel and sending a Syn
-	restApiDatachannel *datachannel.DataChannel
 
 	// fields for processing incoming kubectl commands
 	localhostToken string
@@ -98,13 +94,6 @@ func StartKubeServer(logger *logger.Logger,
 		return err
 	}
 
-	// Create a single datachannel for all of our rest api calls to reduce overhead
-	if datachannel, err := listener.newDataChannel(string(bzkube.RestApi), listener.websocket); err == nil {
-		listener.restApiDatachannel = datachannel
-	} else {
-		return err
-	}
-
 	// Create HTTP Server listens for incoming kubectl commands
 	go func() {
 		// Define our http handlers
@@ -128,14 +117,9 @@ func StartKubeServer(logger *logger.Logger,
 	return nil
 }
 
+// TODO: this logic may no longer be necessary, but would require a zli change to remove
 func (k *KubeServer) isReadyCallback(w http.ResponseWriter, r *http.Request) {
-	if k.restApiDatachannel.Ready() {
-		w.WriteHeader(http.StatusOK)
-		return
-	} else {
-		w.WriteHeader(http.StatusTooEarly)
-		return
-	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
@@ -240,9 +224,6 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 
 	// Before processing, check if we're ready to process or if there's been an error
 	switch {
-	case !h.restApiDatachannel.Ready():
-		h.bubbleUpError(w, "Daemon starting up...", http.StatusTooEarly)
-		return
 	case h.exitMessage != "":
 		msg := fmt.Sprintf("error on daemon: " + h.exitMessage)
 		h.bubbleUpError(w, msg, http.StatusInternalServerError)
@@ -282,13 +263,11 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 		Reader:  r,
 	}
 
-	// feed our restapi datachannel
-	if action == bzkube.RestApi {
-		h.restApiDatachannel.Feed(food)
-
-		// create new datachannel and feed it kubectl handlers
-	} else if datachannel, err := h.newDataChannel(string(action), h.websocket); err == nil {
+	// create new datachannel and feed it kubectl handlers
+	if datachannel, err := h.newDataChannel(string(action), h.websocket); err == nil {
 		datachannel.Feed(food)
+	} else {
+		h.logger.Errorf("failed to provision new datachannel: %s", err)
 	}
 }
 

@@ -74,7 +74,6 @@ func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 		LogId:           r.logId,
 		CommandBeingRun: r.commandBeingRun,
 	}
-
 	// send action payload to plugin to be sent to agent
 	payloadBytes, _ := json.Marshal(payload)
 	r.outputChan <- plugin.ActionWrapper{
