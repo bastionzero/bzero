@@ -113,7 +113,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 
 		// See if we already have a session for this portforwardRequestId, else create it
 		if oldRequest, ok := p.requestMap[dataInputAction.PortForwardRequestId]; ok {
-			oldRequest.portforwardDataInChannel <- dataInputAction.Data
+			oldRequest.dataInChannel <- dataInputAction.Data
 		} else {
 			// Create a new action and update our map
 			subLogger := p.logger.GetActionLogger("kube/portforward/agent/request")
@@ -135,7 +135,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 				return "", []byte{}, rerr
 			}
 			p.requestMap[dataInputAction.PortForwardRequestId] = newRequest
-			newRequest.portforwardDataInChannel <- dataInputAction.Data
+			newRequest.dataInChannel <- dataInputAction.Data
 		}
 
 		return string(action), []byte{}, nil
