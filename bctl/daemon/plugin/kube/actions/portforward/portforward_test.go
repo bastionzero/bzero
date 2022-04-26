@@ -11,10 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"bastionzero.com/bctl/v1/bzerolib/mocks"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"bastionzero.com/bctl/v1/bzerolib/tests"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/build/kubernetes/api"
 	"gopkg.in/tomb.v2"
@@ -29,7 +30,7 @@ func setPerformHandshake() {
 }
 
 // inject a mock stream pair that sends data / error messages so that portforward can establish a complete connection
-func setGetUpgradedConnection(mockConnection *mocks.MockStreamConnection) (http.Header, http.Header) {
+func setGetUpgradedConnection(mockConnection *tests.MockStreamConnection) (http.Header, http.Header) {
 	dataHeaders := http.Header{}
 	dataHeaders.Set(kubeutils.StreamType, kubeutils.StreamTypeData)
 	errorHeaders := http.Header{}
@@ -66,7 +67,7 @@ func TestMain(m *testing.M) {
 func TestPortForward(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
-	logger := mocks.MockLogger()
+	logger := logger.MockLogger()
 	requestId := "rid"
 	logId := "lid"
 	command := "logs"
@@ -79,26 +80,26 @@ func TestPortForward(t *testing.T) {
 	headers := http.Header{}
 	headers.Set(kubeutils.PortForwardRequestIDHeader, requestId)
 
-	request := mocks.MockHttpRequest("GET", urlPath, headers, sendData)
+	request := tests.MockHttpRequest("GET", urlPath, headers, sendData)
 
-	mockStreamConnection := mocks.MockStreamConnection{}
+	mockStreamConnection := tests.MockStreamConnection{}
 	mockStreamConnection.On("SetIdleTimeout", kubeutils.DefaultIdleTimeout).Return()
 	var closeChan <-chan bool
 	mockStreamConnection.On("CloseChan").Return(closeChan)
 	mockStreamConnection.On("Close").Return(nil)
 
-	writer := mocks.MockResponseWriter{}
+	writer := tests.MockResponseWriter{}
 
 	setPerformHandshake()
 	dataHeaders, errorHeaders := setGetUpgradedConnection(&mockStreamConnection)
 
-	mockDataStream := mocks.MockStream{MyStreamData: streamData}
+	mockDataStream := tests.MockStream{MyStreamData: streamData}
 	mockDataStream.On("Headers").Return(dataHeaders)
 	mockDataStream.On("Close").Return(nil)
 	mockDataStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(len(streamData), nil)
 	mockDataStream.On("Write", []byte(testData)).Return(len(testData), nil).Times(3)
 
-	mockErrorStream := mocks.MockStream{MyStreamData: streamError}
+	mockErrorStream := tests.MockStream{MyStreamData: streamError}
 	mockErrorStream.On("Headers").Return(errorHeaders)
 	mockErrorStream.On("Close").Return(nil)
 	mockErrorStream.On("Read", make([]byte, portforward.ErrorStreamBufferSize)).Return(len(streamError), nil)
@@ -220,7 +221,7 @@ func TestPortForward(t *testing.T) {
 func TestPortForwardError(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
-	logger := mocks.MockLogger()
+	logger := logger.MockLogger()
 	requestId := "rid"
 	logId := "lid"
 	command := "logs"
@@ -228,9 +229,9 @@ func TestPortForwardError(t *testing.T) {
 	urlPath := "test-path"
 	errorStr := "test error"
 
-	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+	request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
-	writer := mocks.MockResponseWriter{}
+	writer := tests.MockResponseWriter{}
 	writer.On("WriteHeader", http.StatusForbidden).Return()
 	writer.On("Header").Return(make(map[string][]string))
 	// not crazy about this since we have to reuse code from the file we're testing

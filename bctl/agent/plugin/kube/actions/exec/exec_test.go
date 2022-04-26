@@ -9,10 +9,11 @@ import (
 	"os"
 	"testing"
 
-	"bastionzero.com/bctl/v1/bzerolib/mocks"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	bzexec "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"bastionzero.com/bctl/v1/bzerolib/tests"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 	"k8s.io/client-go/rest"
@@ -74,7 +75,7 @@ func TestMain(m *testing.M) {
 
 func TestExec(t *testing.T) {
 	assert := assert.New(t)
-	logger := mocks.MockLogger()
+	logger := logger.MockLogger()
 	var tmb tomb.Tomb
 	outputChan := make(chan smsg.StreamMessage, 5)
 
@@ -117,8 +118,8 @@ func TestExec(t *testing.T) {
 	assert.Equal([]byte{}, responsePayload)
 
 	t.Logf("Test that the action reports output from stdout and stderr")
-	mocks.AssertNextMessageHasContent(assert, outputChan, testString)
-	mocks.AssertNextMessageHasContent(assert, outputChan, fmt.Sprintf("error: %s", testString))
+	tests.AssertNextMessageHasContent(assert, outputChan, testString)
+	tests.AssertNextMessageHasContent(assert, outputChan, fmt.Sprintf("error: %s", testString))
 
 	t.Logf("Test that the action is closed")
 	assert.True(e.Closed())

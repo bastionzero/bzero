@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"bastionzero.com/bctl/v1/bzerolib/mocks"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
+	"bastionzero.com/bctl/v1/bzerolib/tests"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
@@ -28,7 +29,7 @@ func TestMain(m *testing.M) {
 func TestRestApiOK(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
-	logger := mocks.MockLogger()
+	logger := logger.MockLogger()
 	requestId := "rid"
 	logId := "lid"
 	command := "get pods"
@@ -36,9 +37,9 @@ func TestRestApiOK(t *testing.T) {
 	receiveData := "receive data"
 	urlPath := "test-path"
 
-	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+	request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
-	writer := mocks.MockResponseWriter{}
+	writer := tests.MockResponseWriter{}
 	writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 
 	t.Logf("Test that we can create a new RestApi action")
@@ -82,7 +83,7 @@ func TestRestApiOK(t *testing.T) {
 func TestRestApiNotFound(t *testing.T) {
 	assert := assert.New(t)
 	var tmb tomb.Tomb
-	logger := mocks.MockLogger()
+	logger := logger.MockLogger()
 	requestId := "rid"
 	logId := "lid"
 	command := "get pods"
@@ -93,9 +94,9 @@ func TestRestApiNotFound(t *testing.T) {
 	t.Logf("Test that we can create a new RestApi action")
 	r, outputChan := New(logger, requestId, logId, command)
 
-	request := mocks.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
+	request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
-	writer := mocks.MockResponseWriter{}
+	writer := tests.MockResponseWriter{}
 	writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 	writer.On("Header").Return(make(map[string][]string))
 	writer.On("WriteHeader", http.StatusInternalServerError).Return()
