@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"time"
 
 	"gopkg.in/tomb.v2"
 
@@ -15,7 +16,8 @@ import (
 )
 
 const (
-	chunkSize = 64 * 1024
+	chunkSize     = 64 * 1024
+	writeDeadline = 5 * time.Second
 )
 
 type DialAction struct {
@@ -86,7 +88,13 @@ func (d *DialAction) Start(tmb *tomb.Tomb, lconn *net.TCPConn) error {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
-							lconn.Write(contentBytes)
+							// Set a deadline for the write so we don't block forever
+							lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
+							if _, err := lconn.Write(contentBytes); err != nil {
+								d.logger.Errorf("Error writing to local TCP connection: %s", err)
+								d.closed = true
+								return
+							}
 						}
 
 					} else {

@@ -1,0 +1,33 @@
+name: System Test Develop Branch CI (cloud-dev.bastionzero.com)
+on:
+  pull_request:
+    branches:
+      # Run System Tests on PRs to develop or PRs to feature branches (should be based on develop)
+      - master
+      - develop
+      - "feat/**"
+jobs:
+  build:
+    name: System Test Develop Branch CI (cloud-dev.bastionzero.com)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.CI_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.CI_AWS_ACCESS_KEY_SECRET }}
+          role-to-assume: arn:aws:iam::238681891460:role/cwcdev/system_test_github_action_role
+          aws-region: us-east-1
+          # Skip session tagging (enabling this requires sts:TagSession iam permission)
+          # https://github.com/aws-actions/configure-aws-credentials#session-tagging
+          role-skip-session-tagging: true
+          role-duration-seconds: 3600
+
+      - name: Run CodeBuild
+        uses: aws-actions/aws-codebuild-run-build@v1.0.4
+        with:
+          project-name: bzero-dev-system-test
+          env-vars-for-codebuild: |
+            IDPS_TO_TEST
+        env:
+          IDPS_TO_TEST: "google"
