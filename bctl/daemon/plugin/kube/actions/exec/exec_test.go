@@ -3,18 +3,18 @@ package exec
 import (
 	"encoding/base64"
 	"encoding/json"
-	"flag"
 	"net/http"
-	"os"
 	"testing"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
 
@@ -25,19 +25,18 @@ func setNewSPDYService(mockSpdy *SPDYService) {
 	}
 }
 
-func TestMain(m *testing.M) {
-	flag.Parse()
-	oldNewSPDYService := NewSPDYService
-	defer func() { NewSPDYService = oldNewSPDYService }()
-
-	exitCode := m.Run()
-
-	// Exit
-	os.Exit(exitCode)
+func TestExec(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Daemon Exec suite")
 }
 
-func TestExec(t *testing.T) {
-	assert := assert.New(t)
+var _ = Describe("Daemon Exec action", Ordered, func() {
+	oldNewSPDYService := NewSPDYService
+
+	AfterAll(func() {
+		NewSPDYService = oldNewSPDYService
+	})
+
 	var tmb tomb.Tomb
 	logger := logger.MockLogger()
 	requestId := "rid"
@@ -78,39 +77,40 @@ func TestExec(t *testing.T) {
 
 	writer := tests.MockResponseWriter{}
 
-	t.Logf("Test that we can create a new Exec action")
-	e, outputChan := New(logger, requestId, logId, command)
+	Context("Happy path", func() {
+		e, outputChan := New(logger, requestId, logId, command)
 
-	t.Logf("Test that we can start the action")
-	err := e.Start(&tmb, &writer, &request)
-	assert.Nil(err)
-	startMessage := <-outputChan
+		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
+		It("handles the exec session correctly", func() {
+			By("starting without error")
+			err := e.Start(&tmb, &writer, &request)
+			Expect(err).To(BeNil())
 
-	t.Logf("Test that it sends an exec payload to the agent")
-	assert.Equal(string(exec.ExecStart), startMessage.Action)
-	var payload exec.KubeExecStartActionPayload
-	err = json.Unmarshal(startMessage.ActionPayload, &payload)
-	assert.Nil(err)
-	assert.Equal(command, payload.CommandBeingRun)
-	assert.Equal(requestId, payload.RequestId)
-	assert.Equal(logId, payload.LogId)
+			startMessage := <-outputChan
 
-	t.Logf("Test that it writes stdout data received from the agent to user's stdout")
-	message0 := smsg.StreamMessage{
-		SequenceNumber: 0,
-		Content:        base64.StdEncoding.EncodeToString([]byte(receiveData)),
-	}
-	e.ReceiveStream(message0)
+			By("sending an Exec payload to the agent")
+			Expect(startMessage.Action).To(Equal(string(exec.ExecStart)))
+			var payload exec.KubeExecStartActionPayload
+			err = json.Unmarshal(startMessage.ActionPayload, &payload)
+			Expect(err).To(BeNil())
 
-	t.Logf("Test that it exits upon receiving the escape character")
-	messageEnd := smsg.StreamMessage{
-		SequenceNumber: 1,
-		Content:        base64.StdEncoding.EncodeToString([]byte(exec.EscChar)),
-	}
-	e.ReceiveStream(messageEnd)
+			message0 := smsg.StreamMessage{
+				SequenceNumber: 0,
+				Content:        base64.StdEncoding.EncodeToString([]byte(receiveData)),
+			}
+			e.ReceiveStream(message0)
 
-	// give it time to finish
-	time.Sleep(time.Second)
+			messageEnd := smsg.StreamMessage{
+				SequenceNumber: 1,
+				Content:        base64.StdEncoding.EncodeToString([]byte(exec.EscChar)),
+			}
+			e.ReceiveStream(messageEnd)
 
-	writer.AssertExpectations(t)
-}
+			// give it time to finish
+			time.Sleep(time.Second)
+
+			By("by writing stdout data received from the agent to the user")
+			writer.AssertExpectations(GinkgoT())
+		})
+	})
+})

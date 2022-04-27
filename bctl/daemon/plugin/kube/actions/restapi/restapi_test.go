@@ -19,7 +19,7 @@ import (
 
 func TestRestApi(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Books Suite")
+	RunSpecs(t, "Daemon RestApi Suite")
 }
 
 var _ = Describe("Daemon RestApi action", func() {
@@ -38,13 +38,13 @@ var _ = Describe("Daemon RestApi action", func() {
 		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 		r, outputChan := New(logger, requestId, logId, command)
 
-		// NOTE: because Start() doesn't return until its work is done, we can't make extensive use of the DSL
-		It("sends the correct RestApi payload to the agent, writes the API response to the user, and returns without error", func() {
+		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
+		It("passes the API request and response correctly", func() {
 			go func() {
 				reqMessage := <-outputChan
-				Expect(string(reqMessage.Action)).To(Equal(string(kuberest.RestRequest)))
 
-				// payload should contain the user's request
+				By("sending a RestApi payload to the agent that contains the user's request")
+				Expect(string(reqMessage.Action)).To(Equal(string(kuberest.RestRequest)))
 				var payload kuberest.KubeRestApiActionPayload
 				err := json.Unmarshal(reqMessage.ActionPayload, &payload)
 				Expect(err).To(BeNil())
@@ -60,11 +60,12 @@ var _ = Describe("Daemon RestApi action", func() {
 					ActionPayload: payloadBytes,
 				})
 
-				// this checks that the Write function was called as expected
+				By("writing the API response out to the user")
 				time.Sleep(1 * time.Second)
 				writer.AssertExpectations(GinkgoT())
 			}()
 
+			By("starting without error")
 			err := r.Start(&tmb, &writer, &request)
 			Expect(err).To(BeNil())
 		})
@@ -78,8 +79,8 @@ var _ = Describe("Daemon RestApi action", func() {
 		writer.On("WriteHeader", http.StatusInternalServerError).Return()
 		r, outputChan := New(logger, requestId, logId, command)
 
-		// NOTE: because Start() doesn't return until its work is done, we can't make extensive use of the DSL
-		It("sends the correct RestApi payload to the agent, writes the error to the user, and returns the error", func() {
+		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
+		It("handles the API request and response correctly, given the error", func() {
 			go func() {
 				// we can ignore this since we're not testing it
 				<-outputChan
@@ -98,10 +99,12 @@ var _ = Describe("Daemon RestApi action", func() {
 				})
 
 				// this checks that the Write function was called as expected
+				By("returning the error to the user")
 				time.Sleep(1 * time.Second)
 				writer.AssertExpectations(GinkgoT())
 			}()
 
+			By("returning the error to the datachannel")
 			err := r.Start(&tmb, &writer, &request)
 			Expect(err).To(Equal(fmt.Errorf("request failed with status code %v: %v", http.StatusNotFound, receiveData)))
 		})

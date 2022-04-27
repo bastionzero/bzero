@@ -3,18 +3,18 @@ package exec
 import (
 	"encoding/base64"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net/url"
-	"os"
 	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	bzexec "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
@@ -58,23 +58,20 @@ func setGetConfig() {
 	}
 }
 
-func TestMain(m *testing.M) {
-	flag.Parse()
-	oldGetExecutor := getExecutor
-	oldGetConfig := getConfig
-	defer func() {
-		getExecutor = oldGetExecutor
-		getConfig = oldGetConfig
-	}()
-
-	exitCode := m.Run()
-
-	// Exit
-	os.Exit(exitCode)
+func TestExec(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Agent Exec suite")
 }
 
-func TestExec(t *testing.T) {
-	assert := assert.New(t)
+var _ = Describe("Agent Exec action", Ordered, func() {
+	oldGetExecutor := getExecutor
+	oldGetConfig := getConfig
+
+	AfterAll(func() {
+		getExecutor = oldGetExecutor
+		getConfig = oldGetConfig
+	})
+
 	logger := logger.MockLogger()
 	var tmb tomb.Tomb
 	outputChan := make(chan smsg.StreamMessage, 5)
@@ -83,46 +80,47 @@ func TestExec(t *testing.T) {
 	logId := "lid"
 	testString := "echo hi"
 
-	mockExec := MockExecutor{}
-	stdoutWriter := NewStdWriter(outputChan, smsg.CurrentSchema, requestId, string(kube.Exec), smsg.StdOut, logId)
-	mockExec.On("Stream", stdoutWriter).Return(nil)
-	setGetExecutor(mockExec)
-	setGetConfig()
+	Context("Happy path", func() {
+		mockExecutor := MockExecutor{}
+		stdoutWriter := NewStdWriter(outputChan, smsg.CurrentSchema, requestId, string(kube.Exec), smsg.StdOut, logId)
+		mockExecutor.On("Stream", stdoutWriter).Return(nil)
+		setGetExecutor(mockExecutor)
+		setGetConfig()
+		e, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
 
-	t.Logf("Test that we can create a new Exec action")
-	e, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
-	assert.Nil(err)
+		It("handles the exec session correctly", func() {
+			By("starting without error")
+			Expect(err).To(BeNil())
 
-	// test start
-	startPayloadBytes := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
+			startPayloadBytes := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
 
-	t.Logf("Test that we can initiate an exec session")
-	action, responsePayload, err := e.Receive(string(bzexec.ExecStart), startPayloadBytes)
-	assert.Nil(err)
-	assert.Equal(string(bzexec.ExecStart), action)
-	assert.Equal([]byte{}, responsePayload)
+			By("receiving an Exec request without error")
+			action, responsePayload, err := e.Receive(string(bzexec.ExecStart), startPayloadBytes)
+			Expect(err).To(BeNil())
+			Expect(action).To(Equal(string(bzexec.ExecStart)))
+			Expect(responsePayload).To(Equal([]byte{}))
 
-	readyMessage := <-outputChan
-	readyContent, err := base64.StdEncoding.DecodeString(readyMessage.Content)
-	t.Logf("Test that the action has started the exec interaction with the kube server")
-	assert.Nil(err)
-	assert.Equal([]byte(bzexec.EscChar), readyContent)
+			readyMessage := <-outputChan
+			readyContent, _ := base64.StdEncoding.DecodeString(readyMessage.Content)
+			By("by alerting that it has started the exec interaction with the kube server")
+			Expect(readyContent).To(Equal([]byte(bzexec.EscChar)))
 
-	// test stdin/stdout
-	stdinPayloadBytes := buildStdinActionPayload(requestId, []byte(testString))
+			By("expecting input from stdin")
+			stdinPayloadBytes := buildStdinActionPayload(requestId, []byte(testString))
+			action, responsePayload, err = e.Receive(string(bzexec.ExecInput), stdinPayloadBytes)
+			Expect(err).To(BeNil())
+			Expect(action).To(Equal(string(bzexec.ExecInput)))
+			Expect(responsePayload).To(Equal([]byte{}))
 
-	action, responsePayload, err = e.Receive(string(bzexec.ExecInput), stdinPayloadBytes)
-	assert.Nil(err)
-	t.Logf("Test that the action can accept input from stdin")
-	assert.Equal(string(bzexec.ExecInput), action)
-	assert.Equal([]byte{}, responsePayload)
+			By("reporting output from stdout and stderr")
+			tests.ExpectNextMessageHasContent(outputChan, testString)
+			tests.ExpectNextMessageHasContent(outputChan, fmt.Sprintf("error: %s", testString))
 
-	t.Logf("Test that the action reports output from stdout and stderr")
-	tests.AssertNextMessageHasContent(assert, outputChan, testString)
-	tests.AssertNextMessageHasContent(assert, outputChan, fmt.Sprintf("error: %s", testString))
+			By("informing the datachannel it has closed")
+			Expect(e.Closed()).To(BeTrue())
 
-	t.Logf("Test that the action is closed")
-	assert.True(e.Closed())
-
-	mockExec.AssertExpectations(t)
-}
+			By("writing messages via the stdout writer")
+			mockExecutor.AssertExpectations(GinkgoT())
+		})
+	})
+})

@@ -51,7 +51,7 @@ func setGetUpgradedConnection(mockConnection *tests.MockStreamConnection) (http.
 
 func TestPortForward(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Books Suite")
+	RunSpecs(t, "Daemon PortForward suite")
 }
 
 var _ = Describe("Daemon PortForward action", Ordered, func() {
@@ -112,11 +112,12 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 
 		p, outputChan := New(logger, requestId, logId, command)
 
-		// NOTE: because Start() doesn't return until its work is done, we can't make extensive use of the DSL
-		It("sends the correct PortForward payload to the agent, processes portforward messages in the correct order, ends when killed, and returns without error", func() {
+		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
+		It("handles the portforwarding session correclty", func() {
 			go func() {
 				startMessage := <-outputChan
 
+				By("sending a PortForward pyaload to the agent")
 				Expect(startMessage.Action).To(Equal(string(portforward.StartPortForward)))
 				var payload portforward.KubePortForwardStartActionPayload
 				err := json.Unmarshal(startMessage.ActionPayload, &payload)
@@ -126,6 +127,8 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 					Type:    smsg.Ready,
 					Content: "",
 				})
+
+				By("registering incoming data and error streams")
 				// these might come in either order
 				n := 0
 				receivedDataIn := false
@@ -188,7 +191,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 
 				time.Sleep(time.Second)
 
-				// kill the tomb
+				By("ending when its tomb is killed")
 				tmb.Kill(errors.New("test kill"))
 
 				time.Sleep(time.Second)
@@ -207,10 +210,12 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 				Expect(receivedStopRequestMsg).To(BeTrue())
 				Expect(receivedStopMsg).To(BeTrue())
 
+				By("processing data and erorr output in the correct order")
 				// confirm the above assumptions here
 				writer.AssertExpectations(GinkgoT())
 			}()
 
+			By("starting without error")
 			err := p.Start(&tmb, &writer, &request)
 			Expect(err).To(BeNil())
 		})
@@ -247,10 +252,12 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 				Expect(stopMessage.Action).To(Equal(string(portforward.StopPortForward)))
 
 				// confirm that our mocks were called as expected
+				By("returning the error to the user")
 				time.Sleep(time.Second)
 				writer.AssertExpectations(GinkgoT())
 			}()
 
+			By("returning an error to the datachannel")
 			err := p.Start(&tmb, &writer, &request)
 			Expect(err).To(Equal(fmt.Errorf("error starting portforward stream: %s", errorStr)))
 		})

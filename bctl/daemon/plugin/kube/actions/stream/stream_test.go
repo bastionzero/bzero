@@ -18,7 +18,7 @@ import (
 
 func TestSteam(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Books Suite")
+	RunSpecs(t, "Daemon Stream Suite")
 }
 
 var _ = Describe("Daemon Stream action", func() {
@@ -42,12 +42,13 @@ var _ = Describe("Daemon Stream action", func() {
 
 		s, outputChan := New(logger, requestId, logId, command)
 
-		// NOTE: because Start() doesn't return until its work is done, we can't make extensive use of the DSL
-		It("sends the correct Stream payload to the agent, processes streams in the correct order, ends, and returns without error", func() {
+		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
+		It("passes the request and response correctly", func() {
 			go func() {
 				startMessage := <-outputChan
-				Expect(startMessage.Action).To(Equal(string(stream.StreamStart)))
 
+				By("sending a Stream payload to the agent that contains the user's request")
+				Expect(startMessage.Action).To(Equal(string(stream.StreamStart)))
 				// payload should contain the user's request
 				var payload stream.KubeStreamActionPayload
 				err := json.Unmarshal(startMessage.ActionPayload, &payload)
@@ -111,10 +112,12 @@ var _ = Describe("Daemon Stream action", func() {
 				s.ReceiveStream(endMessage)
 
 				// confirm the above assumptions here
+				By("processing stream chunks in the correct order")
 				time.Sleep(1 * time.Second)
 				writer.AssertExpectations(GinkgoT())
 			}()
 
+			By("starting without error")
 			err := s.Start(&tmb, &writer, &request)
 			Expect(err).To(BeNil())
 		})

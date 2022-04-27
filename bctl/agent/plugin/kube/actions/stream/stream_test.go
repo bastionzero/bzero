@@ -4,17 +4,17 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"flag"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 )
 
@@ -44,17 +44,12 @@ func setMakeRequest(statusCode int, headers map[string][]string, bodyText string
 	}
 }
 
-func TestMain(m *testing.M) {
-	flag.Parse()
-
-	exitCode := m.Run()
-
-	// Exit
-	os.Exit(exitCode)
+func TestStream(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Agent Stream Suite")
 }
 
-func TestStream(t *testing.T) {
-	assert := assert.New(t)
+var _ = Describe("Agent Stream action", Ordered, func() {
 	logger := logger.MockLogger()
 	var tmb tomb.Tomb
 	outputChan := make(chan smsg.StreamMessage, 10)
@@ -66,46 +61,46 @@ func TestStream(t *testing.T) {
 		"Cache-Control": {"value2"},
 	}
 
-	// resopnd with a 4kB string
-	setMakeRequest(200, headers, strings.Repeat(testString, 1024))
+	Context("Happy path", func() {
+		// respond with a 4kb string
+		setMakeRequest(200, headers, strings.Repeat(testString, 1024))
+		s, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
 
-	t.Logf("Test that we can create a new Stream action")
-	s, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
-	assert.Nil(err)
+		It("streams a 4kb message in chunks", func() {
+			By("starting without error")
+			Expect(err).To(BeNil())
 
-	payload := buildActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
-	t.Logf("Test that we can ask the action to start streaming")
-	action, responsePayload, err := s.Receive(string(stream.StreamStart), payload)
-	assert.Nil(err)
-	assert.Equal(string(stream.StreamStart), action)
-	assert.Equal([]byte{}, responsePayload)
+			By("receiving a stream request without error")
+			payload := buildActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
+			action, responsePayload, err := s.Receive(string(stream.StreamStart), payload)
+			Expect(err).To(BeNil())
+			Expect(action).To(Equal(string(stream.StreamStart)))
+			Expect(responsePayload).To(Equal([]byte{}))
 
-	// read the header message
-	headerMessage := <-outputChan
+			By("first returning a message with the stream's headers")
+			headerMessage := <-outputChan
 
-	var kubestreamHeadersPayload stream.KubeStreamHeadersPayload
-	contentBytes, err := base64.StdEncoding.DecodeString(headerMessage.Content)
-	assert.Nil(err)
+			var kubestreamHeadersPayload stream.KubeStreamHeadersPayload
+			contentBytes, _ := base64.StdEncoding.DecodeString(headerMessage.Content)
+			json.Unmarshal(contentBytes, &kubestreamHeadersPayload)
 
-	t.Logf("Test that the action first returns a message with the stream's headers")
-	err = json.Unmarshal(contentBytes, &kubestreamHeadersPayload)
-	assert.Nil(err)
-	assert.Equal(requestId, headerMessage.RequestId)
-	assert.Equal(stream.KubeStreamHeadersPayload{
-		Headers: headers,
-	}, kubestreamHeadersPayload)
+			Expect(kubestreamHeadersPayload).To(Equal(stream.KubeStreamHeadersPayload{
+				Headers: headers,
+			}))
 
-	t.Logf("Test that the 4kb of content that were streamed are returned in 1kb chunks")
-	for n := 0; n < 4; n++ {
-		bodyMessage := <-outputChan
-		contentBytes, err = base64.StdEncoding.DecodeString(bodyMessage.Content)
-		assert.Nil(err)
-		// expect 1024 bytes per message
-		assert.Equal(strings.Repeat(testString, 256), string(contentBytes))
-		assert.Equal(true, bodyMessage.More)
-	}
+			By("breaking up the stream into 1kb chunks")
+			for n := 0; n < 4; n++ {
+				bodyMessage := <-outputChan
+				contentBytes, err = base64.StdEncoding.DecodeString(bodyMessage.Content)
+				Expect(err).To(BeNil())
+				// expect 1024 bytes per message
+				Expect(string(contentBytes)).To(Equal(strings.Repeat(testString, 256)))
+				Expect(bodyMessage.More).To(BeTrue())
+			}
 
-	finalMessage := <-outputChan
-	t.Logf("Test that the action informs us that the stream has ended")
-	assert.Equal(false, finalMessage.More)
-}
+			finalMessage := <-outputChan
+			By("informing the datachannel that the stream has ended")
+			Expect(finalMessage.More).To(BeFalse())
+		})
+	})
+})

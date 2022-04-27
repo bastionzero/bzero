@@ -3,13 +3,12 @@ package restapi
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
@@ -51,19 +50,18 @@ func setMakeRequest(statusCode int, headers map[string][]string, bodyText string
 	}
 }
 
-func TestMain(m *testing.M) {
-	flag.Parse()
-	oldMakeRequest := makeRequest
-	defer func() { makeRequest = oldMakeRequest }()
-
-	exitCode := m.Run()
-
-	// Exit
-	os.Exit(exitCode)
+func TestRestApi(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Agent RestApi Suite")
 }
 
-func TestRestApi(t *testing.T) {
-	assert := assert.New(t)
+var _ = Describe("Agent RestApi action", Ordered, func() {
+
+	oldMakeRequest := makeRequest
+	AfterAll(func() {
+		makeRequest = oldMakeRequest
+	})
+
 	logger := logger.MockLogger()
 
 	statusCode := 200
@@ -74,22 +72,26 @@ func TestRestApi(t *testing.T) {
 		"X-Kubernetes-Pf-Flowschema-Uid":    {"value2"},
 	}
 
-	setMakeRequest(statusCode, headers, testString)
+	Context("Happy path", func() {
+		setMakeRequest(statusCode, headers, testString)
+		r, err := New(logger, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
 
-	t.Logf("Test that we can create a new RestApi action")
-	r, err := New(logger, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
-	assert.Nil(err)
+		It("handles the API request and response correctly", func() {
+			By("starting without error")
+			Expect(err).To(BeNil())
 
-	payloadBytes := buildActionPayload(make(map[string][]string), requestId)
-	t.Logf("Test that we can ask the action to make an API request")
-	action, responsePayload, err := r.Receive("restapi", payloadBytes)
-	assert.Nil(err)
-	assert.Equal(string(kuberest.RestResponse), action)
+			By("receiving an API request without error")
+			payloadBytes := buildActionPayload(make(map[string][]string), requestId)
+			action, responsePayload, err := r.Receive("restapi", payloadBytes)
+			Expect(err).To(BeNil())
+			Expect(action).To(Equal(string(kuberest.RestResponse)))
 
-	t.Logf("Test that it returns the expected response to that request")
-	expectedResponse := buildExpectedResponsePayload(statusCode, headers, requestId, testString)
-	assert.Equal(expectedResponse, responsePayload)
+			By("returning the expected response")
+			expectedResponse := buildExpectedResponsePayload(statusCode, headers, requestId, testString)
+			Expect(responsePayload).To(Equal(expectedResponse))
 
-	t.Logf("Test that the action has closed")
-	assert.Equal(true, r.Closed())
-}
+			By("closing after the return")
+			Expect(r.Closed()).To(BeTrue())
+		})
+	})
+})

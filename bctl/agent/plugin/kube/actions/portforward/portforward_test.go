@@ -4,25 +4,25 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"flag"
 	"net/http"
-	"os"
 	"testing"
 	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"github.com/stretchr/testify/assert"
 	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/rest"
 )
 
 // what portforward action will receive from "bastion"
-func buildStartActionPayload(assert *assert.Assertions, headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
-	payload := portforward.KubePortForwardStartActionPayload{
+func buildStartActionPayload(headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
+	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStartActionPayload{
 		Endpoint:             "test/endpoint",
 		DataHeaders:          make(map[string]string),
 		ErrorHeaders:         make(map[string]string),
@@ -30,9 +30,7 @@ func buildStartActionPayload(assert *assert.Assertions, headers map[string][]str
 		StreamMessageVersion: version,
 		LogId:                "lid",
 		CommandBeingRun:      "command",
-	}
-	payloadBytes, err := json.Marshal(payload)
-	assert.Nil(err)
+	})
 	return payloadBytes
 }
 
@@ -81,19 +79,17 @@ func setGetConfig() {
 	}
 }
 
-func TestMain(m *testing.M) {
-	flag.Parse()
-	oldDoDial := doDial
-	defer func() { doDial = oldDoDial }()
-
-	exitCode := m.Run()
-
-	// Exit
-	os.Exit(exitCode)
+func TestPortForward(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Agent Portforward Suite")
 }
 
-func TestPortforward(t *testing.T) {
-	assert := assert.New(t)
+var _ = Describe("Agent PortForward action", Ordered, func() {
+	oldDoDial := doDial
+	AfterAll(func() {
+		doDial = oldDoDial
+	})
+
 	logger := logger.MockLogger()
 	var tmb tomb.Tomb
 	outputChan := make(chan smsg.StreamMessage, 1)
@@ -102,74 +98,76 @@ func TestPortforward(t *testing.T) {
 	portForwardRequestId := "pid"
 	testData := "test data"
 
-	mockStream := tests.MockStream{MyStreamData: testData}
-	mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
-	mockStream.On("Write", []byte(testData)).Return(len(testData), nil)
-	mockStream.On("Close").Return(nil)
+	Context("Happy path", func() {
+		mockStream := tests.MockStream{MyStreamData: testData}
+		mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
+		mockStream.On("Write", []byte(testData)).Return(len(testData), nil)
+		mockStream.On("Close").Return(nil)
 
-	mockStreamConnection := new(tests.MockStreamConnection)
-	mockStreamConnection.On("CreateStream", http.Header{
-		"Port":      []string{"5000"},
-		"Requestid": []string{portForwardRequestId},
-	}).Return(mockStream, nil)
-	mockStreamConnection.On("Close").Return(nil)
+		mockStreamConnection := new(tests.MockStreamConnection)
+		mockStreamConnection.On("CreateStream", http.Header{
+			"Port":      []string{"5000"},
+			"Requestid": []string{portForwardRequestId},
+		}).Return(mockStream, nil)
+		mockStreamConnection.On("Close").Return(nil)
 
-	setDoDial(mockStreamConnection)
-	setGetConfig()
+		setDoDial(mockStreamConnection)
+		setGetConfig()
 
-	t.Logf("Test that we can create a new PortForward action")
-	p, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
-	assert.Nil(err)
+		p, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
 
-	t.Logf("Test that we can initiate a portforward session")
-	payload := buildStartActionPayload(assert, make(map[string][]string), requestId, smsg.CurrentSchema)
-	action, responsePayload, err := p.Receive(string(portforward.StartPortForward), payload)
-	assert.Nil(err)
-	assert.Equal(string(portforward.StartPortForward), action)
-	assert.Equal([]byte{}, responsePayload)
+		It("handles the portforwarding session correctly", func() {
+			By("starting without error")
+			Expect(err).To(BeNil())
 
-	readyMessage := <-outputChan
-	t.Logf("Test that the action has started the portforward interaction with the kube server")
-	assert.Equal(requestId, readyMessage.RequestId)
-	assert.Equal("", readyMessage.Content)
+			By("receiving a PortForward request without error")
+			payload := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
+			action, responsePayload, err := p.Receive(string(portforward.StartPortForward), payload)
+			Expect(err).To(BeNil())
+			Expect(action).To(Equal(string(portforward.StartPortForward)))
+			Expect(responsePayload).To(Equal([]byte{}))
 
-	payload = buildActionPayload(testData, requestId, portForwardRequestId)
-	t.Logf("Test that the action can accept input from the remote port")
-	action, responsePayload, err = p.Receive(string(portforward.DataInPortForward), payload)
-	assert.Nil(err)
-	assert.Equal(string(portforward.DataInPortForward), action)
-	assert.Equal([]byte{}, responsePayload)
+			readyMessage := <-outputChan
+			By("by alerting that it has started the portforward interaction with the kube server")
+			Expect(readyMessage.Content).To(Equal(""))
 
-	dataMessage := <-outputChan
+			payload = buildActionPayload(testData, requestId, portForwardRequestId)
+			By("receiving data from the remote port")
+			action, responsePayload, err = p.Receive(string(portforward.DataInPortForward), payload)
+			Expect(err).To(BeNil())
+			Expect(action).To(Equal(string(portforward.DataInPortForward)))
+			Expect(responsePayload).To(Equal([]byte{}))
 
-	t.Logf("Test that the action forwards that data")
-	wrappedContent, err := base64.StdEncoding.DecodeString(dataMessage.Content)
-	assert.Nil(err)
-	var content portforward.KubePortForwardStreamMessageContent
-	err = json.Unmarshal(wrappedContent, &content)
-	assert.Nil(err)
-	assert.Equal(testData, string(content.Content))
+			dataMessage := <-outputChan
 
-	t.Logf("Test that we can end a portforward request")
-	stopRequestPayload := buildStopRequestActionPayload(requestId, portForwardRequestId)
-	action, responsePayload, err = p.Receive(string(portforward.StopPortForwardRequest), stopRequestPayload)
-	assert.Nil(err)
-	assert.Equal(string(portforward.StopPortForwardRequest), action)
-	assert.Equal([]byte{}, responsePayload)
+			By("forwarding data to the daemon")
+			wrappedContent, _ := base64.StdEncoding.DecodeString(dataMessage.Content)
+			var content portforward.KubePortForwardStreamMessageContent
+			json.Unmarshal(wrappedContent, &content)
+			Expect(string(content.Content)).To(Equal(testData))
 
-	t.Logf("Test that we can close the portforward action")
-	stopPayload := buildStopActionPayload(requestId)
-	action, responsePayload, err = p.Receive(string(portforward.StopPortForward), stopPayload)
-	assert.Nil(err)
-	assert.Equal(string(portforward.StopPortForward), action)
-	assert.Equal([]byte{}, responsePayload)
-	assert.True(p.Closed())
+			By("ending a particular portforward request when the daemon sends a stop request message")
+			stopRequestPayload := buildStopRequestActionPayload(requestId, portForwardRequestId)
+			action, responsePayload, err = p.Receive(string(portforward.StopPortForwardRequest), stopRequestPayload)
+			Expect(err).To(BeNil())
+			Expect(action).To(Equal(string(portforward.StopPortForwardRequest)))
+			Expect(responsePayload).To(Equal([]byte{}))
 
-	t.Logf("Test that we can kill the action's tomb and stop it")
-	tmb.Kill(errors.New("test kill"))
+			By("closing when the daemon sends a stop message")
+			stopPayload := buildStopActionPayload(requestId)
+			action, responsePayload, err = p.Receive(string(portforward.StopPortForward), stopPayload)
+			Expect(err).To(BeNil())
+			Expect(action).To(Equal(string(portforward.StopPortForward)))
+			Expect(responsePayload).To(Equal([]byte{}))
+			Expect(p.Closed()).To(BeTrue())
 
-	time.Sleep(time.Second)
+			By("dying when its tomb is killed")
+			tmb.Kill(errors.New("test kill"))
 
-	mockStream.AssertExpectations(t)
-	mockStreamConnection.AssertExpectations(t)
-}
+			By("interacting with the stream connection as expected")
+			time.Sleep(time.Second)
+			mockStream.AssertExpectations(GinkgoT())
+			mockStreamConnection.AssertExpectations(GinkgoT())
+		})
+	})
+})
