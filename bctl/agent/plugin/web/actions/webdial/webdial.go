@@ -270,6 +270,17 @@ func (w *WebDial) buildHttpRequest(endpoint string, body []byte, method string, 
 		}
 
 		req.Header.Set("Host", remoteHostUrl.Host)
+
+		// set our referer header so that it matches host for xsrf checks
+		if ref, ok := req.Header["Referer"]; ok {
+			w.logger.Debugf("Found Referer header value: %s, Host value: %s", ref, remoteHostUrl.Host)
+			req.Header.Del("Referer")
+		} else if ref, ok := req.Header["Referrer"]; ok {
+			// ref: https://pkg.go.dev/net/http#Request.Referer
+			w.logger.Debugf("Found Referrer header value: %s, Host value: %s", ref, remoteHostUrl.Host)
+			req.Header.Del("Referrer")
+		}
+
 		return req, nil
 	}
 }
