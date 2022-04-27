@@ -37,6 +37,7 @@ type Dial struct {
 
 func New(logger *logger.Logger,
 	ch chan smsg.StreamMessage,
+	doneChan chan struct{},
 	remoteHost string,
 	remotePort int) (*Dial, error) {
 
@@ -50,18 +51,15 @@ func New(logger *logger.Logger,
 	} else {
 		return &Dial{
 			logger:           logger,
-			doneChan:         make(chan struct{}),
+			doneChan:         doneChan,
 			streamOutputChan: ch,
 			remoteAddress:    raddr,
 		}, nil
 	}
 }
 
-func (d *Dial) Done() <-chan struct{} {
-	return d.doneChan
-}
-
 func (d *Dial) Kill() {
+	d.tmb.Kill(nil)
 	d.remoteConnection.Close()
 	d.tmb.Wait()
 }

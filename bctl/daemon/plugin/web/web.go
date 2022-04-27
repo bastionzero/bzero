@@ -40,6 +40,7 @@ type WebDaemonPlugin struct {
 func New(logger *logger.Logger, remoteHost string, remotePort int) *WebDaemonPlugin {
 	return &WebDaemonPlugin{
 		logger:         logger,
+		doneChan:       make(chan struct{}),
 		outputQueue:    make(chan plugin.ActionWrapper, 5),
 		remoteHost:     remoteHost,
 		remotePort:     remotePort,

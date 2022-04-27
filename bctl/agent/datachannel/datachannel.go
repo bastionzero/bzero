@@ -10,6 +10,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/db"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -291,8 +292,8 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 		d.plugin, err = db.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Web:
 		d.plugin, err = web.New(subLogger, streamOutputChan, action, payload)
-	// case bzplugin.Shell:
-	// 	d.plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+	case bzplugin.Shell:
+		d.plugin, err = shell.New(subLogger, streamOutputChan, action, payload)
 	default:
 		return fmt.Errorf("unrecognized plugin name")
 	}

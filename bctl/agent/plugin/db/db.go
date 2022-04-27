@@ -13,7 +13,6 @@ import (
 
 type IDbAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
-	Done() <-chan struct{}
 	Kill()
 }
 
@@ -22,6 +21,7 @@ type DbPlugin struct {
 
 	action           IDbAction
 	streamOutputChan chan smsg.StreamMessage
+	doneChan         chan struct{}
 
 	// Either use the host:port
 	remotePort int
@@ -34,8 +34,8 @@ func New(logger *logger.Logger,
 	payload []byte) (*DbPlugin, error) {
 
 	// Unmarshal the Syn payload
-	var synPayload db.DbActionParams
-	if err := json.Unmarshal(payload, &synPayload); err != nil {
+	var syn db.DbActionParams
+	if err := json.Unmarshal(payload, &syn); err != nil {
 		return nil, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
@@ -43,8 +43,9 @@ func New(logger *logger.Logger,
 	plugin := &DbPlugin{
 		logger:           logger,
 		streamOutputChan: ch,
-		remotePort:       synPayload.RemotePort,
-		remoteHost:       synPayload.RemoteHost,
+		doneChan:         make(chan struct{}),
+		remotePort:       syn.RemotePort,
+		remoteHost:       syn.RemoteHost,
 	}
 
 	// Start up the action for this plugin
@@ -56,7 +57,7 @@ func New(logger *logger.Logger,
 
 		switch parsedAction {
 		case db.Dial:
-			plugin.action, rerr = dial.New(subLogger, plugin.streamOutputChan, synPayload.RemoteHost, synPayload.RemotePort)
+			plugin.action, rerr = dial.New(subLogger, plugin.streamOutputChan, plugin.doneChan, syn.RemoteHost, syn.RemotePort)
 		default:
 			rerr = fmt.Errorf("unhandled DB action")
 		}
@@ -71,13 +72,7 @@ func New(logger *logger.Logger,
 }
 
 func (d *DbPlugin) Done() <-chan struct{} {
-	if d.action != nil {
-		return d.action.Done()
-	} else {
-		doneChan := make(chan struct{})
-		close(doneChan)
-		return doneChan
-	}
+	return d.doneChan
 }
 
 func (d *DbPlugin) Kill() {

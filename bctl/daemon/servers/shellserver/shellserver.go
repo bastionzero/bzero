@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
@@ -138,6 +139,12 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 					dc.Close(errors.New("shell server exiting...closing datachannel"))
 					return
 				case <-dcTmb.Dead():
+					if dcTmb.Err() != nil {
+						// let's just take our innermost error to give the user
+						errs := strings.Split(dcTmb.Err().Error(), ": ")
+						errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
+						os.Stdout.Write([]byte(errorString))
+					}
 					errorCode := 1
 					os.Exit(errorCode)
 				}

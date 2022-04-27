@@ -112,9 +112,26 @@ func New(logger *logger.Logger,
 		defer dc.logger.Info("DONE WITH MAIN GO ROUTINE")
 
 		// wait for an error or mrzap message from the agent to come in
-		if err := dc.handshakeOrTimeout(); err != nil {
-			return err
+		select {
+		case <-dc.tmb.Dying():
+			return nil
+		case agentMessage := <-dc.inputChan:
+			switch am.MessageType(agentMessage.MessageType) {
+			case am.Error:
+				return fmt.Errorf("daemon cannot recover from an error on the initial syn")
+			case am.Keysplitting:
+				if err := dc.handleKeysplitting(agentMessage); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("datachannel must start with a mrzap or error message, recieved: %s", agentMessage.MessageType)
+			}
+		case <-time.After(handshakeTimeout):
+			return fmt.Errorf("handshake timed out")
 		}
+		// if err := dc.handshakeOrTimeout(); err != nil {
+		// 	return err
+		// }
 		dc.logger.Info("Initial handshake complete")
 
 		for {
@@ -163,26 +180,25 @@ func (d *DataChannel) waitOrTimeout() error {
 	}
 }
 
-func (d *DataChannel) handshakeOrTimeout() error {
-	select {
-	case <-d.tmb.Dying():
-		return nil
-	case agentMessage := <-d.inputChan:
-		switch am.MessageType(agentMessage.MessageType) {
-		case am.Error:
-			return fmt.Errorf("daemon cannot recover from an error on the initial syn")
-		case am.Keysplitting:
-			if err := d.handleKeysplitting(agentMessage); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("datachannel must start with a mrzap or error message, recieved: %s", agentMessage.MessageType)
-		}
-	case <-time.After(handshakeTimeout):
-		return fmt.Errorf("handshake timed out")
-	}
-	return fmt.Errorf("something unexpected has occurred")
-}
+// func (d *DataChannel) handshakeOrTimeout() error {
+// 	select {
+// 	case <-d.tmb.Dying():
+// 		return nil
+// 	case agentMessage := <-d.inputChan:
+// 		switch am.MessageType(agentMessage.MessageType) {
+// 		case am.Error:
+// 			return fmt.Errorf("daemon cannot recover from an error on the initial syn")
+// 		case am.Keysplitting:
+// 			if err := d.handleKeysplitting(agentMessage); err != nil {
+// 				return err
+// 			}
+// 		default:
+// 			return fmt.Errorf("datachannel must start with a mrzap or error message, recieved: %s", agentMessage.MessageType)
+// 		}
+// 	case <-time.After(handshakeTimeout):
+// 		return fmt.Errorf("handshake timed out")
+// 	}
+// }
 
 func (d *DataChannel) sendKeysplitting() error {
 	defer d.logger.Info("DONE WITH SEND KEYSPLITTING")
@@ -327,7 +343,7 @@ func (d *DataChannel) handleError(agentMessage *am.AgentMessage) error {
 			return nil
 		}
 	default:
-		return fmt.Errorf("received fatal error from agent: %s", errMessage.Message)
+		return fmt.Errorf("received fatal %s error from agent: %s", errMessage.Type, errMessage.Message)
 	}
 }
 

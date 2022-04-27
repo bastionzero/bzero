@@ -33,15 +33,15 @@ type DialAction struct {
 	doneChan chan struct{}
 }
 
-func New(logger *logger.Logger, requestId string, outputQueue chan plugin.ActionWrapper) *DialAction {
+func New(logger *logger.Logger, requestId string, outputQueue chan plugin.ActionWrapper, doneChan chan struct{}) *DialAction {
 
 	dial := &DialAction{
 		logger:    logger,
 		requestId: requestId,
 
 		outputChan:      outputQueue,
-		streamInputChan: make(chan smsg.StreamMessage, 30),
-		doneChan:        make(chan struct{}),
+		streamInputChan: make(chan smsg.StreamMessage, 10),
+		doneChan:        doneChan,
 	}
 
 	return dial
@@ -68,6 +68,7 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 
 			for {
 				if n, err := lconn.Read(buf); !d.tmb.Alive() {
+					d.logger.Info("ACTION TOMB DEAD")
 					return nil
 				} else if err != nil {
 					// print our error message
@@ -118,7 +119,8 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 					// if we got an old-fashioned end message or a newfangled one
 					if streamMessage.Type == smsg.DbStreamEnd || (streamMessage.Type == smsg.Stream && !streamMessage.More) {
 						// since there's no more stream coming, close the local connection
-						return fmt.Errorf("remote tcp connection has been closed, closing local tcp connection")
+						d.logger.Errorf("remote tcp connection has been closed, closing local tcp connection")
+						return nil
 
 						// again, might have gotten an old or new message depending on what we asked for
 					} else if streamMessage.Type == smsg.DbStream || streamMessage.Type == smsg.Stream {
@@ -128,12 +130,10 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 							// Set a deadline for the write so we don't block forever
 							lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
 							if _, err := lconn.Write(contentBytes); err != nil {
-								return fmt.Errorf("error writing to local TCP connection: %s", err)
+								d.logger.Errorf("error writing to local TCP connection: %s", err)
+								return nil
 							}
 						}
-
-						// since there's no more stream coming, close the local connection
-						return fmt.Errorf("remote tcp connection has been closed, closing local tcp connection")
 					} else {
 						d.logger.Debugf("unhandled stream type: %s", streamMessage.Type)
 					}

@@ -94,7 +94,6 @@ func (w *WebDialAction) Start(writer http.ResponseWriter, request *http.Request)
 					RequestId: w.requestId,
 				},
 			}
-
 			return fmt.Errorf("http request cancelled")
 		case data := <-w.streamInputChan:
 			// may have gotten an old-fashioned or newfangled message type, depending on what we asked for

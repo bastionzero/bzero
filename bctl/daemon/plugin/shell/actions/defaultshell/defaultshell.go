@@ -28,24 +28,18 @@ type DefaultShell struct {
 
 	outputChan chan plugin.ActionWrapper // plugin's output queue
 	doneChan   chan struct{}
-	//streamInputChan chan smsg.StreamMessage
 
 	// channel where we push each individual keypress byte from StdIn
 	stdInChan chan byte
 }
 
-func New(logger *logger.Logger, outputQueue chan plugin.ActionWrapper) *DefaultShell {
-
-	shellAction := &DefaultShell{
-		logger: logger,
-
+func New(logger *logger.Logger, outputQueue chan plugin.ActionWrapper, doneChan chan struct{}) *DefaultShell {
+	return &DefaultShell{
+		logger:     logger,
 		outputChan: outputQueue,
-		doneChan:   make(chan struct{}),
-		//streamInputChan: make(chan smsg.StreamMessage, 10),
-		stdInChan: make(chan byte, InputBufferSize),
+		doneChan:   doneChan,
+		stdInChan:  make(chan byte, InputBufferSize),
 	}
-
-	return shellAction
 }
 
 func (d *DefaultShell) Done() <-chan struct{} {
@@ -54,7 +48,6 @@ func (d *DefaultShell) Done() <-chan struct{} {
 
 func (d *DefaultShell) Kill() {
 	d.tmb.Kill(nil)
-	d.tmb.Wait()
 }
 
 func (d *DefaultShell) Start(attach bool) error {
@@ -81,9 +74,6 @@ func (d *DefaultShell) Start(attach bool) error {
 	d.sendTerminalSize()
 	d.listenForTerminalSizeChanges()
 
-	// listen to stream messages on input chan and write to stdout
-	// go d.handleStreamMessages()
-
 	// reading Stdin in raw mode and forward keypresses after debouncing
 	go d.sendStdIn()
 	d.tmb.Go(func() error {
@@ -105,8 +95,9 @@ func (d *DefaultShell) Start(attach bool) error {
 			case <-d.tmb.Dying():
 				return nil
 			default:
-				n, err := os.Stdin.Read(b)
-				if err != nil || n != 1 {
+				if n, err := os.Stdin.Read(b); !d.tmb.Alive() {
+					return nil
+				} else if err != nil || n != 1 {
 					return fmt.Errorf("error reading last keypress from Stdin: %s", err)
 				}
 
@@ -142,66 +133,12 @@ func (d *DefaultShell) ReceiveStream(smessage smsg.StreamMessage) {
 		}
 	case smsg.Stop:
 		d.tmb.Kill(fmt.Errorf("received shell quit stream message"))
+		d.tmb.Wait()
 		return
 	default:
 		d.logger.Errorf("unhandled stream type: %s", smessage.Type)
 	}
 }
-
-// func (d *DefaultShell) handleStreamMessages() {
-// 	for {
-// 		select {
-// 		case <-d.tmb.Dying():
-// 			return
-// 		case streamMessage := <-d.streamInputChan:
-// 			// process the incoming stream messages
-// 			switch smsg.StreamType(streamMessage.Type) {
-// 			case smsg.StdOut:
-// 				if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
-// 					d.logger.Errorf("Error decoding ShellStdOut stream content: %s", err)
-// 				} else {
-// 					if _, err = os.Stdout.Write(contentBytes); err != nil {
-// 						d.logger.Errorf("Error writing to Stdout: %s", err)
-// 					}
-// 				}
-// 			case smsg.Stop:
-// 				d.tmb.Kill(fmt.Errorf("received shell quit stream message"))
-// 				return
-// 			default:
-// 				d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
-// 			}
-// 		}
-// 	}
-// }
-
-// Reads from StdIn and pushes to an input channel
-// func (d *DefaultShell) readStdIn() error {
-// 	defer d.logger.Infof("closing action: %s", d.tmb.Err())
-
-// 	// switch stdin into 'raw' mode
-// 	// https://pkg.go.dev/golang.org/x/term#pkg-overview
-// 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-// 	if err != nil {
-// 		return fmt.Errorf("Error switching std to raw mode: %s", err)
-// 	}
-// 	defer term.Restore(int(os.Stdin.Fd()), oldState)
-
-// 	b := make([]byte, 1)
-
-// 	for {
-// 		select {
-// 		case <-d.tmb.Dying():
-// 			return nil
-// 		default:
-// 			n, err := os.Stdin.Read(b)
-// 			if err != nil || n != 1 {
-// 				return fmt.Errorf("error reading last keypress from Stdin: %s", err)
-// 			}
-
-// 			d.stdInChan <- b[0]
-// 		}
-// 	}
-// }
 
 // processes input channel by debouncing all keypresses within a time interval
 func (d *DefaultShell) sendStdIn() {

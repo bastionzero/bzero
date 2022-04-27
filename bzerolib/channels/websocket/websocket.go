@@ -72,11 +72,12 @@ type signalRInvocationMessage struct {
 
 // This will be the client that we use to store our websocket connection
 type Websocket struct {
+	tmb    tomb.Tomb
+	logger *logger.Logger
+
 	client     *websocket.Conn
-	logger     *logger.Logger
 	ready      bool
 	subscribed bool
-	tmb        tomb.Tomb
 	channels   map[string]IChannel
 
 	// Ref: https://github.com/gorilla/websocket/issues/119#issuecomment-198710015
@@ -310,9 +311,9 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 				}
 				if completionMessage.Result != nil {
 					if completionMessage.Result.Error {
-						w.logger.Errorf("Error invoking Agent message type %s on datachannel %s. Error: %s", message.MessageType, message.ChannelId, *completionMessage.Result.ErrorMessage)
+						w.logger.Errorf("Error invoking Agent message type %s. Error: %s", message.MessageType, message.ChannelId, *completionMessage.Result.ErrorMessage)
 					} else {
-						w.logger.Infof("Successfully completed invocation for Agent message type %s on datachannel %s", message.MessageType, message.ChannelId)
+						w.logger.Tracef("Successfully completed invocation for Agent message type %s", message.MessageType)
 					}
 				}
 

@@ -9,25 +9,24 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 type IShellAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
+	Kill()
 }
 
 type ShellPlugin struct {
 	logger *logger.Logger
-	tmb    *tomb.Tomb // datachannel's tomb
 
 	action           IShellAction
 	streamOutputChan chan smsg.StreamMessage
+	doneChan         chan struct{}
 
 	runAsUser string
 }
 
-func New(parentTmb *tomb.Tomb,
-	logger *logger.Logger,
+func New(logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	action string,
 	payload []byte) (*ShellPlugin, error) {
@@ -41,8 +40,8 @@ func New(parentTmb *tomb.Tomb,
 	// Create our plugin
 	plugin := &ShellPlugin{
 		logger:           logger,
-		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,
+		doneChan:         make(chan struct{}),
 		runAsUser:        synPayload.TargetUser,
 	}
 
@@ -53,7 +52,7 @@ func New(parentTmb *tomb.Tomb,
 	} else {
 		switch parsedAction {
 		case shell.DefaultShell:
-			if act, err := defaultshell.New(plugin.tmb, subLogger, plugin.streamOutputChan, plugin.runAsUser); err != nil {
+			if act, err := defaultshell.New(subLogger, plugin.streamOutputChan, plugin.doneChan, plugin.runAsUser); err != nil {
 				return nil, fmt.Errorf("could not start new action: %s", err)
 			} else {
 				plugin.logger.Infof("Shell plugin started %v action", action)
@@ -82,6 +81,16 @@ func parseAction(action string) (shell.ShellAction, error) {
 		return "", fmt.Errorf("malformed action: %s", action)
 	}
 	return shell.ShellAction(parsedAction[1]), nil
+}
+
+func (s *ShellPlugin) Done() <-chan struct{} {
+	return s.doneChan
+}
+
+func (s *ShellPlugin) Kill() {
+	if s.action != nil {
+		s.action.Kill()
+	}
 }
 
 // func cleanPayload(payload []byte) ([]byte, error) {

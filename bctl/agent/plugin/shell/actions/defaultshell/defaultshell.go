@@ -13,7 +13,6 @@ import (
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	"bastionzero.com/bctl/v1/bzerolib/ringbuffer"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 // DefaultShell - Allows launching an interactive shell on the host which the agent is running on. Implements IShellAction.
@@ -53,11 +52,10 @@ type IPseudoTerminal interface {
 }
 
 type DefaultShell struct {
-	tmb    *tomb.Tomb // datachannel's tomb
 	logger *logger.Logger
 
-	runAsUser string
-
+	runAsUser            string
+	doneChan             chan struct{}
 	streamOutputChan     chan smsg.StreamMessage
 	streamSequenceNumber int
 
@@ -70,17 +68,23 @@ type DefaultShell struct {
 
 // New returns a new instance of the DefaultShell
 func New(
-	parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
+	doneChan chan struct{},
 	runAsUser string) (*DefaultShell, error) {
 	return &DefaultShell{
 		runAsUser:            runAsUser,
 		logger:               logger,
-		tmb:                  parentTmb, // if datachannel dies, so should we
 		streamOutputChan:     ch,
 		streamSequenceNumber: 1,
 	}, nil
+}
+
+func (d *DefaultShell) Kill() {
+	if d.terminal != nil {
+		d.terminal.Kill()
+		<-d.doneChan
+	}
 }
 
 // Receive takes input from a client using the MRZAP datachannel and returns output via the MRZAP datachannel
@@ -150,16 +154,6 @@ func (d *DefaultShell) open() error {
 		d.terminal = terminal
 	}
 
-	go func() {
-		select {
-		case <-d.tmb.Dying():
-			d.terminal.Kill()
-			return
-		case <-d.terminal.Done():
-			return
-		}
-	}()
-
 	go d.writePump()
 
 	return nil
@@ -192,6 +186,7 @@ func (d *DefaultShell) setSize(cols, rows uint32) error {
 
 // writePump reads from pty stdout and writes to datachannel.
 func (d *DefaultShell) writePump() {
+	defer close(d.doneChan)
 	defer func() {
 		if err := recover(); err != nil {
 			d.logger.Errorf("WritePump thread crashed with message: %s", err)
