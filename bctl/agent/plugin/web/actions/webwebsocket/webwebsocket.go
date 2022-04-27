@@ -16,9 +16,8 @@ import (
 )
 
 type WebWebsocket struct {
-	logger *logger.Logger
-	tmb    *tomb.Tomb
-
+	tmb      tomb.Tomb
+	logger   *logger.Logger
 	doneChan chan struct{}
 
 	// output channel to send all of our stream messages directly to datachannel
@@ -29,19 +28,19 @@ type WebWebsocket struct {
 
 	remoteHost string
 	remotePort int
-
-	requestId string
+	requestId  string
 }
 
 func New(logger *logger.Logger,
+	streamChan chan smsg.StreamMessage,
+	doneChan chan struct{},
 	remoteHost string,
-	remotePort int,
-	ch chan smsg.StreamMessage) (*WebWebsocket, error) {
+	remotePort int) (*WebWebsocket, error) {
 
 	return &WebWebsocket{
 		logger:           logger,
-		doneChan:         make(chan struct{}),
-		streamOutputChan: ch,
+		doneChan:         doneChan,
+		streamOutputChan: streamChan,
 		remoteHost:       remoteHost,
 		remotePort:       remotePort,
 	}, nil
@@ -166,7 +165,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 		defer close(w.doneChan)
 
 		for {
-			if mt, message, err := ws.ReadMessage(); w.tmb.Err() != tomb.ErrStillAlive {
+			if mt, message, err := ws.ReadMessage(); !w.tmb.Alive() {
 				return nil
 			} else if err != nil {
 				w.logger.Infof("Read websocket error: %s", err)

@@ -32,13 +32,14 @@ type IPlugin interface {
 }
 
 type DataChannel struct {
-	websocket websocket.IWebsocket
-	logger    *logger.Logger
-	tmb       tomb.Tomb
-	id        string
+	tmb    tomb.Tomb
+	logger *logger.Logger
 
-	plugin       IPlugin
+	id string
+
+	websocket    websocket.IWebsocket
 	keysplitting IKeysplitting
+	plugin       IPlugin
 
 	// incoming and outgoing message channels
 	inputChan  chan am.AgentMessage
@@ -48,14 +49,14 @@ type DataChannel struct {
 func New(parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	websocket websocket.IWebsocket,
+	keysplitter IKeysplitting,
 	id string,
-	syn []byte,
-	keysplitter IKeysplitting) (*DataChannel, error) {
+	syn []byte) (*DataChannel, error) {
 
 	datachannel := &DataChannel{
 		logger:       logger,
-		websocket:    websocket,
 		id:           id,
+		websocket:    websocket,
 		keysplitting: keysplitter,
 		inputChan:    make(chan am.AgentMessage, 50),
 		outputChan:   make(chan am.AgentMessage, 10),
@@ -73,7 +74,9 @@ func New(parentTmb *tomb.Tomb,
 	}
 
 	// process our syn to startup the plugin
-	datachannel.handleKeysplittingMessage(&synPayload)
+	if err := datachannel.handleKeysplittingMessage(&synPayload); err != nil {
+		return nil, err
+	}
 
 	// listener for incoming messages
 	datachannel.tmb.Go(func() error {
@@ -162,7 +165,7 @@ func (d *DataChannel) sendError(errType bzerror.ErrorType, err error, hash strin
 
 func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 	// only push to input channel if we're alive (aka not in the process of dying or already dead)
-	if d.tmb.Err() == tomb.ErrStillAlive {
+	if d.tmb.Alive() {
 		d.inputChan <- agentMessage
 	}
 }
@@ -179,16 +182,16 @@ func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
 			d.handleKeysplittingMessage(&ksMessage)
 		}
 	default:
-		rerr := fmt.Errorf("unhandled message type: %v", agentMessage.MessageType)
+		rerr := fmt.Errorf("unhandled message type: %s", agentMessage.MessageType)
 		d.sendError(bzerror.ComponentProcessingError, rerr, "")
 	}
 }
 
-func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.KeysplittingMessage) {
+func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.KeysplittingMessage) error {
 	if err := d.keysplitting.Validate(keysplittingMessage); err != nil {
 		rerr := fmt.Errorf("invalid keysplitting message: %s", err)
 		d.sendError(bzerror.KeysplittingValidationError, rerr, keysplittingMessage.Hash())
-		return
+		return rerr
 	}
 
 	switch keysplittingMessage.Type {
@@ -200,13 +203,13 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 			if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
 				rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
 				d.sendError(bzerror.ComponentProcessingError, rerr, keysplittingMessage.Hash())
-				return
+				return rerr
 			} else {
 				// Start plugin based on action
 				actionPrefix := parsedAction[0]
 				if err := d.startPlugin(bzplugin.PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
 					d.sendError(bzerror.ComponentStartupError, err, keysplittingMessage.Hash())
-					return
+					return err
 				}
 			}
 
@@ -239,7 +242,7 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 		if d.plugin == nil { // Can't process data message if no plugin created
 			rerr := fmt.Errorf("plugin does not exist")
 			d.sendError(bzerror.ComponentProcessingError, rerr, keysplittingMessage.Hash())
-			return
+			return rerr
 		}
 
 		// Send message to plugin and catch response action payload
@@ -255,7 +258,9 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	default:
 		rerr := fmt.Errorf("invalid Keysplitting Payload")
 		d.sendError(bzerror.ComponentProcessingError, rerr, keysplittingMessage.Hash())
+		return rerr
 	}
+	return nil
 }
 
 func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string, payload []byte) error {
@@ -275,7 +280,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 		}
 	}()
 
-	subLogger := d.logger.GetPluginLogger(string(pluginName))
+	subLogger := d.logger.GetPluginLogger(pluginName)
 
 	// var plugin plgn.IPlugin
 	var err error

@@ -1,4 +1,4 @@
-package shellplugin
+package shell
 
 import (
 	"fmt"
@@ -26,22 +26,24 @@ type ShellDaemonPlugin struct {
 	action IShellAction
 }
 
-func New(logger *logger.Logger, actionParams interface{}, attach bool) (*ShellDaemonPlugin, error) {
-	plugin := ShellDaemonPlugin{
+func New(logger *logger.Logger) *ShellDaemonPlugin {
+	return &ShellDaemonPlugin{
 		logger:      logger,
 		outputQueue: make(chan bzplugin.ActionWrapper, 10),
 	}
+}
 
+func (s *ShellDaemonPlugin) StartAction(attach bool) error {
 	// Create the DefaultShell action
-	actLogger := logger.GetActionLogger(string(bzshell.DefaultShell))
-	plugin.action = defaultshell.New(actLogger, plugin.outputQueue)
+	actLogger := s.logger.GetActionLogger(string(bzshell.DefaultShell))
+	s.action = defaultshell.New(actLogger, s.outputQueue)
 
 	// Start the shell action
-	if err := plugin.action.Start(attach); err != nil {
-		return &plugin, fmt.Errorf("error starting the shell action: %s", err)
+	if err := s.action.Start(attach); err != nil {
+		return fmt.Errorf("error starting the shell action: %s", err)
+	} else {
+		return nil
 	}
-
-	return &plugin, nil
 }
 
 func (s *ShellDaemonPlugin) Kill() {
@@ -82,8 +84,4 @@ func (s *ShellDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []b
 	default:
 		return nil
 	}
-}
-
-func (s *ShellDaemonPlugin) Feed(food interface{}) error {
-	return nil
 }

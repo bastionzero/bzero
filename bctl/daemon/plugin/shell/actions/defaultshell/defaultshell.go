@@ -23,7 +23,7 @@ const (
 )
 
 type DefaultShell struct {
-	tmb    *tomb.Tomb
+	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	outputChan chan plugin.ActionWrapper // plugin's output queue

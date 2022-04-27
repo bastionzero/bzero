@@ -3,14 +3,10 @@ package datachannel
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	tomb "gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
-	shell "bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
@@ -50,7 +46,6 @@ type IKeysplitting interface {
 type IPlugin interface {
 	ReceiveKeysplitting(action string, actionPayload []byte) error
 	ReceiveStream(smessage smsg.StreamMessage)
-	Feed(food interface{}) error
 	Outbox() <-chan bzplugin.ActionWrapper
 	Done() <-chan struct{}
 	// Err() function for bubbling up errors to the user?
@@ -67,7 +62,7 @@ type DataChannel struct {
 	plugin      IPlugin
 
 	// channels for incoming messages
-	inputChan chan am.AgentMessage
+	inputChan chan *am.AgentMessage
 
 	// if we receive an error than we ignore all messages in the mrzap queue until we hit a syn
 	ignoreMrZAP          bool
@@ -79,20 +74,19 @@ func New(logger *logger.Logger,
 	parentTmb *tomb.Tomb, // daemon has ability to rage quit and take everything down with it
 	websocket websocket.IWebsocket,
 	keysplitter IKeysplitting,
+	plugin IPlugin,
 	action string,
-	actionParams interface{},
+	synPayload interface{},
 	attach bool, // bool to indicate if we are attaching to an existing datachannel
 ) (*DataChannel, *tomb.Tomb, error) {
 
 	dc := &DataChannel{
-		logger: logger,
-		id:     id,
-
-		websocket:   websocket,
-		keysplitter: keysplitter,
-
-		inputChan: make(chan am.AgentMessage, 25),
-
+		logger:               logger,
+		id:                   id,
+		websocket:            websocket,
+		keysplitter:          keysplitter,
+		plugin:               plugin,
+		inputChan:            make(chan *am.AgentMessage, 50),
 		ignoreMrZAP:          false,
 		errorRecoveryAttempt: 0,
 	}
@@ -100,18 +94,13 @@ func New(logger *logger.Logger,
 	// register with websocket so datachannel can send and receive messages
 	websocket.Subscribe(id, dc)
 
-	// start our plugin
-	if err := dc.startPlugin(action, actionParams, attach); err != nil {
-		return nil, nil, err
-	}
-
 	if !attach {
 		// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
 		logger.Info("Sending request to agent to open a new datachannel")
-		if err := dc.openDataChannel(action, actionParams); err != nil {
+		if err := dc.openDataChannel(action, synPayload); err != nil {
 			return nil, nil, err
 		}
-	} else if _, err := keysplitter.BuildSyn(action, actionParams, true); err != nil {
+	} else if _, err := keysplitter.BuildSyn(action, synPayload, true); err != nil {
 		logger.Infof("Sending SYN on existing datachannel %s with actions %s.", dc.id, action)
 	} else {
 		return nil, nil, fmt.Errorf("failed to build and send syn for attachment flow")
@@ -119,36 +108,34 @@ func New(logger *logger.Logger,
 
 	dc.tmb.Go(func() error {
 		defer websocket.Unsubscribe(id) // causes decoupling from websocket
-		defer dc.logger.Infof("closing datachannel and its subsidiaries: %s", dc.tmb.Err())
+		// defer dc.logger.Infof("closing datachannel and its subsidiaries: %s", dc.tmb.Err())
 		defer dc.logger.Info("DONE WITH MAIN GO ROUTINE")
 
-		// wait for any message from the agent to come in
+		// wait for an error or mrzap message from the agent to come in
 		if err := dc.handshakeOrTimeout(); err != nil {
 			return err
 		}
+		dc.logger.Info("Initial handshake complete")
 
 		for {
 			select {
 			case <-parentTmb.Dying(): // daemon is dying
+				dc.logger.Info("DONE 1")
 				return fmt.Errorf("daemon was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
+				dc.logger.Info("DONE 2")
 				dc.plugin.Kill()
 				return nil
 			case <-dc.plugin.Done():
-
-				// LUCIE: this is my dumb way of waiting for all incoming messages to receive before dying
-				// the purpose is more to absorb any errors than anything but we might be here a while
-				// with this particular solution
-				select {
-				case <-dc.inputChan:
-				case <-time.After(2 * time.Second):
-					return fmt.Errorf("datachannel's sole plugin is closed")
-				}
+				dc.logger.Info("DONE 3")
+				// wait for any in-flight messages to come in or timeout
+				return dc.waitOrTimeout()
 			case agentMessage := <-dc.inputChan: // receive messages
 				if err := dc.processInputMessage(agentMessage); err != nil {
 					dc.logger.Error(err)
 				}
-			case <-time.After(datachannelLifetime):
+			case <-time.After(datachannelLifetime): // idle timeout
+				dc.logger.Info("DONE 5")
 				return fmt.Errorf("cleaning up stale datachannel")
 			}
 		}
@@ -158,6 +145,22 @@ func New(logger *logger.Logger,
 	go dc.zapPluginOutput()
 
 	return dc, &dc.tmb, nil
+}
+
+func (d *DataChannel) waitOrTimeout() error {
+	// LUCIE: this is a maybe okay solution for waiting for all incoming messages to receive before dying
+	// the purpose is more to absorb any errors than anything
+	absoluteTimeout := time.NewTicker(15 * time.Second)
+	defer absoluteTimeout.Stop()
+	for {
+		select {
+		case <-d.inputChan:
+		case <-time.After(2 * time.Second): // idle timeout
+			return fmt.Errorf("datachannel's sole plugin is closed")
+		case <-absoluteTimeout.C:
+			return fmt.Errorf("timed out waiting to finish receiving messages after plugin closing")
+		}
+	}
 }
 
 func (d *DataChannel) handshakeOrTimeout() error {
@@ -178,7 +181,7 @@ func (d *DataChannel) handshakeOrTimeout() error {
 	case <-time.After(handshakeTimeout):
 		return fmt.Errorf("handshake timed out")
 	}
-	return fmt.Errorf("some epic failure has occurred")
+	return fmt.Errorf("something unexpected has occurred")
 }
 
 func (d *DataChannel) sendKeysplitting() error {
@@ -222,8 +225,8 @@ func (d *DataChannel) Close(reason error) {
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
 }
 
-func (d *DataChannel) openDataChannel(action string, actionParams interface{}) error {
-	synMessage, err := d.keysplitter.BuildSyn(action, actionParams, false)
+func (d *DataChannel) openDataChannel(action string, synPayload interface{}) error {
+	synMessage, err := d.keysplitter.BuildSyn(action, synPayload, false)
 	if err != nil {
 		return fmt.Errorf("error building syn: %s", err)
 	}
@@ -239,7 +242,7 @@ func (d *DataChannel) openDataChannel(action string, actionParams interface{}) e
 		Action: action,
 	}
 
-	// Marshall the messagePayload
+	// Marshal the messagePayload
 	messagePayloadBytes, err := json.Marshal(messagePayload)
 	if err != nil {
 		return fmt.Errorf("error marshalling OpenDataChannelPayload: %s", err)
@@ -254,55 +257,6 @@ func (d *DataChannel) openDataChannel(action string, actionParams interface{}) e
 	d.websocket.Send(odMessage)
 
 	return nil
-}
-
-func (d *DataChannel) startPlugin(action string, actionParams interface{}, attach bool) error {
-	// start plugin based on name
-	pluginName := parsePluginName(action)
-	subLogger := d.logger.GetPluginLogger(string(pluginName))
-
-	var err error
-	switch pluginName {
-	// case Kube:
-	// 	d.plugin, err = kube.New(subLogger, kubeParams)
-	case bzplugin.Db:
-		d.plugin, err = db.New(subLogger, actionParams)
-	case bzplugin.Web:
-		d.plugin, err = web.New(subLogger, actionParams)
-	case bzplugin.Shell:
-		d.plugin, err = shell.New(subLogger, actionParams, attach)
-	default:
-		return fmt.Errorf("unrecognized plugin: %s", pluginName)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to start %s daemon plugin: %s", pluginName, err)
-	}
-	d.logger.Infof("Started %v plugin", pluginName)
-	return nil
-}
-
-func parsePluginName(action string) bzplugin.PluginName {
-	// parse our plugin name
-	parsedAction := strings.Split(action, "/")
-	if len(parsedAction) == 0 {
-		return ""
-	} else {
-		return bzplugin.PluginName(parsedAction[0])
-	}
-}
-
-func (d *DataChannel) Feed(data interface{}) error {
-	d.logger.Info("TRYING TO EAT SOMETHING")
-	if d.tmb.Err() != tomb.ErrStillAlive {
-		return fmt.Errorf("could not feed plugin because datachannel is dead")
-	}
-
-	if d.plugin != nil {
-		return d.plugin.Feed(data)
-	} else {
-		return fmt.Errorf("no plugin is associated with this datachannel")
-	}
 }
 
 // Wraps and sends the payload
@@ -321,12 +275,12 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 }
 
 func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
-	if d.tmb.Err() == tomb.ErrStillAlive {
-		d.inputChan <- agentMessage
+	if d.tmb.Alive() {
+		d.inputChan <- &agentMessage
 	}
 }
 
-func (d *DataChannel) processInputMessage(agentMessage am.AgentMessage) error {
+func (d *DataChannel) processInputMessage(agentMessage *am.AgentMessage) error {
 	d.logger.Infof("Datachannel received %v message", agentMessage.MessageType)
 
 	switch am.MessageType(agentMessage.MessageType) {
@@ -348,7 +302,7 @@ func (d *DataChannel) processInputMessage(agentMessage am.AgentMessage) error {
 	return nil
 }
 
-func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
+func (d *DataChannel) handleError(agentMessage *am.AgentMessage) error {
 	var errMessage rrr.ErrorMessage
 	if err := json.Unmarshal(agentMessage.MessagePayload, &errMessage); err != nil {
 		return fmt.Errorf("could not unmarshal error message: %s", err)
@@ -377,19 +331,17 @@ func (d *DataChannel) handleError(agentMessage am.AgentMessage) error {
 	}
 }
 
-func (d *DataChannel) handleStream(agentMessage am.AgentMessage) error {
+func (d *DataChannel) handleStream(agentMessage *am.AgentMessage) error {
 	var sMessage smsg.StreamMessage
 	if err := json.Unmarshal(agentMessage.MessagePayload, &sMessage); err != nil {
 		return fmt.Errorf("malformed Stream message")
-	} else if d.plugin == nil {
-		return fmt.Errorf("no active plugin")
 	} else {
 		d.plugin.ReceiveStream(sMessage)
 		return nil
 	}
 }
 
-func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
+func (d *DataChannel) handleKeysplitting(agentMessage *am.AgentMessage) error {
 	// unmarshal the keysplitting message
 	var ksMessage ksmsg.KeysplittingMessage
 	if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
@@ -408,12 +360,8 @@ func (d *DataChannel) handleKeysplitting(agentMessage am.AgentMessage) error {
 		d.errorRecoveryAttempt = 0
 
 		// Send message to plugin's input message handler
-		if d.plugin != nil {
-			if err := d.plugin.ReceiveKeysplitting(ksMessage.GetAction(), ksMessage.GetActionPayload()); err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("cannot send message to non-existent plugin")
+		if err := d.plugin.ReceiveKeysplitting(ksMessage.GetAction(), ksMessage.GetActionPayload()); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("unhandled keysplitting type")

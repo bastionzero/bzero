@@ -17,18 +17,17 @@ import (
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IWebDaemonAction interface {
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(Writer http.ResponseWriter, Request *http.Request) error //TODO: should not be capitals
-	Done() <-chan struct{}
+	Start(writer http.ResponseWriter, request *http.Request) error
 	Kill()
 }
 
 type WebDaemonPlugin struct {
-	logger *logger.Logger
+	logger   *logger.Logger
+	action   IWebDaemonAction
+	doneChan chan struct{}
 
 	// keysplitting output
 	outputQueue chan plugin.ActionWrapper
-
-	action IWebDaemonAction
 
 	// Web-specific vars
 	remoteHost string
@@ -38,24 +37,42 @@ type WebDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(logger *logger.Logger, actionParams interface{}) (*WebDaemonPlugin, error) {
-	if webActionParams, ok := actionParams.(bzweb.WebActionParams); !ok {
-		return nil, fmt.Errorf("malformed webaction params")
-	} else {
-		plugin := WebDaemonPlugin{
-			logger: logger,
+func New(logger *logger.Logger, remoteHost string, remotePort int) *WebDaemonPlugin {
+	return &WebDaemonPlugin{
+		logger:         logger,
+		outputQueue:    make(chan plugin.ActionWrapper, 5),
+		remoteHost:     remoteHost,
+		remotePort:     remotePort,
+		sequenceNumber: 0,
+	}
+}
 
-			outputQueue: make(chan plugin.ActionWrapper, 1),
+func (w *WebDaemonPlugin) StartAction(action bzweb.WebAction, writer http.ResponseWriter, request *http.Request) error {
+	// Always generate a requestId, each new web command is its own request
+	requestId := uuid.New().String()
 
-			remoteHost: webActionParams.RemoteHost,
-			remotePort: webActionParams.RemotePort,
+	// Create action logger
+	actLogger := w.logger.GetActionLogger(string(action))
 
-			sequenceNumber: 0,
-		}
-
-		return &plugin, nil
+	switch action {
+	case bzweb.Dial:
+		w.action = webdial.New(actLogger, requestId, w.outputQueue, w.doneChan)
+	case bzweb.Websocket:
+		w.action = webwebsocket.New(actLogger, requestId, w.outputQueue, w.doneChan)
+	default:
+		rerr := fmt.Errorf("unrecognized web action: %s", action)
+		w.logger.Error(rerr)
+		return rerr
 	}
 
+	w.logger.Infof("Web plugin created a %s action", action)
+
+	// send local tcp connection to action
+	if err := w.action.Start(writer, request); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (w *WebDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
@@ -63,13 +80,7 @@ func (w *WebDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
 }
 
 func (w *WebDaemonPlugin) Done() <-chan struct{} {
-	if w.action != nil {
-		return w.action.Done()
-	} else {
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
+	return w.doneChan
 }
 
 func (w *WebDaemonPlugin) Kill() {
@@ -93,38 +104,5 @@ func (w *WebDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byt
 	// the only keysplitting message that we would receive is the ack for our web action interrupt
 	// we don't do anything with it on the daemon side, so we receive it here and it will get logged
 	// but no particular action will be taken
-	return nil
-}
-
-func (w *WebDaemonPlugin) Feed(food interface{}) error {
-	// Make sure food matches what it says on the label
-	webFood, ok := food.(bzweb.WebFood)
-	if !ok {
-		return fmt.Errorf("web plugin's food did not match nutrition label: %+v", webFood)
-	}
-	// Always generate a requestId, each new web command is its own request
-	requestId := uuid.New().String()
-
-	// Create action logger
-	actLogger := w.logger.GetActionLogger(string(webFood.Action))
-
-	switch webFood.Action {
-	case bzweb.Dial:
-		w.action = webdial.New(actLogger, requestId, w.outputQueue)
-	case bzweb.Websocket:
-		w.action = webwebsocket.New(actLogger, requestId, w.outputQueue)
-	default:
-		rerr := fmt.Errorf("unrecognized web action: %v", string(webFood.Action))
-		w.logger.Error(rerr)
-		return rerr
-	}
-
-	w.logger.Infof("Web plugin created a %s action", string(webFood.Action))
-
-	// send local tcp connection to action
-	if err := w.action.Start(webFood.Writer, webFood.Request); err != nil {
-		w.logger.Error(fmt.Errorf("%s error: %s", string(webFood.Action), err))
-	}
-
 	return nil
 }

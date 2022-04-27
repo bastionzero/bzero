@@ -205,7 +205,7 @@ func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
 		return fmt.Errorf("agent does not have a websocket associated with id %s", connectionId)
 	} else if keysplitter, err := keysplitting.New(ksSubLogger, c.ksConfig); err != nil {
 		return err
-	} else if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn, keysplitter); err != nil {
+	} else if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, keysplitter, dcId, message.Syn); err != nil {
 		return err
 	} else {
 		// add our new datachannel to our connections dictionary

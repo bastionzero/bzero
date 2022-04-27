@@ -12,6 +12,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -19,15 +20,15 @@ const (
 )
 
 type WebDialAction struct {
-	logger *logger.Logger
-
+	tmb       tomb.Tomb
+	logger    *logger.Logger
 	requestId string
 
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
 
-	// done channel for letting the plugin know we're done
+	// plugin done channel for signalling to the datachannel we're done
 	doneChan chan struct{}
 
 	// keep track of our expected streams
@@ -35,32 +36,21 @@ type WebDialAction struct {
 	streamMessages         map[int]smsg.StreamMessage
 }
 
-func New(logger *logger.Logger,
-	requestId string,
-	outputChan chan plugin.ActionWrapper) *WebDialAction {
-
-	action := &WebDialAction{
-		logger:    logger,
-		requestId: requestId,
-
-		outputChan:      outputChan,
-		streamInputChan: make(chan smsg.StreamMessage, 50),
-		doneChan:        make(chan struct{}),
-
+func New(logger *logger.Logger, requestId string, outputChan chan plugin.ActionWrapper, doneChan chan struct{}) *WebDialAction {
+	return &WebDialAction{
+		logger:                 logger,
+		requestId:              requestId,
+		outputChan:             outputChan,
+		streamInputChan:        make(chan smsg.StreamMessage, 25),
+		doneChan:               doneChan,
 		expectedSequenceNumber: 0,
 		streamMessages:         make(map[int]smsg.StreamMessage),
 	}
-
-	return action
-}
-
-func (w *WebDialAction) Done() <-chan struct{} {
-	return w.doneChan
 }
 
 func (w *WebDialAction) Kill() {
-	w.logger.Info("we were told to die")
-	close(w.doneChan)
+	w.tmb.Killf("we were told to die")
+	w.tmb.Wait()
 }
 
 func (w *WebDialAction) Start(writer http.ResponseWriter, request *http.Request) error {
@@ -73,10 +63,7 @@ func (w *WebDialAction) Start(writer http.ResponseWriter, request *http.Request)
 		},
 	}
 
-	return w.handleHttpRequest(writer, request)
-}
-
-func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
+	// Listen to stream messages coming from bastion, and forward to our local connection
 	// this signals to the parent plugin that the action is done
 	defer close(w.doneChan)
 
@@ -91,9 +78,10 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 	// Send our request, in chunks if the body > chunksize
 	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
 
-	// Listen to stream messages coming from bastion, and forward to our local connection
 	for {
 		select {
+		case <-w.tmb.Dying():
+			return nil
 		case <-w.doneChan:
 			return nil
 		case <-request.Context().Done():
@@ -107,10 +95,11 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 				},
 			}
 
-			return nil
+			return fmt.Errorf("http request cancelled")
 		case data := <-w.streamInputChan:
 			// may have gotten an old-fashioned or newfangled message type, depending on what we asked for
-			if data.Type == smsg.WebStream || data.Type == smsg.WebStreamEnd || data.Type == smsg.Stream {
+			switch data.Type {
+			case smsg.WebStream, smsg.WebStreamEnd, smsg.Stream:
 				w.streamMessages[data.SequenceNumber] = data
 				// process the incoming stream messages *in order*
 				for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
@@ -147,7 +136,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						w.expectedSequenceNumber += 1
 					}
 				}
-			} else {
+			default:
 				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}

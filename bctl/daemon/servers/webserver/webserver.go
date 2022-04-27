@@ -4,16 +4,18 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
+
+	"github.com/google/uuid"
+	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
-	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -88,7 +90,7 @@ func StartWebServer(logger *logger.Logger,
 	go func() {
 		// Define our http handlers
 		// library will automatically put each call in its own thread
-		http.HandleFunc("/", listener.capRequestSize(listener.handleHttp))
+		http.HandleFunc("/", listener.handleHttp) //listener.capRequestSize(listener.handleHttp))
 
 		if err := http.ListenAndServe(fmt.Sprintf("%s:%s", localHost, localPort), nil); err != nil {
 			logger.Error(err)
@@ -100,59 +102,61 @@ func StartWebServer(logger *logger.Logger,
 
 // this function operates as middleware between the http handler and the handleHttp call below
 // it checks to see if someone is trying to send a request body that is far too large
-func (w *WebServer) capRequestSize(h http.HandlerFunc) http.HandlerFunc {
-	return func(writer http.ResponseWriter, request *http.Request) {
-		if strings.HasPrefix(request.Header.Get("Content-Type"), "multipart") {
-			if request.ContentLength > maxFileUpload {
-				// for multipart/form-data type requests, the request body won't exceed our maximum single request size
-				// but we still want to cap the size of uploads because they are stored in their entirety on the target.
-				// Not optimal, here's the ticket: CWC-1647
-				// We shouldn't be relying on content length too much since it can be modified to be whatever.
-				rerr := "BastionZero: Request is too large. Maximum upload is 150MB"
-				w.logger.Errorf(rerr)
-				http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
-				return
-			}
-		} else {
-			request.Body = http.MaxBytesReader(writer, request.Body, maxRequestSize)
-			if err := request.ParseForm(); err != nil {
-				rerr := "BastionZero: Request is too large. Maximum request size is 10MB"
-				w.logger.Errorf(rerr)
-				http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
-				return
-			}
-		}
+// func (w *WebServer) capRequestSize(h http.HandlerFunc) http.HandlerFunc {
+// 	return func(writer http.ResponseWriter, request *http.Request) {
+// 		if strings.HasPrefix(request.Header.Get("Content-Type"), "multipart") {
+// 			if request.ContentLength > maxFileUpload {
+// 				// for multipart/form-data type requests, the request body won't exceed our maximum single request size
+// 				// but we still want to cap the size of uploads because they are stored in their entirety on the target.
+// 				// Not optimal, here's the ticket: CWC-1647
+// 				// We shouldn't be relying on content length too much since it can be modified to be whatever.
+// 				rerr := "BastionZero: Request is too large. Maximum upload is 150MB"
+// 				w.logger.Errorf(rerr)
+// 				http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
+// 				return
+// 			}
+// 		} else {
+// 			request.Body = http.MaxBytesReader(writer, request.Body, maxRequestSize)
+// 			if err := request.ParseForm(); err != nil {
+// 				rerr := "BastionZero: Request is too large. Maximum request size is 10MB"
+// 				w.logger.Errorf(rerr)
+// 				http.Error(writer, rerr, http.StatusRequestEntityTooLarge)
+// 				return
+// 			}
+// 		}
 
-		h(writer, request)
-	}
-}
+// 		h(writer, request)
+// 	}
+// }
 
 func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request) {
-	action := bzweb.Dial
+	// create our new plugin and datachannel
+	subLogger := w.logger.GetPluginLogger(bzplugin.Web)
+	plugin := web.New(subLogger, w.targetHost, w.targetPort)
 
+	action := bzweb.Dial
 	// This will work for http 1.1 and that is what we need to support
 	// Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Upgrade
 	// Ref: https://datatracker.ietf.org/doc/html/rfc6455#section-1.7
-	isWebsocketRequest := request.Header.Get("Upgrade")
-	if isWebsocketRequest == "websocket" {
-		action = bzweb.Websocket
-	}
+	// isWebsocketRequest := request.Header.Get("Upgrade")
+	// if isWebsocketRequest == "websocket" {
+	// 	action = bzweb.Websocket
+	// }
 
-	food := bzweb.WebFood{
-		Action:  action,
-		Request: request,
-		Writer:  writer,
-	}
+	// web actions need to run in their own go routine because we need to determine the
+	// action at this layer by looking at the request so once we return, that request
+	// will cancel
+	go func() {
+		defer w.logger.Infof("RETURNED")
 
-	// create our new datachannel
-	w.logger.Info("CREATING NEW DATACHANNEL")
-	if dc, err := w.newDataChannel(string(action), w.websocket); err != nil {
+		if err := plugin.StartAction(action, writer, request); err != nil {
+			w.logger.Errorf("error starting action: %s", err)
+		}
+	}()
+
+	if err := w.newDataChannel(action, w.websocket, plugin); err != nil {
 		w.logger.Errorf("error starting datachannel: %s", err)
-	} else if err := dc.Feed(food); err != nil {
-		http.Error(writer, "BastionZero failed to establish connection with target. Please log in again.", http.StatusInternalServerError)
-		w.logger.Error(err)
 	}
-	w.logger.Info("TRIED TO FEED")
 }
 
 // for creating new websockets
@@ -167,26 +171,25 @@ func (h *WebServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websocket) (*datachannel.DataChannel, error) {
+func (w *WebServer) newDataChannel(action bzweb.WebAction, websocket *bzwebsocket.Websocket, plugin *web.WebDaemonPlugin) error {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
 	attach := false
 	subLogger := w.logger.GetDatachannelLogger(dcId)
 
-	w.logger.Infof("Creating new datachannel for web with id: %v", dcId)
+	w.logger.Infof("Creating new datachannel for web with id: %s", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
 	actionParams := bzweb.WebActionParams{
 		RemotePort: w.targetPort,
 		RemoteHost: w.targetHost,
 	}
-	action = "web/" + action
 
-	ksLogger := w.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, w.agentPubKey, w.configPath, w.refreshTokenCommand); err != nil {
-		return nil, err
-	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, action, actionParams, attach); err != nil {
-		return nil, err
+	mrzapLogger := w.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(mrzapLogger, w.agentPubKey, w.configPath, w.refreshTokenCommand); err != nil {
+		return err
+	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, string(action), actionParams, attach); err != nil {
+		return err
 	} else {
 
 		// create a function to listen to the datachannel dying and then laugh
@@ -208,6 +211,6 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 				}
 			}
 		}()
-		return datachannel, nil
+		return nil
 	}
 }

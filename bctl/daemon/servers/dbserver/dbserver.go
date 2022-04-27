@@ -5,14 +5,17 @@ import (
 	"net"
 	"os"
 
+	"github.com/google/uuid"
+	"gopkg.in/tomb.v2"
+
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
-	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -108,17 +111,11 @@ func StartDbServer(logger *logger.Logger,
 
 		// create our new datachannel in its own go routine so that we can accept other tcp connections
 		go func() {
-			if dc, err := listener.newDataChannel(string(bzdb.Dial), listener.websocket); err == nil {
-
-				// Start the dial plugin
-				food := bzdb.DbFood{
-					Action: bzdb.Dial,
-					Conn:   conn,
-				}
-				if err := dc.Feed(food); err != nil {
-					logger.Error(err)
-				}
-			} else {
+			pluginLogger := logger.GetPluginLogger(bzplugin.Db)
+			plugin := db.New(pluginLogger)
+			if err := plugin.StartAction(bzdb.Dial, conn); err != nil {
+				logger.Errorf("error starting action: %s", err)
+			} else if err := listener.newDataChannel(string(bzdb.Dial), listener.websocket, plugin); err != nil {
 				logger.Errorf("error starting datachannel: %s", err)
 			}
 		}()
@@ -137,7 +134,7 @@ func (d *DbServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
+func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket, plugin *db.DbDaemonPlugin) error {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
 	attach := false
@@ -145,8 +142,8 @@ func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 
 	d.logger.Infof("Creating new datachannel id: %s", dcId)
 
-	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := bzdb.DbActionParams{
+	// Build the synPayload to send to the datachannel to start the plugin
+	synPayload := bzdb.DbActionParams{
 		RemotePort: d.remotePort,
 		RemoteHost: d.remoteHost,
 	}
@@ -154,9 +151,9 @@ func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 	action = "db/" + action
 	ksLogger := d.logger.GetComponentLogger("mrzap")
 	if keysplitter, err := keysplitting.New(ksLogger, d.agentPubKey, d.configPath, d.refreshTokenCommand); err != nil {
-		return nil, err
-	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, action, actionParams, attach); err != nil {
-		return nil, err
+		return err
+	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, plugin, action, synPayload, attach); err != nil {
+		return err
 	} else {
 
 		// create a function to listen to the datachannel dying and then laugh
@@ -166,10 +163,7 @@ func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 				case <-d.tmb.Dying():
 					dc.Close(errors.New("db server closing"))
 					return
-				case <-dcTmb.Dying():
-					// Wait until everything is dead and any close processes are sent before killing the datachannel
-					dcTmb.Wait()
-
+				case <-dcTmb.Dead():
 					// notify agent to close the datachannel
 					d.logger.Info("Sending DataChannel Close")
 					cdMessage := am.AgentMessage{
@@ -182,6 +176,6 @@ func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket)
 				}
 			}
 		}()
-		return dc, nil
+		return nil
 	}
 }

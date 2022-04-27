@@ -67,11 +67,9 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 			sequenceNumber := 0
 
 			for {
-				if n, err := lconn.Read(buf); err != nil {
-					if d.tmb.Err() != tomb.ErrStillAlive {
-						return nil
-					}
-
+				if n, err := lconn.Read(buf); !d.tmb.Alive() {
+					return nil
+				} else if err != nil {
 					// print our error message
 					if err == io.EOF {
 						d.logger.Info("local tcp connection has been closed")
@@ -110,7 +108,7 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 			case <-d.tmb.Dying():
 				return nil
 			case data := <-d.streamInputChan:
-				if d.tmb.Err() != tomb.ErrStillAlive {
+				if !d.tmb.Alive() {
 					return nil
 				}
 				streamMessages[data.SequenceNumber] = data

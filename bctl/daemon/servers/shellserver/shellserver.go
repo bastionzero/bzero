@@ -2,16 +2,20 @@ package shellserver
 
 import (
 	"errors"
+	"fmt"
 	"os"
+
+	"github.com/google/uuid"
+	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
-	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -73,7 +77,7 @@ func StartShellServer(
 	}
 
 	// create our new datachannel
-	if _, err := shellServer.newDataChannel(string(bzshell.DefaultShell), shellServer.websocket); err != nil {
+	if err := shellServer.newDataChannel(string(bzshell.DefaultShell), shellServer.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 
@@ -92,7 +96,7 @@ func (ss *ShellServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
+func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websocket) error {
 	var attach bool
 	if ss.dataChannelId == "" {
 		ss.dataChannelId = uuid.New().String()
@@ -101,6 +105,13 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	} else {
 		attach = true
 		ss.logger.Infof("Attaching to an existing datachannel id: %s", ss.dataChannelId)
+	}
+
+	// create our plugin and start the action
+	pluginLogger := ss.logger.GetPluginLogger(bzplugin.Db)
+	plugin := shell.New(pluginLogger)
+	if err := plugin.StartAction(attach); err != nil {
+		return fmt.Errorf("failed to start action: %s", err)
 	}
 
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
@@ -114,9 +125,9 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	action = "shell/" + action
 	ksLogger := ss.logger.GetComponentLogger("mrzap")
 	if keysplitter, err := keysplitting.New(ksLogger, ss.agentPubKey, ss.configPath, ss.refreshTokenCommand); err != nil {
-		return nil, err
-	} else if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, action, actionParams, attach); err != nil {
-		return nil, err
+		return err
+	} else if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, actionParams, attach); err != nil {
+		return err
 	} else {
 
 		// create a function to listen to the datachannel dying and then exit the shell daemon process
@@ -132,6 +143,6 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 				}
 			}
 		}()
-		return dc, nil
+		return nil
 	}
 }

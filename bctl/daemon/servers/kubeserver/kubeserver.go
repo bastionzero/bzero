@@ -10,9 +10,6 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
-	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -152,60 +149,60 @@ func (h *KubeServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
-	dcId := uuid.New().String()
-	attach := false
-	subLogger := h.logger.GetDatachannelLogger(dcId)
+// func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocket, food interface{}) error {
+// 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+// 	dcId := uuid.New().String()
+// 	attach := false
+// 	subLogger := h.logger.GetDatachannelLogger(dcId)
 
-	h.logger.Infof("Creating new datachannel id: %v", dcId)
+// 	h.logger.Infof("Creating new datachannel id: %v", dcId)
 
-	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := bzkube.KubeActionParams{
-		TargetUser:   h.targetUser,
-		TargetGroups: h.targetGroups,
-	}
+// 	// Build the actionParams to send to the datachannel to start the plugin
+// 	actionParams := bzkube.KubeActionParams{
+// 		TargetUser:   h.targetUser,
+// 		TargetGroups: h.targetGroups,
+// 	}
 
-	action = "kube/" + action
-	ksLogger := h.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, h.agentPubKey, h.configPath, h.refreshTokenCommand); err != nil {
-		return nil, err
-	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, keysplitter, action, actionParams, attach); err != nil {
-		return nil, err
-	} else {
+// action = "kube/" + action
+// ksLogger := h.logger.GetComponentLogger("mrzap")
+// if keysplitter, err := keysplitting.New(ksLogger, h.agentPubKey, h.configPath, h.refreshTokenCommand); err != nil {
+// 	return err
+// } else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, keysplitter, action, actionParams, attach, food); err != nil {
+// 	return err
+// } else {
 
-		// create a function to listen to the datachannel dying and then laugh
-		go func() {
-			for {
-				select {
-				case <-h.tmb.Dying():
-					datachannel.Close(errors.New("kube server closing"))
-					return
-				case <-dcTmb.Dead():
-					// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
-					if err := dcTmb.Err(); err != nil {
-						h.exitMessage = dcTmb.Err().Error()
-					}
+// 	// create a function to listen to the datachannel dying and then laugh
+// 	go func() {
+// 		for {
+// 			select {
+// 			case <-h.tmb.Dying():
+// 				datachannel.Close(errors.New("kube server closing"))
+// 				return
+// 			case <-dcTmb.Dead():
+// 				// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
+// 				if err := dcTmb.Err(); err != nil {
+// 					h.exitMessage = dcTmb.Err().Error()
+// 				}
 
-					// notify agent to close the datachannel
-					h.logger.Info("Sending DataChannel Close")
-					cdMessage := am.AgentMessage{
-						ChannelId:   dcId,
-						MessageType: string(am.CloseDataChannel),
-					}
-					h.websocket.Send(cdMessage)
+// 				// notify agent to close the datachannel
+// 				h.logger.Info("Sending DataChannel Close")
+// 				cdMessage := am.AgentMessage{
+// 					ChannelId:   dcId,
+// 					MessageType: string(am.CloseDataChannel),
+// 				}
+// 				h.websocket.Send(cdMessage)
 
-					// close our websocket if the datachannel we closed was the last and it's not rest api
-					if bzkube.KubeAction(action) != bzkube.RestApi && h.websocket.SubscriberCount() == 0 {
-						h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
-					}
-					return
-				}
-			}
-		}()
-		return datachannel, nil
-	}
-}
+// 				// close our websocket if the datachannel we closed was the last and it's not rest api
+// 				if h.websocket.SubscriberCount() == 0 {
+// 					h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
+// 				}
+// 				return
+// 			}
+// 		}
+// 	}()
+// 	return nil
+// }
+// }
 
 func (h *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
 	w.WriteHeader(statusCode)
@@ -238,30 +235,28 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 	}
 
 	// Check if we have a command to extract
-	command := "N/A" // TODO: should be empty string
-	logId := uuid.New().String()
-	if len(tokensSplit) == 3 {
-		command = tokensSplit[1]
-		logId = tokensSplit[2]
-	}
+	// command := "N/A" // TODO: should be empty string
+	// logId := uuid.New().String()
+	// if len(tokensSplit) == 3 {
+	// 	command = tokensSplit[1]
+	// 	logId = tokensSplit[2]
+	// }
 
 	// Determine the action
-	action := getAction(r)
+	// action := getAction(r)
 
-	// Make food
-	food := kube.KubeFood{
-		Action:  action,
-		LogId:   logId,
-		Command: command,
-		Writer:  w,
-		Reader:  r,
-	}
+	// // Make food
+	// food := kube.KubeFood{
+	// 	Action:  action,
+	// 	LogId:   logId,
+	// 	Command: command,
+	// 	Writer:  w,
+	// 	Reader:  r,
+	// }
 
-	if datachannel, err := h.newDataChannel(string(action), h.websocket); err != nil {
-		h.logger.Error(err)
-	} else if err := datachannel.Feed(food); err != nil {
-		h.logger.Error(err)
-	}
+	// if datachannel, err := h.newDataChannel(string(action), h.websocket, food); err != nil {
+	// 	h.logger.Error(err)
+	// }
 }
 
 func getAction(req *http.Request) bzkube.KubeAction {

@@ -33,14 +33,35 @@ type DbDaemonPlugin struct {
 	sequenceNumber int
 }
 
-func New(logger *logger.Logger, actionParams interface{}) (*DbDaemonPlugin, error) {
-	plugin := DbDaemonPlugin{
+func New(logger *logger.Logger) *DbDaemonPlugin {
+	return &DbDaemonPlugin{
 		logger:         logger,
 		outputQueue:    make(chan plugin.ActionWrapper, 5),
 		sequenceNumber: 0,
 	}
+}
 
-	return &plugin, nil
+func (d *DbDaemonPlugin) StartAction(action bzdb.DbAction, conn *net.TCPConn) error {
+	// Make sure our food matches the nutrition label
+
+	requestId := uuid.New().String()
+	actLogger := d.logger.GetActionLogger(string(action))
+
+	switch action {
+	case bzdb.Dial:
+		d.action = dial.New(actLogger, requestId, d.outputQueue)
+	default:
+		return fmt.Errorf("unrecognized db action: %s", action)
+	}
+
+	d.logger.Infof("db plugin created %s action", action)
+
+	// send local tcp connection to action
+	if err := d.action.Start(conn); err != nil {
+		return fmt.Errorf("%s error: %s", action, err)
+	}
+
+	return nil
 }
 
 func (d *DbDaemonPlugin) Kill() {
@@ -50,13 +71,7 @@ func (d *DbDaemonPlugin) Kill() {
 }
 
 func (d *DbDaemonPlugin) Done() <-chan struct{} {
-	if d.action != nil {
-		return d.action.Done()
-	} else {
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
+	return d.action.Done()
 }
 
 func (d *DbDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
@@ -79,32 +94,5 @@ func (d *DbDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byte
 	// the only keysplitting message that we would receive is the ack from the agent after stopping the dial action
 	// we don't do anything with it on the daemon side, so we receive it here and it will get logged
 	// but no particular action will be taken
-	return nil
-}
-
-func (d *DbDaemonPlugin) Feed(food interface{}) error {
-	// Make sure our food matches the nutrition label
-	dbFood, ok := food.(bzdb.DbFood)
-	if !ok {
-		return fmt.Errorf("db food did not match nutrition label: %+v", food)
-	}
-
-	requestId := uuid.New().String()
-	actLogger := d.logger.GetActionLogger(string(dbFood.Action))
-
-	switch bzdb.DbAction(dbFood.Action) {
-	case bzdb.Dial:
-		d.action = dial.New(actLogger, requestId, d.outputQueue)
-	default:
-		return fmt.Errorf("unrecognized db action: %v", string(dbFood.Action))
-	}
-
-	d.logger.Infof("db plugin created %s action", string(dbFood.Action))
-
-	// send local tcp connection to action
-	if err := d.action.Start(dbFood.Conn); err != nil {
-		return fmt.Errorf("%s error: %s", string(dbFood.Action), err)
-	}
-
 	return nil
 }

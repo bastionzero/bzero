@@ -14,7 +14,6 @@ import (
 
 type IWebAction interface {
 	Receive(action string, actionPayload []byte) (string, []byte, error)
-	Done() <-chan struct{}
 	Kill()
 }
 
@@ -23,6 +22,7 @@ type WebPlugin struct {
 
 	action           IWebAction
 	streamOutputChan chan smsg.StreamMessage
+	doneChan         chan struct{}
 
 	// remote host:port
 	remotePort int
@@ -37,16 +37,14 @@ func New(logger *logger.Logger,
 	// Unmarshal the Syn payload
 	var actionPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &actionPayload); err != nil {
-		return nil, fmt.Errorf("malformed web plugin SYN payload %s", string(payload))
+		return nil, fmt.Errorf("malformed web plugin SYN payload")
 	}
 
 	plugin := &WebPlugin{
-		logger: logger,
-
+		logger:           logger,
 		streamOutputChan: ch,
-
-		remotePort: actionPayload.RemotePort,
-		remoteHost: actionPayload.RemoteHost,
+		remotePort:       actionPayload.RemotePort,
+		remoteHost:       actionPayload.RemoteHost,
 	}
 
 	// start the action for the plugin
@@ -58,16 +56,15 @@ func New(logger *logger.Logger,
 	} else {
 		switch parsedAction {
 		case bzweb.Dial:
-			plugin.action, rerr = webdial.New(subLogger, plugin.streamOutputChan, plugin.remoteHost, plugin.remotePort)
+			plugin.action, rerr = webdial.New(subLogger, plugin.streamOutputChan, plugin.doneChan, plugin.remoteHost, plugin.remotePort)
 		case bzweb.Websocket:
-			plugin.action, rerr = webwebsocket.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.streamOutputChan)
+			plugin.action, rerr = webwebsocket.New(subLogger, plugin.streamOutputChan, plugin.doneChan, plugin.remoteHost, plugin.remotePort)
 		default:
 			rerr = fmt.Errorf("unhandled Web action")
 		}
 	}
 
 	if rerr != nil {
-		plugin.logger.Errorf("failed to start Web plugin with action %s: %s", action, rerr)
 		return nil, rerr
 	} else {
 		plugin.logger.Infof("Web plugin started with %v action", action)
@@ -76,13 +73,7 @@ func New(logger *logger.Logger,
 }
 
 func (w *WebPlugin) Done() <-chan struct{} {
-	if w.action != nil {
-		return w.action.Done()
-	} else {
-		doneChan := make(chan struct{})
-		close(doneChan)
-		return doneChan
-	}
+	return w.doneChan
 }
 
 func (w *WebPlugin) Kill() {

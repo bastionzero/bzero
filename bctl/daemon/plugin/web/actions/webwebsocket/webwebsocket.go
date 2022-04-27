@@ -18,36 +18,29 @@ import (
 )
 
 type WebWebsocketAction struct {
-	tmb    tomb.Tomb
-	logger *logger.Logger
-
+	tmb       tomb.Tomb
+	logger    *logger.Logger
 	requestId string
 
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
 
-	// done channel for letting the plugin know we're done
+	// plugin done channel for signalling to the datachannel we're done
 	doneChan chan struct{}
 
 	sequenceNumber int
 }
 
-func New(logger *logger.Logger, requestId string, outputChan chan plugin.ActionWrapper) *WebWebsocketAction {
-
-	action := &WebWebsocketAction{
-		logger: logger,
-
-		requestId: requestId,
-
+func New(logger *logger.Logger, requestId string, outputChan chan plugin.ActionWrapper, doneChan chan struct{}) *WebWebsocketAction {
+	return &WebWebsocketAction{
+		logger:          logger,
+		requestId:       requestId,
 		outputChan:      outputChan,
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		doneChan:        make(chan struct{}),
-
-		sequenceNumber: 0,
+		doneChan:        doneChan,
+		sequenceNumber:  0,
 	}
-
-	return action
 }
 
 func (w *WebWebsocketAction) Start(writer http.ResponseWriter, request *http.Request) error {
@@ -84,11 +77,12 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 		log.Print("upgrade failed: ", err)
 		return err
 	}
-	defer conn.Close()
 
 	// Setup a go routine to stream data from the agent back to daemon
 	w.tmb.Go(func() error {
 		defer conn.Close()
+		defer close(w.doneChan)
+
 		for {
 			incomingMessage := <-w.streamInputChan
 			// may be getting an old-fashioned or newfangled message, depending on what we asked for
@@ -110,7 +104,7 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 
 	// Continuosly read
 	for {
-		if mt, message, err := conn.ReadMessage(); w.tmb.Err() != tomb.ErrStillAlive {
+		if mt, message, err := conn.ReadMessage(); !w.tmb.Alive() {
 			return nil
 		} else if err != nil {
 			w.logger.Infof("Read failed: %s", err)
@@ -122,7 +116,7 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 					RequestId: w.requestId,
 				},
 			}
-			break
+			return fmt.Errorf("failed to read from connection: %s", err)
 		} else {
 			// Convert the message to a string
 			messageBase64 := base64.StdEncoding.EncodeToString(message)
@@ -138,16 +132,11 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 			}
 		}
 	}
-	return nil
-}
-
-func (w *WebWebsocketAction) Done() <-chan struct{} {
-	return w.doneChan
 }
 
 func (w *WebWebsocketAction) Kill() {
 	w.tmb.Kill(fmt.Errorf("death requested by higher ups"))
-	<-w.doneChan
+	w.tmb.Wait()
 }
 
 func (w *WebWebsocketAction) ReceiveStream(smessage smsg.StreamMessage) {

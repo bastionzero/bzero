@@ -23,7 +23,7 @@ const (
 )
 
 type WebDial struct {
-	tmb       *tomb.Tomb
+	tmb       tomb.Tomb
 	logger    *logger.Logger
 	requestId string
 
@@ -42,22 +42,19 @@ type WebDial struct {
 }
 
 func New(logger *logger.Logger,
-	ch chan smsg.StreamMessage,
+	streamChan chan smsg.StreamMessage,
+	doneChan chan struct{},
 	remoteHost string,
 	remotePort int) (*WebDial, error) {
 
 	return &WebDial{
 		logger:           logger,
-		doneChan:         make(chan struct{}),
-		streamOutputChan: ch,
+		doneChan:         doneChan,
+		streamOutputChan: streamChan,
 		remoteHost:       remoteHost,
 		remotePort:       remotePort,
 		requestBody:      []byte{},
 	}, nil
-}
-
-func (w *WebDial) Done() <-chan struct{} {
-	return w.doneChan
 }
 
 func (w *WebDial) Kill() {

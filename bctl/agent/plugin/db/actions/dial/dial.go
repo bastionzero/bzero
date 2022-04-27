@@ -20,7 +20,7 @@ const (
 )
 
 type Dial struct {
-	tmb    *tomb.Tomb
+	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	// channel for letting the plugin know we're done
@@ -143,7 +143,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 
 		for {
 			// this line blocks until it reads output or error
-			if n, err := d.remoteConnection.Read(buff); d.tmb.Err() != tomb.ErrStillAlive {
+			if n, err := d.remoteConnection.Read(buff); !d.tmb.Alive() {
 				return nil
 			} else if err != nil {
 				if err != io.EOF {
