@@ -16,17 +16,14 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 type StreamAction struct {
 	logger *logger.Logger
-	tmb    *tomb.Tomb
-	closed bool
 
+	doneChan             chan struct{}
 	streamOutputChan     chan smsg.StreamMessage
 	streamMessageVersion smsg.SchemaVersion
-	doneChan             chan bool
 
 	requestId           string
 	serviceAccountToken string
@@ -36,27 +33,25 @@ type StreamAction struct {
 }
 
 func New(logger *logger.Logger,
-	pluginTmb *tomb.Tomb,
+	ch chan smsg.StreamMessage,
+	doneChan chan struct{},
 	serviceAccountToken string,
 	kubeHost string,
 	targetGroups []string,
-	targetUser string,
-	ch chan smsg.StreamMessage) (*StreamAction, error) {
+	targetUser string) *StreamAction {
 	return &StreamAction{
 		logger:              logger,
-		tmb:                 pluginTmb,
-		closed:              false,
 		streamOutputChan:    ch,
-		doneChan:            make(chan bool),
+		doneChan:            doneChan,
 		serviceAccountToken: serviceAccountToken,
 		kubeHost:            kubeHost,
 		targetGroups:        targetGroups,
 		targetUser:          targetUser,
-	}, nil
+	}
 }
 
-func (s *StreamAction) Closed() bool {
-	return s.closed
+func (s *StreamAction) Kill() {
+	close(s.doneChan)
 }
 
 func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
@@ -81,8 +76,7 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 		}
 
 		s.logger.Info("Stopping Stream Action")
-		s.doneChan <- true // close the go routines
-		s.closed = true
+		close(s.doneChan) // close the go routines
 
 		return "", []byte{}, nil
 	default:
@@ -147,73 +141,61 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 	go func() {
 		defer res.Body.Close()
 		for {
-			select {
-			case <-s.tmb.Dying():
-				return
-			default:
-				// Read into the buffer
-				numBytes, err := br.Read(buf)
+			// Read into the buffer
+			numBytes, err := br.Read(buf)
 
-				if err != nil {
-					switch err {
-					case context.Canceled:
-						s.logger.Info("Stream action stream closed")
-					case io.EOF:
-						s.logger.Info("Received EOF on stream action stream")
-					default:
-						s.logger.Error(fmt.Errorf("could not read HTTP response: %s", err))
+			if err != nil {
+				switch err {
+				case context.Canceled:
+					s.logger.Info("Stream action stream closed")
+				case io.EOF:
+					s.logger.Info("Received EOF on stream action stream")
+				default:
+					s.logger.Error(fmt.Errorf("could not read HTTP response: %s", err))
 
-						// If the sequenceNumber is 1, this means that we never streamed any data back, if this is a log request attempt
-						// to get the latest logs
-						if sequenceNumber == 1 {
-							// check to see if there are any logs we can stream back, do not attempt to handle any error, this is best effort
-							// Remove the follow from the endpoint
-							if urlObject, err := convertToUrlObject(streamActionRequest.Endpoint); err == nil {
-								// Ensure this is a log request
-								if strings.HasSuffix(urlObject.Path, "/log") {
-									s.handleLastLogStream(urlObject, streamActionRequest, sequenceNumber)
-								}
-							} else {
-								s.logger.Errorf("error converting to url object: %s", err)
+					// If the sequenceNumber is 1, this means that we never streamed any data back, if this is a log request attempt
+					// to get the latest logs
+					if sequenceNumber == 1 {
+						// check to see if there are any logs we can stream back, do not attempt to handle any error, this is best effort
+						// Remove the follow from the endpoint
+						if urlObject, err := convertToUrlObject(streamActionRequest.Endpoint); err == nil {
+							// Ensure this is a log request
+							if strings.HasSuffix(urlObject.Path, "/log") {
+								s.handleLastLogStream(urlObject, streamActionRequest, sequenceNumber)
 							}
+						} else {
+							s.logger.Errorf("error converting to url object: %s", err)
 						}
 					}
-
-					// Let the daemon know the stream has ended
-					switch s.streamMessageVersion {
-					// prior to 202204
-					case "":
-						s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, false, []byte{}, streamActionRequest.LogId)
-					default:
-						s.sendStreamMessage(sequenceNumber, smsg.Stream, false, []byte{}, streamActionRequest.LogId)
-					}
-					return
 				}
 
-				// Stream the response back
+				// Let the daemon know the stream has ended
 				switch s.streamMessageVersion {
 				// prior to 202204
 				case "":
-					s.sendStreamMessage(sequenceNumber, smsg.StreamData, true, buf[:numBytes], streamActionRequest.LogId)
+					s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, false, []byte{}, streamActionRequest.LogId)
 				default:
-					s.sendStreamMessage(sequenceNumber, smsg.Data, true, buf[:numBytes], streamActionRequest.LogId)
+					s.sendStreamMessage(sequenceNumber, smsg.Stream, false, []byte{}, streamActionRequest.LogId)
 				}
-				sequenceNumber += 1
+				return
 			}
+
+			// Stream the response back
+			switch s.streamMessageVersion {
+			// prior to 202204
+			case "":
+				s.sendStreamMessage(sequenceNumber, smsg.StreamData, true, buf[:numBytes], streamActionRequest.LogId)
+			default:
+				s.sendStreamMessage(sequenceNumber, smsg.Data, true, buf[:numBytes], streamActionRequest.LogId)
+			}
+			sequenceNumber += 1
 		}
 	}()
 
 	// Subscribe to our done channel
 	go func() {
-		defer cancel()
-		for {
-			select {
-			case <-s.tmb.Dying():
-				return
-			case <-s.doneChan:
-				return
-			}
-		}
+		<-s.doneChan
+		cancel()
 	}()
 
 	return action, []byte{}, nil

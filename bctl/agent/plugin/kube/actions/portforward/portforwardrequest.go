@@ -13,12 +13,10 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 )
 
 type PortForwardRequest struct {
-	tmb                  *tomb.Tomb
 	logger               *logger.Logger
 	streamOutputChan     chan smsg.StreamMessage // output channel to send all of our stream messages directly to datachannel
 	streamMessageVersion smsg.SchemaVersion
@@ -31,11 +29,12 @@ type PortForwardRequest struct {
 	dataInChannel  chan []byte
 	errorInChannel chan []byte
 	doneChan       chan bool // Done channel so the go routines can communicate with eachother
+	parentDoneChan chan struct{}
 }
 
 func createPortForwardRequest(
 	logger *logger.Logger,
-	tmb *tomb.Tomb,
+	doneChan chan struct{},
 	streamOutputChan chan smsg.StreamMessage,
 	version smsg.SchemaVersion,
 	requestId string,
@@ -44,7 +43,6 @@ func createPortForwardRequest(
 ) *PortForwardRequest {
 	return &PortForwardRequest{
 		logger:               logger,
-		tmb:                  tmb,
 		streamOutputChan:     streamOutputChan,
 		streamMessageVersion: version,
 
@@ -55,6 +53,7 @@ func createPortForwardRequest(
 		dataInChannel:  make(chan []byte),
 		errorInChannel: make(chan []byte),
 		doneChan:       make(chan bool),
+		parentDoneChan: doneChan,
 	}
 }
 
@@ -93,7 +92,7 @@ func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string
 	go func() {
 		for {
 			select {
-			case <-p.tmb.Dying():
+			case <-p.parentDoneChan:
 				return
 			case <-p.doneChan:
 				errorStream.Close()
@@ -128,7 +127,7 @@ func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string
 
 		for {
 			select {
-			case <-p.tmb.Dying():
+			case <-p.parentDoneChan:
 				return
 			default:
 				p.forwardStream(smsg.Data, dataStream, dataSeqNumber)
@@ -146,7 +145,7 @@ func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string
 
 		for {
 			select {
-			case <-p.tmb.Dying():
+			case <-p.parentDoneChan:
 				return
 			default:
 				p.forwardStream(smsg.Error, errorStream, errorSeqNumber)

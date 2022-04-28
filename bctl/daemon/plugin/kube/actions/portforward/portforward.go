@@ -18,7 +18,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 
 	"golang.org/x/build/kubernetes/api"
 	"k8s.io/apimachinery/pkg/util/httpstream"
@@ -30,14 +29,15 @@ type RequestMapStruct struct {
 	streamMessage        smsg.StreamMessage
 }
 type PortForwardAction struct {
-	logger          *logger.Logger
+	logger *logger.Logger
+
 	requestId       string
 	logId           string
 	commandBeingRun string
 
+	doneChan        chan struct{}
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
 
 	streamPairsLock       sync.RWMutex
 	streamPairs           map[string]*httpStreamPair
@@ -59,29 +59,31 @@ type httpStreamPair struct {
 }
 
 func New(logger *logger.Logger,
+	outputChan chan plugin.ActionWrapper,
+	doneChan chan struct{},
 	requestId string,
 	logId string,
-	command string) (*PortForwardAction, chan plugin.ActionWrapper) {
+	command string) *PortForwardAction {
 
-	portForward := &PortForwardAction{
+	return &PortForwardAction{
 		logger:                logger,
 		requestId:             requestId,
 		logId:                 logId,
 		commandBeingRun:       command,
-		outputChan:            make(chan plugin.ActionWrapper, 10),
+		doneChan:              doneChan,
+		outputChan:            outputChan,
 		streamInputChan:       make(chan smsg.StreamMessage, 10),
-		ksInputChan:           make(chan plugin.ActionWrapper, 10),
 		streamPairs:           make(map[string]*httpStreamPair),
 		streamCreationTimeout: kubeutils.DefaultStreamCreationTimeout,
 		requestMap:            make(map[string]chan RequestMapStruct),
 	}
-
-	return portForward, portForward.outputChan
 }
 
-func (p *PortForwardAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	p.ksInputChan <- wrappedAction
+func (p *PortForwardAction) Kill() {
+	close(p.doneChan)
 }
+
+func (p *PortForwardAction) ReceiveKeysplitting(actionPayload []byte) {}
 
 func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 
@@ -113,7 +115,7 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 	}
 }
 
-func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
+func (p *PortForwardAction) Start(writer http.ResponseWriter, request *http.Request) error {
 	// Set our endpoint
 	p.endpoint = request.URL.String()
 
@@ -141,19 +143,23 @@ func (p *PortForwardAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, re
 	}
 
 	// Now wait for the ready message, incase we need to bubble up an error to the user
-readyMessageLoop:
+waitForReadyMessage:
 	for {
-		streamMessage := <-p.streamInputChan
-		// may be hearing about this via old or new language, depending on what we asked for
-		if streamMessage.Type == smsg.ReadyPortForward || streamMessage.Type == smsg.Ready {
-			// See if we have an error to bubble up to the user
-			if len(streamMessage.Content) != 0 {
-				bubbleUpError(writer, streamMessage.Content)
+		select {
+		case streamMessage := <-p.streamInputChan:
+			// may be hearing about this via old or new language, depending on what we asked for
+			if streamMessage.Type == smsg.ReadyPortForward || streamMessage.Type == smsg.Ready {
+				// See if we have an error to bubble up to the user
+				if len(streamMessage.Content) != 0 {
+					bubbleUpError(writer, streamMessage.Content)
 
-				p.sendCloseMessage()
-				return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
+					p.sendCloseMessage()
+					return fmt.Errorf("error starting portforward stream: %s", streamMessage.Content)
+				}
+				break waitForReadyMessage
 			}
-			break readyMessageLoop
+		case <-time.After(15 * time.Second):
+			return fmt.Errorf("failed to receive ready message in time")
 		}
 	}
 
@@ -173,57 +179,55 @@ readyMessageLoop:
 		return fmt.Errorf("unable to upgrade websocket connection")
 	}
 	conn.SetIdleTimeout(kubeutils.DefaultIdleTimeout)
+
+	defer p.sendCloseMessage()
 	defer conn.Close()
 
 	// Now listen for incoming kubectl portforward requests in the background
-	go func() {
-		for {
-			select {
-			case <-tmb.Dying():
-				return
-			case <-conn.CloseChan():
-				return
-			case stream := <-streamChan:
-				// Extract the requestId and streamType from the stream
-				requestID, err := p.requestID(stream)
-				if err != nil {
-					p.logger.Error(fmt.Errorf("failed to parse request id: %v", err))
-					return
-				}
-				streamType := stream.Headers().Get(kubeutils.StreamType)
-				p.logger.Infof("Received new stream %v of type %v.", requestID, streamType)
+	for {
+		select {
+		case <-p.doneChan:
+			return nil
+		case <-conn.CloseChan():
+			p.logger.Info("Portforwarding context finished. Sending close message to portforward action")
+			p.sendCloseMessage()
+			return nil
+		case stream := <-streamChan:
+			// Extract the requestId and streamType from the stream
+			requestID, err := p.requestID(stream)
+			if err != nil {
+				p.logger.Errorf("failed to parse request id: %v", err)
+				p.sendCloseMessage()
+				return nil
+			}
+			streamType := stream.Headers().Get(kubeutils.StreamType)
+			p.logger.Infof("Received new stream %v of type %v.", requestID, streamType)
 
-				// Now attempt to make our stream pair (error, data)
-				portforwardSession, created := p.getStreamPair(requestID)
-
-				// If this was a new stream pair that was created, start a go routine to ensure it finishes (i.e. gets the error/data strema)
-				if created {
-					go p.monitorStreamPair(portforwardSession, time.After(p.streamCreationTimeout))
-				}
-
-				// Attempt to add the stream, so we can join the two streams
-				if complete, err := portforwardSession.add(stream); err != nil {
-					msg := fmt.Sprintf("error processing stream for request %s: %v", requestID, err)
-					portforwardSession.printError(msg)
-				} else if complete {
-					go p.portForward(portforwardSession)
-				}
+			// Now attempt to make our stream pair (error, data)
+			if portforwardSession, created := p.getStreamPair(requestID); created {
+				// If this was a new stream pair that was created, start a go routine to ensure it finishes (i.e. gets the error/data stream)
+				go p.monitorStreamPair(portforwardSession, time.After(p.streamCreationTimeout))
+			} else if complete, err := portforwardSession.add(stream); err != nil { // Attempt to add the stream, so we can join the two streams
+				msg := fmt.Sprintf("error processing stream for request %s: %v", requestID, err)
+				portforwardSession.printError(msg)
+			} else if complete {
+				go p.portForward(portforwardSession)
 			}
 		}
-	}()
+	}
 
 	// Keep this context till the user exits the http session
 	// Keep the connection alive till we get a closeChan messsage, then close the context as well
-	select {
-	case <-tmb.Dying():
-		break
-	case <-conn.CloseChan():
-		p.logger.Info("Portforwarding context finished. Sending close message to portforward action")
-		break
-	}
+	// select {
+	// case <-tmb.Dying():
+	// 	break
+	// case <-conn.CloseChan():
+	// 	p.logger.Info("Portforwarding context finished. Sending close message to portforward action")
+	// 	break
+	// }
 
-	p.sendCloseMessage()
-	return nil
+	// p.sendCloseMessage()
+	// return nil
 }
 
 // portForward invokes the portForwardProxy's forwarder.PortForward
@@ -260,14 +264,15 @@ func (p *PortForwardAction) sendCloseRequestMessage(portforwardingRequestId stri
 }
 
 func (p *PortForwardAction) sendCloseMessage() {
+	defer close(p.doneChan)
+
 	// Now send this data to Bastion
-	payload := portforward.KubePortForwardStopActionPayload{
-		RequestId: p.requestId,
-		LogId:     p.logId,
-	}
 	p.outputChan <- plugin.ActionWrapper{
-		Action:        string(portforward.StopPortForward),
-		ActionPayload: payload,
+		Action: string(portforward.StopPortForward),
+		ActionPayload: portforward.KubePortForwardStopActionPayload{
+			RequestId: p.requestId,
+			LogId:     p.logId,
+		},
 	}
 }
 
@@ -286,6 +291,8 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		defer portforwardSession.errorStream.Close()
 		for {
 			select {
+			case <-p.doneChan:
+				return
 			case <-doneChan:
 				return
 			default:
@@ -317,6 +324,8 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		defer portforwardSession.dataStream.Close()
 		for {
 			select {
+			case <-p.doneChan:
+				return
 			case <-doneChan:
 				return
 			default:
@@ -384,6 +393,8 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	// Set up the function to listen to bastion messages and push to the user
 	for {
 		select {
+		case <-p.doneChan:
+			return nil
 		case <-doneChan:
 			// Delete the stream pair from our mapping
 			delete(p.requestMap, portforwardSession.requestID)
@@ -393,7 +404,8 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		case requestMapStruct := <-requestMapChannel:
 			// contentBytes, _ := base64.StdEncoding.DecodeString(streamMessage.Content)
 
-			if requestMapStruct.streamMessage.Type == smsg.Data {
+			switch requestMapStruct.streamMessage.Type {
+			case smsg.Data:
 				// Check our seqNumber
 				if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
 					processDataMessage(requestMapStruct.streamMessageContent.Content)
@@ -403,19 +415,15 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				}
 
 				// Always attempt to processes out of order messages
-				outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
-				for ok {
-					// Keep pulling older messages
-					processDataMessage(outOfOrderDataContent)
-					outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
+				for outOfOrderData, ok := dataBuffer[expectedDataSeqNumber]; ok; outOfOrderData, ok = dataBuffer[expectedDataSeqNumber] {
+					processDataMessage(outOfOrderData)
 				}
 
 				if !requestMapStruct.streamMessage.More {
 					// Alert on our done chan
 					doneChan <- true
 				}
-
-			} else if requestMapStruct.streamMessage.Type == smsg.Error {
+			case smsg.Error:
 				if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
 					processErrorMessage(requestMapStruct.streamMessageContent.Content)
 				} else {
@@ -424,16 +432,59 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				}
 
 				// Always attempt to process out of order messages
-				outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
-				for ok {
-					// Keep pulling older messages
-					processErrorMessage(outOfOrderErrorContent)
-					outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
+				for outOfOrderError, ok := errorBuffer[expectedDataSeqNumber]; ok; outOfOrderError, ok = errorBuffer[expectedDataSeqNumber] {
+					processDataMessage(outOfOrderError)
 				}
-
-			} else {
+				// outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
+				// for ok {
+				// 	// Keep pulling older messages
+				// 	processErrorMessage(outOfOrderErrorContent)
+				// 	outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
+				// }
+			default:
 				p.logger.Errorf("unhandled stream type: %s", requestMapStruct.streamMessage.Type)
 			}
+			// if requestMapStruct.streamMessage.Type == smsg.Data {
+			// 	// Check our seqNumber
+			// 	if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
+			// 		processDataMessage(requestMapStruct.streamMessageContent.Content)
+			// 	} else {
+			// 		// Update our buffer
+			// 		dataBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+			// 	}
+
+			// 	// Always attempt to processes out of order messages
+			// 	outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
+			// 	for ok {
+			// 		// Keep pulling older messages
+			// 		processDataMessage(outOfOrderDataContent)
+			// 		outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
+			// 	}
+
+			// 	if !requestMapStruct.streamMessage.More {
+			// 		// Alert on our done chan
+			// 		doneChan <- true
+			// 	}
+
+			// } else if requestMapStruct.streamMessage.Type == smsg.Error {
+			// 	if requestMapStruct.streamMessage.SequenceNumber == expectedErrorSeqNumber {
+			// 		processErrorMessage(requestMapStruct.streamMessageContent.Content)
+			// 	} else {
+			// 		// Update our buffer
+			// 		errorBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+			// 	}
+
+			// 	// Always attempt to process out of order messages
+			// 	outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
+			// 	for ok {
+			// 		// Keep pulling older messages
+			// 		processErrorMessage(outOfOrderErrorContent)
+			// 		outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
+			// 	}
+
+			// } else {
+			// 	p.logger.Errorf("unhandled stream type: %s", requestMapStruct.streamMessage.Type)
+			// }
 		}
 	}
 }

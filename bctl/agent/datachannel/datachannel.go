@@ -10,6 +10,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/db"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -268,6 +269,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	// create channel and listener and pass it to the new plugin
+	// LUCIE: get rid of this and just have an output() in the plugin we can listen to above
 	streamOutputChan := make(chan smsg.StreamMessage, 30)
 	go func() {
 		for {
@@ -283,11 +285,10 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 
 	subLogger := d.logger.GetPluginLogger(pluginName)
 
-	// var plugin plgn.IPlugin
 	var err error
 	switch pluginName {
-	// case bzplugin.Kube:
-	// 	d.plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, payload)
+	case bzplugin.Kube:
+		d.plugin, err = kube.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Db:
 		d.plugin, err = db.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Web:

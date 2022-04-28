@@ -139,6 +139,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 					dc.Close(errors.New("shell server exiting...closing datachannel"))
 					return
 				case <-dcTmb.Dead():
+					// bubble up our error to the user
 					if dcTmb.Err() != nil {
 						// let's just take our innermost error to give the user
 						errs := strings.Split(dcTmb.Err().Error(), ": ")

@@ -86,7 +86,7 @@ func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 	if d.action != nil {
 		d.action.ReceiveStream(smessage)
 	} else {
-		d.logger.Debugf("db plugin received stream message before an action was created. Ignoring")
+		d.logger.Debugf("db plugin received a stream message before an action was created. Ignoring")
 	}
 }
 

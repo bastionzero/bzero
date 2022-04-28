@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/transport/spdy"
@@ -20,7 +19,6 @@ import (
 )
 
 type PortForwardAction struct {
-	tmb    *tomb.Tomb
 	logger *logger.Logger
 
 	serviceAccountToken string
@@ -36,7 +34,7 @@ type PortForwardAction struct {
 	streamMessageVersion smsg.SchemaVersion
 
 	// Done channel
-	doneChan chan bool
+	doneChan chan struct{}
 
 	// Map of portforardId <-> PortForwardSubAction
 	requestMap map[string]*PortForwardRequest
@@ -49,17 +47,19 @@ type PortForwardAction struct {
 	streamConn      httpstream.Connection
 }
 
-func New(logger *logger.Logger,
-	pluginTmb *tomb.Tomb,
+func New(
+	logger *logger.Logger,
+	ch chan smsg.StreamMessage,
+	doneChan chan struct{},
 	serviceAccountToken string,
 	kubeHost string,
 	targetGroups []string,
 	targetUser string,
-	ch chan smsg.StreamMessage) (*PortForwardAction, error) {
+) *PortForwardAction {
 
 	return &PortForwardAction{
 		logger:              logger,
-		tmb:                 pluginTmb,
+		doneChan:            doneChan,
 		serviceAccountToken: serviceAccountToken,
 		kubeHost:            kubeHost,
 		targetGroups:        targetGroups,
@@ -67,12 +67,11 @@ func New(logger *logger.Logger,
 		closed:              false,
 		streamOutputChan:    ch,
 		requestMap:          make(map[string]*PortForwardRequest),
-		doneChan:            make(chan bool),
-	}, nil
+	}
 }
 
-func (p *PortForwardAction) Closed() bool {
-	return p.closed
+func (p *PortForwardAction) Kill() {
+	close(p.doneChan)
 }
 
 func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
@@ -111,7 +110,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 			subLogger.AddRequestId(p.requestId)
 			newRequest := createPortForwardRequest(
 				subLogger,
-				p.tmb,
+				p.doneChan,
 				p.streamOutputChan,
 				p.streamMessageVersion,
 				p.requestId,
@@ -169,15 +168,12 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		}
 
 		// Alert on our done channel
-		p.doneChan <- true
+		// close(p.doneChan)
 
 		// close the connection
 		if p.streamConn != nil {
 			p.streamConn.Close()
 		}
-
-		// Set ourselves to closed so this object will get dereferenced
-		p.closed = true
 
 		return string(portforward.StopPortForward), []byte{}, nil
 	default:
@@ -193,7 +189,6 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 	p.ErrorHeaders = startPortForwardRequest.ErrorHeaders
 	p.Endpoint = startPortForwardRequest.Endpoint
 	p.logId = startPortForwardRequest.LogId
-	p.doneChan = make(chan bool, 1)
 
 	// keep track of who we're talking to
 	p.requestId = startPortForwardRequest.RequestId

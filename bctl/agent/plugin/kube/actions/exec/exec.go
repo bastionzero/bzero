@@ -17,9 +17,10 @@ import (
 )
 
 type ExecAction struct {
+	tmb    tomb.Tomb
 	logger *logger.Logger
-	tmb    *tomb.Tomb
-	closed bool
+
+	doneChan chan struct{}
 
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan     chan smsg.StreamMessage
@@ -28,6 +29,9 @@ type ExecAction struct {
 	// To send input/resize to our exec sessions
 	execStdinChannel  chan []byte
 	execResizeChannel chan bzexec.KubeExecResizeActionPayload
+
+	// we hold onto this so we can close appropriately
+	stdinReader *StdReader
 
 	serviceAccountToken string
 	kubeHost            string
@@ -38,17 +42,16 @@ type ExecAction struct {
 }
 
 func New(logger *logger.Logger,
-	pluginTmb *tomb.Tomb,
+	ch chan smsg.StreamMessage,
+	doneChan chan struct{},
 	serviceAccountToken string,
 	kubeHost string,
 	targetGroups []string,
-	targetUser string,
-	ch chan smsg.StreamMessage) (*ExecAction, error) {
+	targetUser string) *ExecAction {
 
 	return &ExecAction{
 		logger:              logger,
-		tmb:                 pluginTmb,
-		closed:              false,
+		doneChan:            doneChan,
 		streamOutputChan:    ch,
 		execStdinChannel:    make(chan []byte, 10),
 		execResizeChannel:   make(chan bzexec.KubeExecResizeActionPayload, 10),
@@ -56,11 +59,12 @@ func New(logger *logger.Logger,
 		kubeHost:            kubeHost,
 		targetGroups:        targetGroups,
 		targetUser:          targetUser,
-	}, nil
+	}
 }
 
-func (e *ExecAction) Closed() bool {
-	return e.closed
+func (e *ExecAction) Kill() {
+	e.stdinReader.Close()
+	<-e.doneChan
 }
 
 func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
@@ -113,7 +117,7 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			return "", []byte{}, rerr
 		}
 
-		e.closed = true
+		e.stdinReader.Close()
 		return string(bzexec.ExecStop), []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled exec action: %v", action)
@@ -170,7 +174,7 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	// NOTE: don't need to version this because Type is not read on the other end
 	stderrWriter := NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdErr, e.logId)
 	stdoutWriter := NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdOut, e.logId)
-	stdinReader := NewStdReader(string(bzexec.StdIn), startExecRequest.RequestId, e.execStdinChannel)
+	e.stdinReader = NewStdReader(string(bzexec.StdIn), startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
 
 	// This function listens for a closed datachannel.  If the datachannel is closed, it doesn't necessarily mean
@@ -178,16 +182,18 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	// no way to interrupt it or pass in a context. Therefore, we need to close the stream in order to pass an
 	// io.EOF message to exec which will close the exec.Stream and that will close the go routine.
 	// https://github.com/kubernetes/client-go/issues/554
-	go func() {
-		<-e.tmb.Dying()
-		stdinReader.Close()
-	}()
+	// go func() {
+	// 	<-e.tmb.Dying()
+	// 	stdinReader.Close()
+	// }()
 
 	// runs the exec interaction with the kube server
 	go func() {
+		defer close(e.doneChan)
+
 		if startExecRequest.IsTty {
 			err = exec.Stream(remotecommand.StreamOptions{
-				Stdin:             stdinReader,
+				Stdin:             e.stdinReader,
 				Stdout:            stdoutWriter,
 				Stderr:            stderrWriter,
 				TerminalSizeQueue: terminalSizeQueue,
@@ -195,25 +201,22 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 			})
 		} else {
 			err = exec.Stream(remotecommand.StreamOptions{
-				Stdin:  stdinReader,
+				Stdin:  e.stdinReader,
 				Stdout: stdoutWriter,
 				Stderr: stderrWriter,
 			})
 		}
 
 		if err != nil {
-			// Log the error
 			rerr := fmt.Errorf("error in SPDY stream: %s", err)
 			e.logger.Error(rerr)
 
 			// Also write the error to our stdoutWriter so the user can see it
-			stdoutWriter.Write([]byte(fmt.Sprint(err)))
+			stdoutWriter.Write([]byte(fmt.Sprint(rerr)))
 		}
 
 		// Now close the stream
 		stdoutWriter.Write([]byte(bzexec.EscChar))
-
-		e.closed = true
 	}()
 
 	return string(bzexec.ExecStart), []byte{}, nil

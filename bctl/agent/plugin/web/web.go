@@ -43,6 +43,7 @@ func New(logger *logger.Logger,
 	plugin := &WebPlugin{
 		logger:           logger,
 		streamOutputChan: ch,
+		doneChan:         make(chan struct{}),
 		remotePort:       actionPayload.RemotePort,
 		remoteHost:       actionPayload.RemoteHost,
 	}

@@ -12,33 +12,36 @@ import (
 )
 
 type RestApiAction struct {
+	logger   *logger.Logger
+	doneChan chan struct{}
+
 	serviceAccountToken string
 	kubeHost            string
 	targetGroups        []string
 	targetUser          string
-	closed              bool
-	logger              *logger.Logger
 }
 
-func New(logger *logger.Logger, serviceAccountToken string, kubeHost string, targetGroups []string, targetUser string) (*RestApiAction, error) {
+func New(
+	logger *logger.Logger,
+	doneChan chan struct{},
+	serviceAccountToken string,
+	kubeHost string,
+	targetGroups []string,
+	targetUser string) *RestApiAction {
 	return &RestApiAction{
+		logger:              logger,
+		doneChan:            doneChan,
 		serviceAccountToken: serviceAccountToken,
 		kubeHost:            kubeHost,
 		targetGroups:        targetGroups,
 		targetUser:          targetUser,
-		logger:              logger,
-		closed:              false,
-	}, nil
+	}
 }
 
-func (r *RestApiAction) Closed() bool {
-	return r.closed
-}
+func (r *RestApiAction) Kill() {}
 
 func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	defer func() {
-		r.closed = true
-	}()
+	defer close(r.doneChan)
 
 	var apiRequest kuberest.KubeRestApiActionPayload
 	if err := json.Unmarshal(actionPayload, &apiRequest); err != nil {
@@ -54,7 +57,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 		return action, []byte{}, err
 	}
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{} // LUCIE: Add a timeout here
 	res, err := httpClient.Do(req)
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)

@@ -17,45 +17,49 @@ import (
 )
 
 type ExecAction struct {
+	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	requestId       string
 	logId           string
 	commandBeingRun string
+	doneChan        chan struct{}
 
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
 }
 
 func New(logger *logger.Logger,
+	outputChan chan plugin.ActionWrapper,
+	doneChan chan struct{},
 	requestId string,
 	logId string,
-	commandBeingRun string) (*ExecAction, chan plugin.ActionWrapper) {
+	commandBeingRun string) *ExecAction {
 
-	exec := &ExecAction{
+	return &ExecAction{
 		logger:          logger,
 		requestId:       requestId,
 		logId:           logId,
 		commandBeingRun: commandBeingRun,
-		outputChan:      make(chan plugin.ActionWrapper, 10),
+		doneChan:        doneChan,
+		outputChan:      outputChan,
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		ksInputChan:     make(chan plugin.ActionWrapper, 10),
 	}
-
-	return exec, exec.outputChan
 }
 
-func (e *ExecAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	e.ksInputChan <- wrappedAction
+func (e *ExecAction) Kill() {
+	e.tmb.Kill(nil)
+	e.tmb.Wait()
 }
+
+func (e *ExecAction) ReceiveKeysplitting(actionPayload []byte) {}
 
 func (e *ExecAction) ReceiveStream(stream smsg.StreamMessage) {
 	e.streamInputChan <- stream
 }
 
-func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
+func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) error {
 	// create new SPDY service for exec communication
 	subLogger := e.logger.GetComponentLogger("SPDY")
 	spdy, err := NewSPDYService(subLogger, writer, request)
@@ -71,15 +75,17 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 	e.outputChan <- wrapStartPayload(isTty, e.requestId, e.logId, request.URL.Query()["command"], request.URL.String())
 
 	// Set up a go function for stdout
-	go func() {
-		defer close(e.outputChan)
+	e.tmb.Go(func() error {
+		defer close(e.doneChan)
+
 		streamQueue := make(map[int]smsg.StreamMessage)
 		seqNumber := 0
+		closeChan := spdy.conn.CloseChan()
 
 		for {
 			select {
-			case <-tmb.Dying():
-				return
+			case <-e.tmb.Dying():
+				return nil
 			case streamMessage := <-e.streamInputChan:
 				// check if received message is out of order
 				if streamMessage.SequenceNumber != seqNumber {
@@ -95,7 +101,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 						if string(contentBytes) == exec.EscChar {
 							e.logger.Info("exec stream ended")
 							spdy.conn.Close()
-							break
+							return nil
 						}
 
 						// write message to output
@@ -107,13 +113,22 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 						msg, ok = streamQueue[seqNumber]
 					}
 				}
+			case <-closeChan:
+				// Send message to agent to close the stream
+				e.outputChan <- plugin.ActionWrapper{
+					Action: string(exec.ExecStop),
+					ActionPayload: exec.KubeExecStopActionPayload{
+						RequestId: e.requestId,
+						LogId:     e.logId,
+					},
+				}
+				return nil
 			}
 		}
-	}()
+	})
 
-	// Set up a go function for stdin
+	// Set up a go function to read from stdin
 	go func() {
-
 		for {
 			// Reset buffer every loop
 			buffer := make([]byte, 0)
@@ -122,33 +137,30 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 			chunkSizeBuffer := make([]byte, kubeutils.ExecChunkSize)
 
 			select {
-			case <-tmb.Dying():
+			case <-e.tmb.Dying():
 				return
 			default:
 				// Keep reading from our stdin stream if we see multiple chunks coming in
 				for {
-					n, err := spdy.stdinStream.Read(chunkSizeBuffer)
-
-					// Always return if we see a EOF
-					if err == io.EOF {
+					if n, err := spdy.stdinStream.Read(chunkSizeBuffer); !e.tmb.Alive() {
 						return
+					} else if err == io.EOF {
+						// Always return if we see a EOF
+						break // LUCIE: if we hit an eof, we would still want to send whatever's in the buffer...right?
+					} else {
+						// Append the new chunk to our buffer
+						buffer = append(buffer, chunkSizeBuffer[:n]...)
+
+						// If we stop seeing chunks (i.e. n != 8192) or we have reached our max buffer size, break
+						if n != kubeutils.ExecChunkSize || len(buffer) > kubeutils.ExecDefaultMaxBufferSize {
+							break
+						}
 					}
-
-					// Append the new chunk to our buffer
-					buffer = append(buffer, chunkSizeBuffer[:n]...)
-
-					// If we stop seeing chunks (i.e. n != 8192) or we have reached our max buffer size, break
-					if n != kubeutils.ExecChunkSize || len(buffer) > kubeutils.ExecDefaultMaxBufferSize {
-						break
-					}
-
 				}
-
 				// Send message to agent
 				e.outputChan <- wrapStdinPayload(e.requestId, e.logId, buffer)
 			}
 		}
-
 	}()
 
 	if isTty {
@@ -156,7 +168,7 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 		go func() {
 			for {
 				select {
-				case <-tmb.Dying():
+				case <-e.tmb.Dying():
 					return
 				default:
 					decoder := json.NewDecoder(spdy.resizeStream)
@@ -176,28 +188,6 @@ func (e *ExecAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *
 			}
 		}()
 	}
-
-	closeChan := spdy.conn.CloseChan()
-
-	go func() {
-		for {
-			select {
-			case <-tmb.Dying():
-				return
-			case <-closeChan:
-				// Send message to agent to close the stream
-				e.outputChan <- plugin.ActionWrapper{
-					Action: string(exec.ExecStop),
-					ActionPayload: exec.KubeExecStopActionPayload{
-						RequestId: e.requestId,
-						LogId:     e.logId,
-					},
-				}
-
-				return
-			}
-		}
-	}()
 
 	return nil
 }

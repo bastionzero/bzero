@@ -12,7 +12,6 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"gopkg.in/tomb.v2"
 )
 
 var runAsUser = "Bojji"
@@ -102,7 +101,8 @@ func TestShellOpen(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(mockLogger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -112,7 +112,8 @@ func TestShellClose(t *testing.T) {
 	mockPT := createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(mockLogger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -131,7 +132,8 @@ func TestShellInput(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(mockLogger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -150,7 +152,8 @@ func TestShellResize(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(mockLogger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -176,7 +179,8 @@ func TestShellReplay(t *testing.T) {
 
 	// init shell
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(mockLogger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
