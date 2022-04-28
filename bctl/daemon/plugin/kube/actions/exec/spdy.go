@@ -48,15 +48,15 @@ func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *
 	// Extract the options of the exec
 	options := extractExecOptions(request)
 
-	logger.Infof("Starting Exec for command: %s\n", options.Command)
+	logger.Infof("Starting Exec for command: %s", options.Command)
 
 	// Initiate a handshake and upgrade the request
 	supportedProtocols := []string{"v4.channel.k8s.io", "v3.channel.k8s.io", "v2.channel.k8s.io", "channel.k8s.io"}
 	protocol, err := httpstream.Handshake(request, writer, supportedProtocols)
 	if err != nil {
-		return nil, fmt.Errorf("could not complete http stream handshake: %v", err.Error())
+		return nil, fmt.Errorf("could not complete http stream handshake: %s", err)
 	}
-	logger.Infof("Using protocol: %s\n", protocol)
+	logger.Infof("Using protocol: %s", protocol)
 
 	// Now make our stream channel
 	streamCh := make(chan streamAndReply)
@@ -70,7 +70,7 @@ func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *
 		// occurred during upgrading. All we can do is return here at this point
 		// if we weren't successful in upgrading.
 		// TODO: Return a better error
-		logger.Error(fmt.Errorf("unable to upgrade request"))
+		logger.Errorf("unable to upgrade request")
 		return nil, fmt.Errorf("unable to upgrade request")
 	}
 
@@ -89,7 +89,7 @@ func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *
 
 	// Wait for streams to come in and return SPDY service
 	if err := service.waitForStreams(request.Context(), streamCh, options.ExpectedStreams, expired.C); err != nil {
-		return nil, fmt.Errorf("error waiting for streams to come in: %v", err.Error())
+		return nil, fmt.Errorf("error waiting for streams to come in: %s", err)
 	} else {
 		return service, nil
 	}
@@ -114,7 +114,7 @@ WaitForStreams:
 		case stream := <-streams:
 			// Extract the stream type from the header
 			streamType := stream.Headers().Get(kubeutils.StreamType)
-			s.logger.Infof("Saw stream type: " + streamType)
+			s.logger.Tracef("Saw stream type: %s", streamType)
 
 			// Save the stream
 			switch streamType {

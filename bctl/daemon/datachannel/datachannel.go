@@ -111,6 +111,11 @@ func New(logger *logger.Logger,
 		// defer dc.logger.Infof("closing datachannel and its subsidiaries: %s", dc.tmb.Err())
 		defer dc.logger.Info("DONE WITH MAIN GO ROUTINE")
 
+		go func() {
+			<-dc.tmb.Dead()
+			dc.logger.Infof("closing datachannel and its subsidiaries: %s", dc.tmb.Err())
+		}()
+
 		// wait for an error or mrzap message from the agent to come in
 		select {
 		case <-dc.tmb.Dying():
@@ -138,7 +143,7 @@ func New(logger *logger.Logger,
 			select {
 			case <-parentTmb.Dying(): // daemon is dying
 				dc.logger.Info("DONE 1")
-				return fmt.Errorf("daemon was orphaned too young and can't be batman :'(")
+				return fmt.Errorf("datachannel was orphaned too young and can't be batman :'(")
 			case <-dc.tmb.Dying():
 				dc.logger.Info("DONE 2")
 				dc.plugin.Kill()

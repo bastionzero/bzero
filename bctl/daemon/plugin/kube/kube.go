@@ -15,18 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type JustRequestId struct {
-	RequestId string `json:"requestId"`
-}
-type KubeFood struct {
-	Action  bzkube.KubeAction
-	LogId   string
-	Command string
-	Writer  http.ResponseWriter
-	Reader  *http.Request
-}
-
-// Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type IKubeDaemonAction interface {
 	ReceiveKeysplitting(actionPayload []byte)
 	ReceiveStream(stream smsg.StreamMessage)
@@ -38,6 +26,7 @@ type KubeDaemonPlugin struct {
 
 	action   IKubeDaemonAction
 	doneChan chan struct{}
+	killed   bool
 
 	// outbox channel
 	outputQueue chan plugin.ActionWrapper
@@ -61,6 +50,7 @@ func (k *KubeDaemonPlugin) Kill() {
 	if k.action != nil {
 		k.action.Kill()
 	}
+	k.killed = true
 }
 
 func (k *KubeDaemonPlugin) Done() <-chan struct{} {
@@ -80,6 +70,9 @@ func (k *KubeDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 }
 
 func (k *KubeDaemonPlugin) StartAction(action bzkube.KubeAction, logId string, command string, writer http.ResponseWriter, reader *http.Request) error {
+	if k.killed {
+		return fmt.Errorf("plugin has already been killed, cannot create a new kube action")
+	}
 	// Always generate a requestId, each new kube command is its own request
 	// TODO: deprecated
 	requestId := uuid.New().String()
@@ -103,7 +96,7 @@ func (k *KubeDaemonPlugin) StartAction(action bzkube.KubeAction, logId string, c
 		return rerr
 	}
 
-	k.logger.Infof("Created %s action with url %s", action, reader.URL.Path)
+	k.logger.Infof("Created %s action with url: %s", action, reader.URL.Path)
 
 	// send http handlers to action
 	if err := k.action.Start(writer, reader); err != nil {

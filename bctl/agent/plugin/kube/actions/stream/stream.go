@@ -173,9 +173,9 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 				switch s.streamMessageVersion {
 				// prior to 202204
 				case "":
-					s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, false, []byte{}, streamActionRequest.LogId)
+					s.sendStreamMessage(sequenceNumber, smsg.StreamEnd, false, buf[:numBytes], streamActionRequest.LogId)
 				default:
-					s.sendStreamMessage(sequenceNumber, smsg.Stream, false, []byte{}, streamActionRequest.LogId)
+					s.sendStreamMessage(sequenceNumber, smsg.Stream, false, buf[:numBytes], streamActionRequest.LogId)
 				}
 				return
 			}
