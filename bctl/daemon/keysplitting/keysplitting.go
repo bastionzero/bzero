@@ -7,8 +7,8 @@ import (
 	"io/ioutil"
 	"os"
 	"sync"
-	"time"
 
+	"github.com/Masterminds/semver"
 	orderedmap "github.com/wk8/go-ordered-map"
 
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
@@ -26,9 +26,9 @@ const (
 
 type ZLIConfig struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`
-	TokenSet TokenSetConfig     `json:"tokenSet"`
+	TokenSet ZLITokenSetConfig  `json:"tokenSet"`
 }
-type TokenSetConfig struct {
+type ZLITokenSetConfig struct {
 	CurrentIdToken string `json:"id_token"`
 }
 
@@ -66,6 +66,9 @@ type Keysplitting struct {
 
 	// bool variable for letting the datachannel know when to start processing incoming messages again
 	recovering bool
+
+	// we need to know the version the agent is using so we can do icky things
+	dirtyPayload bool
 }
 
 func New(
@@ -122,7 +125,6 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 func (k *Keysplitting) resend(hpointer string) {
 	recoveryMap := *k.pipelineMap
 	k.pipelineMap = orderedmap.New()
-	// k.logger.Infof("recoveryMap length: %d", (&recoveryMap).Len())
 
 	// figure out where we need to start resending from
 	if pair := (&recoveryMap).GetPair(hpointer); pair == nil {
@@ -162,42 +164,54 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	// Check this messages is in response to one we've sent
 	if hpointer, err := ksMessage.GetHpointer(); err != nil {
 		return err
-	} else if ksMessage.Type == ksmsg.SynAck {
-		if msg, ok := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload); ok {
-			defer k.pipelineLock.Unlock()
-
-			k.lastAck = ksMessage
-			k.pipelineMap.Delete(hpointer) // delete syn from map
-
-			// when we recover, we're recovering based on the nonce in the syn/ack because
-			// it is an hpointer which refers to the agent's last recieved and validated message
-			// aka it is the current state of the mrzap hash chain according to the agent and this
-			// recovery mechanism allows us to sync our mrzap state to that
-			k.resend(msg.Nonce)
-			k.recovering = false
-		}
 	} else if _, ok := k.pipelineMap.Get(hpointer); ok {
+		switch ksMessage.Type {
+		case ksmsg.SynAck:
+			if msg, ok := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload); ok {
+				defer k.pipelineLock.Unlock()
 
-		// check if incoming message corresponds to our most recently sent data
-		if pair := k.pipelineMap.Oldest(); pair == nil {
-			return fmt.Errorf("where did this ack come from?! we're not waiting for a response to any messages")
-		} else if pair.Key != hpointer {
-			k.logger.Info("RECEIVED AN OUT OF ORDER ACK")
-			if len(k.outOfOrderAcks) > pipelineLimit {
-				// we're missing an ack sometime in the past, let's try to recover
-				if _, err := k.BuildSyn("", []byte{}, true); err != nil {
-					k.recovering = true
-					return fmt.Errorf("could not recover from missing ack: %s", err)
+				k.lastAck = ksMessage
+				k.pipelineMap.Delete(hpointer) // delete syn from map
+
+				// when we recover, we're recovering based on the nonce in the syn/ack because
+				// it is an hpointer which refers to the agent's last recieved and validated message
+				// aka it is the current state of the mrzap hash chain according to the agent and this
+				// recovery mechanism allows us to sync our mrzap state to that
+				k.resend(msg.Nonce)
+				k.recovering = false
+
+				// check to see if we're talking with an agent that's using pre-2.0 keysplitting because
+				// we'll need to dirty the payload by adding extra quotes around it
+				if c, err := semver.NewConstraint("< 2.0"); err != nil {
+					return fmt.Errorf("unable to create versioning constraint")
+				} else if v, err := semver.NewVersion(msg.SchemaVersion); err != nil {
+					return fmt.Errorf("unable to parse version")
 				} else {
-					return fmt.Errorf("hold up, we're missing an ack. Going into recovery")
+					k.dirtyPayload = c.Check(v)
 				}
 			}
-			k.outOfOrderAcks[hpointer] = ksMessage
-		} else {
-			k.lastAck = ksMessage
-			k.pipelineMap.Delete(hpointer)
-			k.processOutOfOrderAcks()
-			k.pipelineOpen.Broadcast()
+		case ksmsg.DataAck:
+			// check if incoming message corresponds to our most recently sent data
+			if pair := k.pipelineMap.Oldest(); pair == nil {
+				return fmt.Errorf("where did this ack come from?! we're not waiting for a response to any messages")
+			} else if pair.Key != hpointer {
+				k.logger.Info("RECEIVED AN OUT OF ORDER ACK")
+				if len(k.outOfOrderAcks) > pipelineLimit {
+					// we're missing an ack sometime in the past, let's try to recover
+					if _, err := k.BuildSyn("", []byte{}, true); err != nil {
+						k.recovering = true
+						return fmt.Errorf("could not recover from missing ack: %s", err)
+					} else {
+						return fmt.Errorf("hold up, we're missing an ack. Going into recovery")
+					}
+				}
+				k.outOfOrderAcks[hpointer] = ksMessage
+			} else {
+				k.lastAck = ksMessage
+				k.pipelineMap.Delete(hpointer)
+				k.processOutOfOrderAcks()
+				k.pipelineOpen.Broadcast()
+			}
 		}
 	} else {
 		return fmt.Errorf("%T message did not correspond to a previously sent message", ksMessage.KeysplittingPayload)
@@ -219,11 +233,7 @@ func (k *Keysplitting) processOutOfOrderAcks() {
 
 func (k *Keysplitting) Inbox(action string, actionPayload interface{}) error {
 	k.pipelineLock.Lock()
-	// k.logger.Infof("Inbox: LOCKING")
-	defer func() {
-		// k.logger.Infof("Inbox: UNLOCKING")
-		k.pipelineLock.Unlock()
-	}()
+	defer k.pipelineLock.Unlock()
 
 	return k.pipeline(action, actionPayload)
 }
@@ -266,9 +276,17 @@ func (k *Keysplitting) pipeline(action string, actionPayload interface{}) error 
 }
 
 func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, payload interface{}) (ksmsg.KeysplittingMessage, error) {
-	if payloadBytes, err := json.Marshal(payload); err != nil {
+	payloadBytes, err := json.Marshal(payload)
+
+	if err != nil {
 		return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to marshal action params")
-	} else if responseMessage, err := ksMessage.BuildUnsignedResponse(action, payloadBytes, k.bzcertHash); err != nil {
+	} else if k.dirtyPayload {
+		// if we're talking with an old agent, then we have to add extra quotes
+		dirty := "\"" + string(payloadBytes) + "\""
+		payloadBytes = []byte(dirty)
+	}
+
+	if responseMessage, err := ksMessage.BuildUnsignedResponse(action, payloadBytes, k.bzcertHash); err != nil {
 		return responseMessage, err
 	} else if err := responseMessage.Sign(k.clientSecretKey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
@@ -278,7 +296,6 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 }
 
 func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) error {
-	// if hashBytes, ok := util.HashPayload(ksMessage.KeysplittingPayload); !ok {
 	if hash := ksMessage.Hash(); hash == "" {
 		return fmt.Errorf("failed to hash message")
 	} else {
@@ -286,13 +303,11 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 		// EXCEPT if it's a syn OR we're recovering, then there's always room
 		if k.pipelineMap.Len() == pipelineLimit && ksMessage.Type != ksmsg.Syn && !k.recovering {
 			k.logger.Debug("Pipeline full, waiting to send next message")
-			// k.logger.Info("COND LOCK: WAITING")
 			k.pipelineOpen.Wait()
 			k.logger.Debug("Pipeline open, sending message")
 		}
 
 		k.pipelineMap.Set(hash, ksMessage)
-		k.logger.Infof("WE'VE ADDED A NEW %s MESSAGE TO OUR OUTPUT STUFF", ksMessage.Type)
 		return nil
 	}
 }
@@ -300,7 +315,6 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
 	// lock our pipeline because nothing can be calculated until we get our synack
 	k.pipelineLock.Lock()
-	// k.logger.Info("Syn: LOCKING")
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -331,7 +345,6 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 	}
 
 	ksMessage := ksmsg.KeysplittingMessage{
-		Timestamp:           time.Now().Unix(),
 		Type:                ksmsg.Syn,
 		KeysplittingPayload: synPayload,
 	}

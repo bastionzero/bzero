@@ -40,6 +40,7 @@ func New(logger *logger.Logger, targetUser string, targetGroups []string) *KubeD
 	return &KubeDaemonPlugin{
 		logger:       logger,
 		doneChan:     make(chan struct{}),
+		killed:       false,
 		outputQueue:  make(chan plugin.ActionWrapper, 25),
 		targetUser:   targetUser,
 		targetGroups: targetGroups,
@@ -47,10 +48,10 @@ func New(logger *logger.Logger, targetUser string, targetGroups []string) *KubeD
 }
 
 func (k *KubeDaemonPlugin) Kill() {
+	k.killed = true
 	if k.action != nil {
 		k.action.Kill()
 	}
-	k.killed = true
 }
 
 func (k *KubeDaemonPlugin) Done() <-chan struct{} {

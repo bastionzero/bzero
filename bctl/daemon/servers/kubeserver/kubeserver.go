@@ -59,7 +59,8 @@ type KubeServer struct {
 	agentPubKey         string
 }
 
-func StartKubeServer(logger *logger.Logger,
+func StartKubeServer(
+	logger *logger.Logger,
 	localPort string,
 	localHost string,
 	certPath string,
@@ -73,7 +74,8 @@ func StartKubeServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	targetSelectHandler func(msg am.AgentMessage) (string, error),
+) error {
 
 	listener := &KubeServer{
 		logger:              logger,
@@ -130,48 +132,46 @@ func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 		ExitMessage: k.exitMessage,
 	}
 
-	registerJson, err := json.Marshal(statusMessage)
-	if err != nil {
-		k.logger.Error(fmt.Errorf("error marshalling status message: %+v", err))
+	if registerJson, err := json.Marshal(statusMessage); err != nil {
+		k.logger.Errorf("error marshalling status message: %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		return
+	} else {
+		w.WriteHeader(http.StatusOK)
+		w.Write(registerJson)
 	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write(registerJson)
 }
 
 // for creating new websockets
-func (h *KubeServer) newWebsocket(wsId string) error {
-	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Cluster); err != nil {
+func (k *KubeServer) newWebsocket(wsId string) error {
+	subLogger := k.logger.GetWebsocketLogger(wsId)
+	if wsClient, err := websocket.New(subLogger, k.serviceUrl, k.params, k.headers, k.targetSelectHandler, autoReconnect, getChallenge, k.refreshTokenCommand, websocket.Cluster); err != nil {
 		return err
 	} else {
-		h.websocket = wsClient
+		k.websocket = wsClient
 		return nil
 	}
 }
 
 // for creating new datachannels
-func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin) error {
+func (k *KubeServer) newDataChannel(action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin) error {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
 	attach := false
-	subLogger := h.logger.GetDatachannelLogger(dcId)
+	subLogger := k.logger.GetDatachannelLogger(dcId)
 
-	h.logger.Infof("Creating new datachannel id: %v", dcId)
+	k.logger.Infof("Creating new datachannel id: %v", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
 	actionParams := bzkube.KubeActionParams{
-		TargetUser:   h.targetUser,
-		TargetGroups: h.targetGroups,
+		TargetUser:   k.targetUser,
+		TargetGroups: k.targetGroups,
 	}
 
 	action = "kube/" + action
-	ksLogger := h.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, h.agentPubKey, h.configPath, h.refreshTokenCommand); err != nil {
+	ksLogger := k.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(ksLogger, k.agentPubKey, k.configPath, k.refreshTokenCommand); err != nil {
 		return err
-	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, keysplitter, plugin, action, actionParams, attach); err != nil {
+	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &k.tmb, websocket, keysplitter, plugin, action, actionParams, attach); err != nil {
 		return err
 	} else {
 
@@ -179,27 +179,28 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 		go func() {
 			for {
 				select {
-				case <-h.tmb.Dying():
+				case <-k.tmb.Dying():
 					datachannel.Close(errors.New("kube server closing"))
 					return
 				case <-dcTmb.Dead():
 					// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
 					if err := dcTmb.Err(); err != nil {
 						// LUCIE: maybe we need to add a disconnect and reconnect here? that's what the user's going to have to do
-						h.exitMessage = dcTmb.Err().Error() // LUCIE: clean up this error
+						errs := strings.Split(dcTmb.Err().Error(), ": ")
+						k.exitMessage = fmt.Sprintf("error: %s", errs[len(errs)-1])
 					}
 
 					// notify agent to close the datachannel
-					h.logger.Info("Sending DataChannel Close")
+					k.logger.Info("Sending DataChannel Close")
 					cdMessage := am.AgentMessage{
 						ChannelId:   dcId,
 						MessageType: string(am.CloseDataChannel),
 					}
-					h.websocket.Send(cdMessage)
+					k.websocket.Send(cdMessage)
 
 					// close our websocket if the datachannel we closed was the last and it's not rest api
-					if h.websocket.SubscriberCount() == 0 {
-						h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
+					if k.websocket.SubscriberCount() == 0 {
+						k.websocket.Close(errors.New("all datachannels closed, closing websocket"))
 					}
 					return
 				}
@@ -209,22 +210,21 @@ func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 	}
 }
 
-func (h *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
+func (k *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
 	w.WriteHeader(statusCode)
-	h.logger.Error(errors.New(msg))
+	k.logger.Error(errors.New(msg))
 	w.Write([]byte(msg))
 }
 
-func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
-	h.logger.Infof("Handling %s - %s\n", r.URL.Path, r.Method)
+func (k *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
+	k.logger.Infof("Handling %s - %s\n", r.URL.Path, r.Method)
 
 	// Before processing, check if we're ready to process or if there's been an error
-	// switch {
-	// case h.exitMessage != "":
-	// 	msg := fmt.Sprintf("error on daemon: " + h.exitMessage)
-	// 	h.bubbleUpError(w, msg, http.StatusInternalServerError)
-	// 	return
-	// }
+	if k.exitMessage != "" {
+		msg := fmt.Sprintf("error on daemon: " + k.exitMessage)
+		k.bubbleUpError(w, msg, http.StatusInternalServerError)
+		return
+	}
 
 	// First verify our token and extract any commands if we can
 	tokenToValidate := r.Header.Get("Authorization")
@@ -234,8 +234,8 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 
 	// Validate the token
 	tokensSplit := strings.Split(tokenToValidate, securityTokenDelimiter)
-	if tokensSplit[0] != h.localhostToken {
-		h.bubbleUpError(w, "localhost token did not validate. Ensure you are using the right Kube config file", http.StatusInternalServerError)
+	if tokensSplit[0] != k.localhostToken {
+		k.bubbleUpError(w, "localhost token did not validate. Ensure you are using the right Kube config file", http.StatusInternalServerError)
 		return
 	}
 
@@ -252,14 +252,12 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 
 	// start up our plugin
 	pluginLogger := logger.GetPluginLogger(bzplugin.Kube)
-	plugin := kube.New(pluginLogger, h.targetUser, h.targetGroups)
-	// go func() {
+	plugin := kube.New(pluginLogger, k.targetUser, k.targetGroups)
 
-	// }()
-
-	if err := h.newDataChannel(string(action), h.websocket, plugin); err != nil {
-		h.logger.Error(err)
+	if err := k.newDataChannel(string(action), k.websocket, plugin); err != nil {
+		k.logger.Error(err)
 	}
+
 	if err := plugin.StartAction(action, logId, command, w, r); err != nil {
 		logger.Errorf("error starting action: %s", err)
 	}

@@ -30,12 +30,14 @@ type ExecAction struct {
 	streamInputChan chan smsg.StreamMessage
 }
 
-func New(logger *logger.Logger,
+func New(
+	logger *logger.Logger,
 	outputChan chan plugin.ActionWrapper,
 	doneChan chan struct{},
 	requestId string,
 	logId string,
-	commandBeingRun string) *ExecAction {
+	commandBeingRun string,
+) *ExecAction {
 
 	return &ExecAction{
 		logger:          logger,

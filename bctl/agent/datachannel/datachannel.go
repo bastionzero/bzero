@@ -48,12 +48,14 @@ type DataChannel struct {
 	outputChan chan am.AgentMessage
 }
 
-func New(parentTmb *tomb.Tomb,
+func New(
+	parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	websocket websocket.IWebsocket,
 	keysplitter IKeysplitting,
 	id string,
-	syn []byte) (*DataChannel, error) {
+	syn []byte,
+) (*DataChannel, error) {
 
 	datachannel := &DataChannel{
 		logger:       logger,
@@ -112,7 +114,7 @@ func New(parentTmb *tomb.Tomb,
 				case <-time.After(1 * time.Second):
 					return fmt.Errorf("datachannel's sole plugin is closed")
 				}
-			case agentMessage := <-datachannel.outputChan: // send messages
+			case agentMessage := <-datachannel.outputChan:
 				// Push message to websocket channel output
 				datachannel.websocket.Send(agentMessage)
 			}
@@ -209,33 +211,12 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 			} else {
 				// Start plugin based on action
 				actionPrefix := parsedAction[0]
-				if err := d.startPlugin(bzplugin.PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
+				if err := d.startPlugin(bzplugin.PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload, synPayload.SchemaVersion); err != nil {
 					d.sendError(bzerror.ComponentStartupError, err, keysplittingMessage.Hash())
 					return err
 				}
 			}
-
-			// Grab user's action
-			// if parsedAction := strings.Split(synPayload.Action, "/"); len(parsedAction) <= 1 {
-			// 	rerr := fmt.Errorf("malformed action: %s", synPayload.Action)
-			// 	d.sendError(rrr.ComponentProcessingError, rerr, keysplittingMessage.Hash())
-			// 	return
-			// } else {
-
-			// 	// Don't start plugin if there's already one started
-			// 	if d.plugin == nil {
-
-			// 		// Start plugin based on action
-			// 		actionPrefix := parsedAction[0]
-			// 		if err := d.startPlugin(PluginName(actionPrefix), synPayload.Action, synPayload.ActionPayload); err != nil {
-			// 			d.sendError(rrr.ComponentStartupError, err, keysplittingMessage.Hash())
-			// 			return
-			// 		}
-			// 	}
-
-			// return a SYN/ACK
 		}
-		d.logger.Info("GOOD TO GO LETS SEND A RESPONSE")
 
 		d.sendKeysplitting(keysplittingMessage, "", []byte{}) // empty payload
 	case ksmsg.Data:
@@ -265,11 +246,11 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 	return nil
 }
 
-func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string, payload []byte) error {
+func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string, payload []byte, version string) error {
 	d.logger.Infof("Starting %v plugin", pluginName)
 
 	// create channel and listener and pass it to the new plugin
-	// LUCIE: get rid of this and just have an output() in the plugin we can listen to above
+	// TODO: get rid of this and just have an output() in the plugin we can listen to above
 	streamOutputChan := make(chan smsg.StreamMessage, 30)
 	go func() {
 		for {
@@ -288,13 +269,13 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 	var err error
 	switch pluginName {
 	case bzplugin.Kube:
-		d.plugin, err = kube.New(subLogger, streamOutputChan, action, payload)
+		d.plugin, err = kube.New(subLogger, streamOutputChan, action, payload, version)
 	case bzplugin.Db:
-		d.plugin, err = db.New(subLogger, streamOutputChan, action, payload)
+		d.plugin, err = db.New(subLogger, streamOutputChan, action, payload, version)
 	case bzplugin.Web:
-		d.plugin, err = web.New(subLogger, streamOutputChan, action, payload)
+		d.plugin, err = web.New(subLogger, streamOutputChan, action, payload, version)
 	case bzplugin.Shell:
-		d.plugin, err = shell.New(subLogger, streamOutputChan, action, payload)
+		d.plugin, err = shell.New(subLogger, streamOutputChan, action, payload, version)
 	default:
 		return fmt.Errorf("unrecognized plugin name")
 	}

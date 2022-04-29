@@ -26,6 +26,7 @@ type DbDaemonPlugin struct {
 
 	action   IDbDaemonAction
 	doneChan chan struct{}
+	killed   bool
 
 	// outbox
 	outputQueue chan plugin.ActionWrapper
@@ -38,13 +39,16 @@ func New(logger *logger.Logger) *DbDaemonPlugin {
 	return &DbDaemonPlugin{
 		logger:         logger,
 		doneChan:       make(chan struct{}),
+		killed:         false,
 		outputQueue:    make(chan plugin.ActionWrapper, 5),
 		sequenceNumber: 0,
 	}
 }
 
 func (d *DbDaemonPlugin) StartAction(action bzdb.DbAction, conn *net.TCPConn) error {
-	// Make sure our food matches the nutrition label
+	if d.killed {
+		return fmt.Errorf("plugin has already been killed, cannot create a new shell action")
+	}
 
 	requestId := uuid.New().String()
 	actLogger := d.logger.GetActionLogger(string(action))
@@ -67,6 +71,7 @@ func (d *DbDaemonPlugin) StartAction(action bzdb.DbAction, conn *net.TCPConn) er
 }
 
 func (d *DbDaemonPlugin) Kill() {
+	d.killed = true
 	if d.action != nil {
 		d.action.Kill()
 	}

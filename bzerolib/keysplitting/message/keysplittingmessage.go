@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
@@ -21,23 +20,10 @@ const (
 )
 
 const (
-	SchemaVersion = "1.1"
+	SchemaVersion = "2.0"
 )
 
-// type IKeysplittingPayload interface {
-// 	GetHpointer() (string, error)
-// 	GetAction() string
-// 	GetActionPayload() []byte
-// }
-
-// type IKeysplittingMessage interface {
-// 	BuildResponse(actionPayload interface{}, publickey string) (KeysplittingMessage, error)
-// 	VerifySignature(publicKey string) error
-// 	Sign(privateKey string) error
-// }
-
 type KeysplittingMessage struct {
-	Timestamp           int64                   `json:"timestamp"`
 	Type                KeysplittingPayloadType `json:"type"`
 	KeysplittingPayload interface{}             `json:"keysplittingPayload"`
 	Signature           string                  `json:"signature"`
@@ -59,7 +45,6 @@ func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (K
 			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
-				Timestamp:           time.Now().Unix(),
 				Type:                SynAck,
 				KeysplittingPayload: synAckPayload,
 			}, nil
@@ -69,7 +54,6 @@ func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (K
 			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
-				Timestamp:           time.Now().Unix(),
 				Type:                DataAck,
 				KeysplittingPayload: dataAckPayload,
 			}, nil
@@ -86,7 +70,6 @@ func (k *KeysplittingMessage) BuildUnsignedResponse(action string, actionPayload
 			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
-				Timestamp:           time.Now().Unix(),
 				Type:                Data,
 				KeysplittingPayload: dataPayload,
 			}, nil
@@ -96,7 +79,6 @@ func (k *KeysplittingMessage) BuildUnsignedResponse(action string, actionPayload
 			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
-				Timestamp:           time.Now().Unix(),
 				Type:                Data,
 				KeysplittingPayload: dataPayload,
 			}, nil

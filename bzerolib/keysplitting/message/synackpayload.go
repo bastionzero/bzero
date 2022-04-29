@@ -13,7 +13,7 @@ type SynAckPayload struct {
 	Type                  string `json:"type"`
 	Action                string `json:"action"`
 	ActionResponsePayload []byte `json:"actionResponsePayload"`
-	Timestamp             int64  `json:"timestamp"`
+	Timestamp             string `json:"timestamp"`
 
 	// Unique to SynAck
 	TargetPublicKey string `json:"targetPublicKey"`

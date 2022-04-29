@@ -3,7 +3,9 @@ package stream
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -29,12 +31,14 @@ type StreamAction struct {
 	outOfOrderMessages     map[int]smsg.StreamMessage
 }
 
-func New(logger *logger.Logger,
+func New(
+	logger *logger.Logger,
 	outputChan chan plugin.ActionWrapper,
 	doneChan chan struct{},
 	requestId string,
 	logId string,
-	commandBeingRun string) *StreamAction {
+	commandBeingRun string,
+) *StreamAction {
 
 	return &StreamAction{
 		logger:          logger,
@@ -116,6 +120,8 @@ waitForHeaders:
 				}
 				break waitForHeaders
 			}
+		case <-time.After(10 * time.Second):
+			return fmt.Errorf("timed out waiting for initial header message")
 		}
 	}
 
@@ -154,6 +160,7 @@ waitForHeaders:
 					// End the stream
 					s.logger.Infof("Stream has been ended from the agent, closing request")
 					close(s.doneChan)
+					return nil
 				}
 				// Then stream the response to kubectl
 				if watchData.SequenceNumber == s.expectedSequenceNumber {
@@ -162,12 +169,10 @@ waitForHeaders:
 					if err := kubeutils.WriteToHttpRequest(contentBytes, writer); err != nil {
 						s.logger.Error(err)
 						close(s.doneChan)
+						return fmt.Errorf("could not write response: %s", err)
 					}
 
-					// Increment the seqNumber
 					s.expectedSequenceNumber += 1
-
-					// See if we have any early messages for this seqNumber
 					s.handleOutOfOrderMessage(writer)
 				} else {
 					s.outOfOrderMessages[watchData.SequenceNumber] = watchData

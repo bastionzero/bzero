@@ -25,6 +25,7 @@ type WebDaemonPlugin struct {
 	logger   *logger.Logger
 	action   IWebDaemonAction
 	doneChan chan struct{}
+	killed   bool
 
 	// keysplitting output
 	outputQueue chan plugin.ActionWrapper
@@ -41,6 +42,7 @@ func New(logger *logger.Logger, remoteHost string, remotePort int) *WebDaemonPlu
 	return &WebDaemonPlugin{
 		logger:         logger,
 		doneChan:       make(chan struct{}),
+		killed:         false,
 		outputQueue:    make(chan plugin.ActionWrapper, 5),
 		remoteHost:     remoteHost,
 		remotePort:     remotePort,
@@ -49,6 +51,10 @@ func New(logger *logger.Logger, remoteHost string, remotePort int) *WebDaemonPlu
 }
 
 func (w *WebDaemonPlugin) StartAction(action bzweb.WebAction, writer http.ResponseWriter, request *http.Request) error {
+	if w.killed {
+		return fmt.Errorf("plugin has already been killed, cannot create a new web action")
+	}
+
 	// Always generate a requestId, each new web command is its own request
 	requestId := uuid.New().String()
 
@@ -85,6 +91,7 @@ func (w *WebDaemonPlugin) Done() <-chan struct{} {
 }
 
 func (w *WebDaemonPlugin) Kill() {
+	w.killed = true
 	if w.action != nil {
 		w.action.Kill()
 	}

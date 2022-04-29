@@ -144,14 +144,6 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 		action = bzweb.Websocket
 	}
 
-	// web actions need to run in their own go routine because we need to determine the
-	// action at this layer by looking at the request so once we return, that request
-	// will cancel
-	// go func() {
-	// 	defer w.logger.Infof("RETURNED")
-
-	// }()
-
 	if err := w.newDataChannel(action, w.websocket, plugin); err != nil {
 		w.logger.Errorf("error starting datachannel: %s", err)
 	}

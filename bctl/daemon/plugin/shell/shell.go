@@ -21,6 +21,7 @@ type ShellDaemonPlugin struct {
 	logger      *logger.Logger
 	outputQueue chan bzplugin.ActionWrapper
 	doneChan    chan struct{}
+	killed      bool
 	action      IShellAction
 }
 
@@ -29,10 +30,15 @@ func New(logger *logger.Logger) *ShellDaemonPlugin {
 		logger:      logger,
 		outputQueue: make(chan bzplugin.ActionWrapper, 10),
 		doneChan:    make(chan struct{}),
+		killed:      false,
 	}
 }
 
 func (s *ShellDaemonPlugin) StartAction(attach bool) error {
+	if s.killed {
+		return fmt.Errorf("plugin has already been killed, cannot create a new shell action")
+	}
+
 	// Create the DefaultShell action
 	actLogger := s.logger.GetActionLogger(string(bzshell.DefaultShell))
 	s.action = defaultshell.New(actLogger, s.outputQueue, s.doneChan)
@@ -46,6 +52,7 @@ func (s *ShellDaemonPlugin) StartAction(attach bool) error {
 }
 
 func (s *ShellDaemonPlugin) Kill() {
+	s.killed = true
 	if s.action != nil {
 		s.action.Kill()
 	}

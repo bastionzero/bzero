@@ -25,7 +25,7 @@ const (
 
 	// maximum amount of time we want to keep this datachannel alive after
 	// neither receiving nor sending anything
-	datachannelLifetime = 8 * 24 * time.Hour
+	datachannelIdleTimeout = 7 * 24 * time.Hour
 )
 
 type OpenDataChannelPayload struct {
@@ -48,7 +48,6 @@ type IPlugin interface {
 	ReceiveStream(smessage smsg.StreamMessage)
 	Outbox() <-chan bzplugin.ActionWrapper
 	Done() <-chan struct{}
-	// Err() function for bubbling up errors to the user?
 	Kill()
 }
 
@@ -69,7 +68,8 @@ type DataChannel struct {
 	errorRecoveryAttempt int
 }
 
-func New(logger *logger.Logger,
+func New(
+	logger *logger.Logger,
 	id string,
 	parentTmb *tomb.Tomb, // daemon has ability to rage quit and take everything down with it
 	websocket websocket.IWebsocket,
@@ -94,6 +94,7 @@ func New(logger *logger.Logger,
 	// register with websocket so datachannel can send and receive messages
 	websocket.Subscribe(id, dc)
 
+	// if we're attaching to an existing datachannel vs if we are creating a new one
 	if !attach {
 		// tell Bastion we're opening a datachannel and send SYN to agent initiates an authenticated datachannel
 		logger.Info("Sending request to agent to open a new datachannel")
@@ -108,56 +109,33 @@ func New(logger *logger.Logger,
 
 	dc.tmb.Go(func() error {
 		defer websocket.Unsubscribe(id) // causes decoupling from websocket
-		// defer dc.logger.Infof("closing datachannel and its subsidiaries: %s", dc.tmb.Err())
-		defer dc.logger.Info("DONE WITH MAIN GO ROUTINE")
+		defer dc.logger.Info("Datachannel done")
 
-		go func() {
-			<-dc.tmb.Dead()
-			dc.logger.Infof("closing datachannel and its subsidiaries: %s", dc.tmb.Err())
-		}()
-
-		// wait for an error or mrzap message from the agent to come in
-		select {
-		case <-dc.tmb.Dying():
-			return nil
-		case agentMessage := <-dc.inputChan:
-			switch am.MessageType(agentMessage.MessageType) {
-			case am.Error:
-				return fmt.Errorf("daemon cannot recover from an error on the initial syn")
-			case am.Keysplitting:
-				if err := dc.handleKeysplitting(agentMessage); err != nil {
-					return err
-				}
-			default:
-				return fmt.Errorf("datachannel must start with a mrzap or error message, recieved: %s", agentMessage.MessageType)
-			}
-		case <-time.After(handshakeTimeout):
-			return fmt.Errorf("handshake timed out")
+		// wait for the syn/ack to our intial syn message or an error
+		if err := dc.handshakeOrTimeout(); err != nil {
+			return err
 		}
-		// if err := dc.handshakeOrTimeout(); err != nil {
-		// 	return err
-		// }
 		dc.logger.Info("Initial handshake complete")
 
 		for {
 			select {
 			case <-parentTmb.Dying(): // daemon is dying
-				dc.logger.Info("DONE 1")
-				return fmt.Errorf("datachannel was orphaned too young and can't be batman :'(")
+				dc.logger.Info("Datachannel was orphaned too young and can't be batman :'(")
+				return nil
 			case <-dc.tmb.Dying():
-				dc.logger.Info("DONE 2")
+				dc.logger.Infof("Datachannel dying: %s", dc.tmb.Err().Error())
 				dc.plugin.Kill()
 				return nil
 			case <-dc.plugin.Done():
-				dc.logger.Info("DONE 3")
+				dc.logger.Infof("%s is done", action)
 				// wait for any in-flight messages to come in or timeout
 				return dc.waitOrTimeout()
 			case agentMessage := <-dc.inputChan: // receive messages
 				if err := dc.processInputMessage(agentMessage); err != nil {
 					dc.logger.Error(err)
 				}
-			case <-time.After(datachannelLifetime): // idle timeout
-				dc.logger.Info("DONE 5")
+			case <-time.After(datachannelIdleTimeout):
+				dc.logger.Info("Datachannel has been idle for too long, ceasing operation")
 				return fmt.Errorf("cleaning up stale datachannel")
 			}
 		}
@@ -169,51 +147,53 @@ func New(logger *logger.Logger,
 	return dc, &dc.tmb, nil
 }
 
+func (d *DataChannel) handshakeOrTimeout() error {
+	select {
+	case <-d.tmb.Dying():
+		return nil
+	case agentMessage := <-d.inputChan:
+		switch am.MessageType(agentMessage.MessageType) {
+		case am.Error:
+			return fmt.Errorf("daemon cannot recover from an error on the initial syn")
+		case am.Keysplitting:
+			if err := d.handleKeysplitting(agentMessage); err != nil {
+				return err
+			} else {
+				return nil
+			}
+		default:
+			return fmt.Errorf("datachannel must start with a mrzap or error message, recieved: %s", agentMessage.MessageType)
+		}
+	case <-time.After(handshakeTimeout):
+		return fmt.Errorf("handshake timed out")
+	}
+}
+
 func (d *DataChannel) waitOrTimeout() error {
 	// LUCIE: this is a maybe okay solution for waiting for all incoming messages to receive before dying
 	// the purpose is more to absorb any errors than anything
-	absoluteTimeout := time.NewTicker(15 * time.Second)
+	idleTimeout := 2 * time.Second
+	absoluteTimeout := time.NewTicker(10 * time.Second)
 	defer absoluteTimeout.Stop()
 	for {
 		select {
 		case <-d.inputChan:
-		case <-time.After(2 * time.Second): // idle timeout
-			return fmt.Errorf("datachannel's sole plugin is closed")
+		case <-time.After(idleTimeout): // idle timeout
+			return nil
 		case <-absoluteTimeout.C:
-			return fmt.Errorf("timed out waiting to finish receiving messages after plugin closing")
+			d.logger.Errorf("timed out waiting for agent to finish sending messages after plugin closed")
+			return nil
 		}
 	}
 }
 
-// func (d *DataChannel) handshakeOrTimeout() error {
-// 	select {
-// 	case <-d.tmb.Dying():
-// 		return nil
-// 	case agentMessage := <-d.inputChan:
-// 		switch am.MessageType(agentMessage.MessageType) {
-// 		case am.Error:
-// 			return fmt.Errorf("daemon cannot recover from an error on the initial syn")
-// 		case am.Keysplitting:
-// 			if err := d.handleKeysplitting(agentMessage); err != nil {
-// 				return err
-// 			}
-// 		default:
-// 			return fmt.Errorf("datachannel must start with a mrzap or error message, recieved: %s", agentMessage.MessageType)
-// 		}
-// 	case <-time.After(handshakeTimeout):
-// 		return fmt.Errorf("handshake timed out")
-// 	}
-// }
-
 func (d *DataChannel) sendKeysplitting() error {
-	defer d.logger.Info("DONE WITH SEND KEYSPLITTING")
 	for {
 		select {
 		case <-d.tmb.Dying():
 			d.keysplitter.Release()
 			return nil
 		case ksMessage := <-d.keysplitter.Outbox():
-			// d.logger.Infof("WE'RE SENDING SOME OUTPUT")
 			if ksMessage.Type == ksmsg.Syn {
 				d.ignoreMrZAP = false
 			}
@@ -221,18 +201,15 @@ func (d *DataChannel) sendKeysplitting() error {
 				d.send(am.Keysplitting, ksMessage)
 			}
 		}
-		// time.Sleep(1 * time.Second)
 	}
 }
 
 func (d *DataChannel) zapPluginOutput() error {
-	defer d.logger.Info("DONE WITH ZAP PLUGIN OUTPUT")
 	for {
 		select {
 		case <-d.tmb.Dying():
 			return nil
 		case wrapper := <-d.plugin.Outbox():
-			// d.logger.Infof("PLUGIN OUTPUT HEADED FOR KEYSPLITTING")
 			// Build and send response
 			if err := d.keysplitter.Inbox(wrapper.Action, wrapper.ActionPayload); err != nil {
 				d.logger.Errorf("could not build response message: %s", err)
@@ -282,17 +259,20 @@ func (d *DataChannel) openDataChannel(action string, synPayload interface{}) err
 
 // Wraps and sends the payload
 func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{}) error {
-	messageBytes, _ := json.Marshal(messagePayload)
-	agentMessage := am.AgentMessage{
-		ChannelId:      d.id,
-		MessageType:    string(messageType),
-		SchemaVersion:  am.SchemaVersion,
-		MessagePayload: messageBytes,
-	}
+	if messageBytes, err := json.Marshal(messagePayload); err != nil {
+		return fmt.Errorf("failed to marshal the provided agent message payload: %s", messageBytes)
+	} else {
+		agentMessage := am.AgentMessage{
+			ChannelId:      d.id,
+			MessageType:    string(messageType),
+			SchemaVersion:  am.SchemaVersion,
+			MessagePayload: messageBytes,
+		}
 
-	// Push message to websocket channel output
-	d.websocket.Send(agentMessage)
-	return nil
+		// Push message to websocket channel output
+		d.websocket.Send(agentMessage)
+		return nil
+	}
 }
 
 func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
@@ -302,7 +282,7 @@ func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 }
 
 func (d *DataChannel) processInputMessage(agentMessage *am.AgentMessage) error {
-	d.logger.Infof("Datachannel received %v message", agentMessage.MessageType)
+	d.logger.Debugf("Datachannel received %v message", agentMessage.MessageType)
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.Error:

@@ -10,7 +10,7 @@ type DataPayload struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Type          string `json:"type"`
 	Action        string `json:"action"`
-	Timestamp     int64  `json:"timestamp"`
+	Timestamp     string `json:"timestamp"`
 
 	// Unique to Data Payload
 	TargetId      string `json:"targetId"`

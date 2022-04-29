@@ -57,7 +57,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 		return action, []byte{}, err
 	}
 
-	httpClient := &http.Client{} // LUCIE: Add a timeout here
+	httpClient := &http.Client{} // LUCIE: Add a timeout here?
 	res, err := httpClient.Do(req)
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)

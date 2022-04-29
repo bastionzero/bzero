@@ -14,7 +14,7 @@ type SynPayload struct {
 	Type          string `json:"type"`
 	Action        string `json:"action"`
 	ActionPayload []byte `json:"actionPayload"`
-	Timestamp     int64  `json:"timestamp"`
+	Timestamp     string `json:"timestamp"`
 
 	// Unique to Syn
 	TargetId string       `json:"targetId"`
