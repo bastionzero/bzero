@@ -8,8 +8,9 @@ type ActionWrapper struct {
 type PluginName string
 
 const (
-	Kube  PluginName = "kube"
 	Db    PluginName = "db"
-	Web   PluginName = "web"
+	Kube  PluginName = "kube"
 	Shell PluginName = "shell"
+	Ssh   PluginName = "ssh"
+	Web   PluginName = "web"
 )

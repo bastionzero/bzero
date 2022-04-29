@@ -32,6 +32,7 @@ const (
 	Db      = 3
 	Web     = 4
 	Shell   = 5
+	Ssh     = 6
 
 	// Enum target types for agent side connections
 	AgentWebsocket = -1
@@ -442,6 +443,10 @@ func (w *Websocket) connect() error {
 				if err := w.connectShell(); err != nil {
 					return fmt.Errorf("error making shell connection: %s", err)
 				}
+			case Ssh:
+				if err := w.connectSsh(); err != nil {
+					return fmt.Errorf("error making ssh connection: %s", err)
+				}
 			case AgentWebsocket:
 				if err := w.connectAgentWebsocket(); err != nil {
 					return fmt.Errorf("error making agent websocket connection: %s", err)
@@ -582,6 +587,17 @@ func (w *Websocket) connectShell() error {
 	}
 
 	createConnectionResponse, err := cnController.CreateShellConnection(w.params["connection_id"])
+
+	return w.buildCnUrl(createConnectionResponse, err)
+}
+
+func (w *Websocket) connectSsh() error {
+	cnController, cnControllerErr := w.getCnController()
+	if cnControllerErr != nil {
+		return fmt.Errorf("error creating cnController")
+	}
+
+	createConnectionResponse, err := cnController.CreateSshConnection(w.params["target_id"])
 
 	return w.buildCnUrl(createConnectionResponse, err)
 }

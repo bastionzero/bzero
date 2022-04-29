@@ -57,7 +57,7 @@ func StartDbServer(logger *logger.Logger,
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
-	listener := &DbServer{
+	server := &DbServer{
 		logger:              logger,
 		serviceUrl:          serviceUrl,
 		params:              params,
@@ -73,8 +73,8 @@ func StartDbServer(logger *logger.Logger,
 	}
 
 	// Create a new websocket
-	if err := listener.newWebsocket(uuid.New().String()); err != nil {
-		listener.logger.Error(err)
+	if err := server.newWebsocket(uuid.New().String()); err != nil {
+		server.logger.Error(err)
 		return err
 	}
 
@@ -108,7 +108,7 @@ func StartDbServer(logger *logger.Logger,
 
 		// create our new datachannel in its own go routine so that we can accept other tcp connections
 		go func() {
-			if dc, err := listener.newDataChannel(string(bzdb.Dial), listener.websocket); err == nil {
+			if dc, err := server.newDataChannel(string(bzdb.Dial), server.websocket); err == nil {
 
 				// Start the dial plugin
 				food := bzdb.DbFood{

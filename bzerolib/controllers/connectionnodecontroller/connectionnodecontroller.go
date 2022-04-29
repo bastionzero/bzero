@@ -25,6 +25,9 @@ const (
 	// Db related
 	createDbConnectionEndpoint = "/api/v2/connections/db"
 
+	// Ssh related
+	createSshConnectionEndpoint = "/api/v2/connections/ssh"
+
 	// Web related
 	createWebConnectionEndpoint = "/api/v2/connections/web"
 
@@ -97,6 +100,15 @@ func (c *ConnectionNodeController) CreateShellConnection(connectionId string) (C
 	return c.createCnConnection(connectionId)
 }
 
+func (c *ConnectionNodeController) CreateSshConnection(targetId string) (ConnectionDetailsResponse, error) {
+	// Create our request
+	createSshConnectionRequest := CreateConnectionRequest{
+		TargetId: targetId,
+	}
+
+	return c.createConnection(createSshConnectionRequest, "ssh")
+}
+
 func (c *ConnectionNodeController) createConnection(request interface{}, connectionType string) (ConnectionDetailsResponse, error) {
 	// Build the endpoint we want to hit
 	endpoint := ""
@@ -107,6 +119,8 @@ func (c *ConnectionNodeController) createConnection(request interface{}, connect
 		endpoint = createWebConnectionEndpoint
 	case "db":
 		endpoint = createDbConnectionEndpoint
+	case "ssh":
+		endpoint = createSshConnectionEndpoint
 	default:
 		return ConnectionDetailsResponse{}, fmt.Errorf("attempting to make an unrecognized connection: %s", connectionType)
 	}

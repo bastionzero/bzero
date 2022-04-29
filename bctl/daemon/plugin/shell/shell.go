@@ -7,7 +7,6 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell/actions/defaultshell"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
-	"bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"gopkg.in/tomb.v2"
@@ -68,7 +67,6 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzshell.Shell
 			case <-shellDaemonPlugin.tmb.Dying():
 				return
 			case m, more := <-actOutputChan:
-				logger.Infof("GOING TO OUTPUT CHAN")
 				if more {
 					shellDaemonPlugin.outputQueue <- m
 				} else {
@@ -133,7 +131,7 @@ func (s *ShellDaemonPlugin) processKeysplitting(action string, actionPayload []b
 	s.logger.Infof("Shell plugin received keysplitting message with action: %s", action)
 
 	switch action {
-	case string(shell.ShellReplay):
+	case string(bzshell.ShellReplay):
 		return s.action.Replay(actionPayload)
 	default:
 		return nil

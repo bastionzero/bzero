@@ -11,6 +11,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/shellserver"
+	"bastionzero.com/bctl/v1/bctl/daemon/servers/sshserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -114,21 +115,43 @@ func startServer(logger *logger.Logger, headers map[string]string, params map[st
 	logger.Infof("Opening websocket to Bastion: %s for plugin %s", serviceUrl, plugin)
 
 	switch bzplugin.PluginName(plugin) {
-	case bzplugin.Kube:
-		params["websocketType"] = "cluster"
-		return startKubeServer(logger, headers, params)
 	case bzplugin.Db:
 		params["websocketType"] = "db"
 		return startDbServer(logger, headers, params)
-	case bzplugin.Web:
-		params["websocketType"] = "web"
-		return startWebServer(logger, headers, params)
+	case bzplugin.Kube:
+		params["websocketType"] = "cluster"
+		return startKubeServer(logger, headers, params)
 	case bzplugin.Shell:
 		params["websocketType"] = "shell"
 		return startShellServer(logger, headers, params)
+	case bzplugin.Ssh:
+		params["websocketType"] = "ssh"
+		return startSshServer(logger, headers, params)
+	case bzplugin.Web:
+		params["websocketType"] = "web"
+		return startWebServer(logger, headers, params)
 	default:
 		return fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
+}
+
+func startSshServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+	subLogger := logger.GetComponentLogger("sshserver")
+
+	params["connection_id"] = connectionId
+
+	return sshserver.StartSshServer(
+		subLogger,
+		targetUser,
+		dataChannelId,
+		refreshTokenCommand,
+		configPath,
+		serviceUrl,
+		params,
+		headers,
+		agentPubKey,
+		targetSelectHandler,
+	)
 }
 
 func startShellServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
@@ -272,14 +295,15 @@ func parseFlags() error {
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
 	requiredFlags := []string{"sessionId", "sessionToken", "authHeader", "logPath", "configPath", "agentPubKey"}
-	switch plugin {
-	case "kube":
+	switch bzplugin.PluginName(plugin) {
+	case bzplugin.Kube:
 		requiredFlags = append(requiredFlags, "localPort", "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
-	case "db":
-	case "web":
+	case bzplugin.Db:
+	case bzplugin.Web:
 		requiredFlags = append(requiredFlags, "localPort", "remoteHost", "remotePort")
-	case "shell":
+	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
+	case bzplugin.Ssh:
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

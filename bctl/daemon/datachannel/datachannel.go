@@ -15,6 +15,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	shellplugin "bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -25,6 +26,7 @@ import (
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
+	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
@@ -270,6 +272,20 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, actionParams [
 		} else {
 			d.plugin = plugin
 		}
+	case bzplugin.Ssh:
+		// Deserialize the action params
+		var sshParams bzssh.SshActionParams
+		if err := json.Unmarshal(actionParams, &sshParams); err != nil {
+			return fmt.Errorf("error deserializing actions params")
+		}
+
+		// start ssh plugin
+		if plugin, err := ssh.New(&d.tmb, subLogger, sshParams); err != nil {
+			return fmt.Errorf("could not start ssh daemon plugin: %s", err)
+		} else {
+			d.plugin = plugin
+		}
+
 	case bzplugin.Web:
 		// Deserialize the action params
 		var webParams bzweb.WebActionParams
