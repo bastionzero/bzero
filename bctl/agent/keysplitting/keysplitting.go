@@ -20,8 +20,7 @@ type BZCertMetadata struct {
 }
 
 type Keysplitting struct {
-	logger *logger.Logger
-	// hPointer         string
+	logger           *logger.Logger
 	expectedHPointer string
 	bzCert           BZCertMetadata // only for one client
 	publickey        string
@@ -47,8 +46,7 @@ func New(logger *logger.Logger, config IKeysplittingConfig) (*Keysplitting, erro
 	}
 
 	return &Keysplitting{
-		logger: logger,
-		// hPointer:            "",
+		logger:              logger,
 		expectedHPointer:    "",
 		publickey:           config.GetPublicKey(),
 		privatekey:          config.GetPrivateKey(),
@@ -134,15 +132,7 @@ func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action str
 	} else if hash := responseMessage.Hash(); hash == "" {
 		return responseMessage, fmt.Errorf("could not hash payload")
 	} else {
-		// k.logger.Infof("Setting expected hpointer to %s based off %+v", hash, responseMessage.KeysplittingPayload)
 		k.expectedHPointer = hash
 		return responseMessage, nil
 	}
-
-	// else if hashBytes, ok := util.HashPayload(responseMessage.KeysplittingPayload); !ok {
-	// 	return responseMessage, fmt.Errorf("could not hash payload")
-	// } else {
-	// 	k.expectedHPointer = base64.StdEncoding.EncodeToString(hashBytes)
-	// 	return responseMessage, nil
-	// }
 }

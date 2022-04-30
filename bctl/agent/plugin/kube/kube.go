@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Masterminds/semver"
 	kuberest "k8s.io/client-go/rest"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/exec"
@@ -35,9 +34,6 @@ type KubePlugin struct {
 	kubeHost            string
 	targetUser          string
 	targetGroups        []string
-
-	// versioning constraint for extra quotes in payload bug
-	payloadClean bool
 }
 
 func New(
@@ -73,14 +69,6 @@ func New(
 		kubeHost:            kubeHost,
 		targetUser:          synPayload.TargetUser,
 		targetGroups:        synPayload.TargetGroups,
-	}
-
-	if c, err := semver.NewConstraint(">= 2.0"); err != nil {
-		return nil, fmt.Errorf("unable to create versioning constraint")
-	} else if v, err := semver.NewVersion(version); err != nil {
-		return nil, fmt.Errorf("unable to parse version")
-	} else {
-		plugin.payloadClean = c.Check(v)
 	}
 
 	// Start up the action for this plugin
@@ -119,7 +107,7 @@ func (k *KubePlugin) Kill() {
 func (k *KubePlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	k.logger.Debugf("Kube plugin received message with %s action", action)
 
-	if payload, err := k.cleanPayload(actionPayload); err != nil {
+	if payload, err := cleanPayload(actionPayload); err != nil {
 		k.logger.Error(err)
 		return "", []byte{}, err
 	} else if action, payload, err := k.action.Receive(action, payload); err != nil {
@@ -137,11 +125,7 @@ func parseAction(action string) (bzkube.KubeAction, error) {
 	return bzkube.KubeAction(parsedAction[1]), nil
 }
 
-func (k *KubePlugin) cleanPayload(payload []byte) ([]byte, error) {
-	if k.payloadClean {
-		return payload, nil
-	}
-
+func cleanPayload(payload []byte) ([]byte, error) {
 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
 	// so that we can murder its family

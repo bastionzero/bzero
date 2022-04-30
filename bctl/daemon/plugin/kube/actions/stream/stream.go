@@ -120,7 +120,7 @@ waitForHeaders:
 				}
 				break waitForHeaders
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(30 * time.Second):
 			return fmt.Errorf("timed out waiting for initial header message")
 		}
 	}

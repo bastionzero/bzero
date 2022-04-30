@@ -10,7 +10,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"github.com/Masterminds/semver"
 )
 
 type IShellAction interface {
@@ -24,10 +23,7 @@ type ShellPlugin struct {
 	action           IShellAction
 	streamOutputChan chan smsg.StreamMessage
 	doneChan         chan struct{}
-
-	runAsUser string
-
-	payloadClean bool
+	runAsUser        string
 }
 
 func New(
@@ -50,14 +46,6 @@ func New(
 		streamOutputChan: ch,
 		doneChan:         make(chan struct{}),
 		runAsUser:        synPayload.TargetUser,
-	}
-
-	if c, err := semver.NewConstraint(">= 2.0"); err != nil {
-		return nil, fmt.Errorf("unable to create versioning constraint")
-	} else if v, err := semver.NewVersion(version); err != nil {
-		return nil, fmt.Errorf("unable to parse version")
-	} else {
-		plugin.payloadClean = c.Check(v)
 	}
 
 	// Start up the action for this plugin
@@ -83,7 +71,7 @@ func New(
 func (s *ShellPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	s.logger.Debugf("Shell plugin received message with %s action", action)
 
-	if payload, err := s.cleanPayload(actionPayload); err != nil {
+	if payload, err := cleanPayload(actionPayload); err != nil {
 		s.logger.Error(err)
 		return "", []byte{}, err
 	} else if action, payload, err := s.action.Receive(action, payload); err != nil {
@@ -111,10 +99,7 @@ func (s *ShellPlugin) Kill() {
 	}
 }
 
-func (s *ShellPlugin) cleanPayload(payload []byte) ([]byte, error) {
-	if s.payloadClean {
-		return payload, nil
-	}
+func cleanPayload(payload []byte) ([]byte, error) {
 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
 	// so that we can murder its family

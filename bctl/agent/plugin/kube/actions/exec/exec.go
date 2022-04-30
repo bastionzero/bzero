@@ -63,8 +63,15 @@ func New(logger *logger.Logger,
 }
 
 func (e *ExecAction) Kill() {
-	e.stdinReader.Close()
-	<-e.doneChan
+	// If the datachannel is closed and this kill function is called, it doesn't necessarily mean
+	// that the exec was properly closed, and because the below exec.Stream only returns when it's done, there's
+	// no way to interrupt it or pass in a context. Therefore, we need to close the stream in order to pass an
+	// io.EOF message to exec which will close the exec.Stream and that will close the go routine.
+	// ref: https://github.com/kubernetes/client-go/issues/554
+	if e.stdinReader != nil {
+		e.stdinReader.Close()
+		<-e.doneChan
+	}
 }
 
 func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
@@ -176,16 +183,6 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	stdoutWriter := NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdOut, e.logId)
 	e.stdinReader = NewStdReader(string(bzexec.StdIn), startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
-
-	// This function listens for a closed datachannel.  If the datachannel is closed, it doesn't necessarily mean
-	// that the exec was properly closed, and because the below exec.Stream only returns when it's done, there's
-	// no way to interrupt it or pass in a context. Therefore, we need to close the stream in order to pass an
-	// io.EOF message to exec which will close the exec.Stream and that will close the go routine.
-	// https://github.com/kubernetes/client-go/issues/554
-	// go func() {
-	// 	<-e.tmb.Dying()
-	// 	stdinReader.Close()
-	// }()
 
 	// runs the exec interaction with the kube server
 	go func() {
