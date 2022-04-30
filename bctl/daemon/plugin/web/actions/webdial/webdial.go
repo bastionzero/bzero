@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 
-	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
@@ -71,15 +70,17 @@ func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 }
 
 func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
+	request.Header.Set("Host", "localhost:1234")
+	w.logger.Infof("Daemon Request: %+v", request)
 	// First modify the host header to reflect what we are trying to connect to
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
-	request.Header.Set("X-Forwarded-Host", request.Host)
+	// request.Header.Set("X-Forwarded-Host", request.Host)
 
 	// First extract the headers out of the request
-	headers := bzhttp.GetHeaders(request.Header)
+	// headers := bzhttp.GetHeaders(request.Header)
 
 	// Send our request, in chunks if the body > chunksize
-	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
+	w.sendRequestChunks(request.Body, request.URL.String(), request.Header, request.Method)
 
 	// this signals to the parent plugin that the action is done
 	defer close(w.outputChan)
