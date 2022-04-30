@@ -33,6 +33,7 @@ var (
 	logLevel                         string
 	forceReRegistration              bool
 	wait                             bool
+	printVersion, listLogFile        bool
 )
 
 const (
@@ -40,12 +41,28 @@ const (
 	Bzero   = "bzero"
 
 	prodServiceUrl = "https://cloud.bastionzero.com/"
+
+	bzeroLogFilePath = "/var/log/bzero/bzero-agent.log"
 )
 
 func main() {
 	setAgentType()
 
 	parseErr := parseFlags()
+
+	// see if the user is asking for any helpful info and just print that
+	if parseErr == nil && printVersion {
+		fmt.Printf("%s\n", getAgentVersion())
+		return
+	} else if parseErr == nil && listLogFile {
+		switch agentType {
+		case Bzero:
+			fmt.Printf("%s\n", bzeroLogFilePath)
+		case Cluster:
+			fmt.Printf("Bzero Agent logs can be accessed via\n") // LUCIE: Ask Sid
+		}
+		return
+	}
 
 	if logger, err := setupLogger(); err != nil {
 		reportError(logger, err)
@@ -118,7 +135,7 @@ func setupLogger() (*logger.Logger, error) {
 	// if this is systemd, output files
 	logFile := ""
 	if agentType == Bzero {
-		logFile = "/var/log/bzero/bzero-agent.log" // bzero-agent is protect here because we replace at build with process name
+		logFile = bzeroLogFilePath // bzero-agent is protect here because we replace at build with process name
 	}
 
 	// setup our loggers
@@ -237,6 +254,10 @@ func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 }
 
 func parseFlags() error {
+	// Helpful flags
+	flag.BoolVar(&printVersion, "version", false, "Print current version of the agent")
+	flag.BoolVar(&listLogFile, "logs", false, "Print the agent log file path")
+
 	// Our required registration flags
 	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
 	flag.StringVar(&registrationKey, "registrationKey", "", "API Key used to register the agent")
