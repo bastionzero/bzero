@@ -253,7 +253,7 @@ func (w *WebDial) buildHttpRequest(endpoint string, body []byte, method string, 
 
 	if endpoint, err := bzhttp.BuildEndpoint(remoteUrl, endpoint); err != nil {
 		return nil, err
-	} else if remoteHostUrl, err := url.Parse(w.remoteHost); err != nil {
+	} else if _, err := url.Parse(w.remoteHost); err != nil {
 		w.logger.Error(fmt.Errorf("error parsing remote host url %s", w.remoteHost))
 		return nil, err
 	} else {
@@ -261,15 +261,38 @@ func (w *WebDial) buildHttpRequest(endpoint string, body []byte, method string, 
 		req, _ := http.NewRequest(method, endpoint, bodyBytesReader)
 
 		// Add any headers
-		for name, values := range headers {
+		// for name, values := range headers {
 
-			// Loop over all values for the name.
-			for _, value := range values {
-				req.Header.Set(name, value)
-			}
-		}
+		// 	// Loop over all values for the name
+		// 	for _, value := range values {
+		// 		req.Header.Set(name, value)
+		// 	}
+		// }
+		req.Header = headers
 
-		req.Header.Set("Host", remoteHostUrl.Host)
+		// req.Header.Del("X-Forwarded-Host")
+		// req.Header.Del("Origin")
+		req.Host = "localhost:1234"
+		w.logger.Infof("Agent Request: %+v", req)
+		// req.Header.Set("Host", "52.87.172.129:8085")
+		// // req.Header.Set("Origin", )
+		// // req.Header.Set("X-Atlassian-Token", "no-check")
+
+		// // set our referer header so that it matches host for xsrf checks
+		// if _, ok := req.Header["Referer"]; ok {
+		// 	w.logger.Debugf("HEADERS BEFORE: %+v", req.Header)
+		// 	// w.logger.Debugf("Found Referer header value: %s, Host value: %s", ref, remoteHostUrl.Host)
+		// 	req.Header.Set("Referer", "http://52.87.172.129:8085/userlogin.action")
+		// 	w.logger.Debugf("HEADERS AFTER: %+v", req.Header)
+		// 	// req.Header.Del("Referer")
+		// } else if ref, ok := req.Header["Referrer"]; ok {
+		// 	// ref: https://pkg.go.dev/net/http#Request.Referer
+		// 	w.logger.Debugf("Found Referrer header value: %s, Host value: %s", ref, remoteHostUrl.Host)
+		// 	req.Header.Set("Referrer", "http://52.87.172.129:8085/userlogin.action")
+		// 	// req.Header.Set("Referer", remoteHostUrl.Host)
+		// 	// req.Header.Del("Referrer")
+		// }
+
 		return req, nil
 	}
 }

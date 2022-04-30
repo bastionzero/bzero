@@ -45,7 +45,7 @@ func New(logger *logger.Logger,
 
 	// Open up a connection to the TCP addr we are trying to connect to
 	if raddr, err := net.ResolveTCPAddr("tcp", address); err != nil {
-		logger.Errorf("Failed to resolve remote address: %s", err)
+		logger.Errorf("Failed to resolve remote address: {address: %s, error: %s}", address, err)
 		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
 	} else {
 		return &Dial{
@@ -93,6 +93,7 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 
 			// Send this data to our remote connection
 			d.logger.Info("Received data from daemon, forwarding to remote tcp connection")
+			d.logger.Infof("HTTP REQUEST: %s", string(dataToWrite))
 			_, err = d.remoteConnection.Write(dataToWrite)
 		}
 
