@@ -41,13 +41,15 @@ type ExecAction struct {
 	requestId           string
 }
 
-func New(logger *logger.Logger,
+func New(
+	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	doneChan chan struct{},
 	serviceAccountToken string,
 	kubeHost string,
 	targetGroups []string,
-	targetUser string) *ExecAction {
+	targetUser string,
+) *ExecAction {
 
 	return &ExecAction{
 		logger:              logger,

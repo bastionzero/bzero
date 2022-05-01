@@ -11,6 +11,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"github.com/Masterminds/semver"
 )
 
 type IWebAction interface {
@@ -28,6 +29,8 @@ type WebPlugin struct {
 	// remote host:port
 	remotePort int
 	remoteHost string
+
+	payloadClean bool
 }
 
 func New(
@@ -50,6 +53,14 @@ func New(
 		doneChan:         make(chan struct{}),
 		remotePort:       actionPayload.RemotePort,
 		remoteHost:       actionPayload.RemoteHost,
+	}
+
+	if c, err := semver.NewConstraint(">= 2.0"); err != nil {
+		return nil, fmt.Errorf("unable to create versioning constraint")
+	} else if v, err := semver.NewVersion(version); err != nil {
+		return nil, fmt.Errorf("unable to parse version")
+	} else {
+		plugin.payloadClean = c.Check(v)
 	}
 
 	// start the action for the plugin
@@ -90,7 +101,7 @@ func (w *WebPlugin) Kill() {
 func (w *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	w.logger.Debugf("Web plugin received message with %v action", action)
 
-	if payload, err := cleanPayload(actionPayload); err != nil {
+	if payload, err := w.cleanPayload(actionPayload); err != nil {
 		w.logger.Error(err)
 		return "", []byte{}, err
 	} else if action, payload, err := w.action.Receive(action, payload); err != nil {
@@ -108,7 +119,11 @@ func parseAction(action string) (bzweb.WebAction, error) {
 	return bzweb.WebAction(parsedAction[1]), nil
 }
 
-func cleanPayload(payload []byte) ([]byte, error) {
+func (w *WebPlugin) cleanPayload(payload []byte) ([]byte, error) {
+	if w.payloadClean {
+		return payload, nil
+	}
+
 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
 	// so that we can murder its family

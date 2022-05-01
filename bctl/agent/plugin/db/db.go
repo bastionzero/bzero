@@ -10,6 +10,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"github.com/Masterminds/semver"
 )
 
 type IDbAction interface {
@@ -27,6 +28,8 @@ type DbPlugin struct {
 	// Either use the host:port
 	remotePort int
 	remoteHost string
+
+	payloadClean bool
 }
 
 func New(logger *logger.Logger,
@@ -49,6 +52,14 @@ func New(logger *logger.Logger,
 		doneChan:         make(chan struct{}),
 		remotePort:       syn.RemotePort,
 		remoteHost:       syn.RemoteHost,
+	}
+
+	if c, err := semver.NewConstraint(">= 2.0"); err != nil {
+		return nil, fmt.Errorf("unable to create versioning constraint")
+	} else if v, err := semver.NewVersion(version); err != nil {
+		return nil, fmt.Errorf("unable to parse version")
+	} else {
+		plugin.payloadClean = c.Check(v)
 	}
 
 	// Start up the action for this plugin
@@ -87,7 +98,7 @@ func (d *DbPlugin) Kill() {
 func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
 	d.logger.Debugf("DB plugin received message with %s action", action)
 
-	if payload, err := cleanPayload(actionPayload); err != nil {
+	if payload, err := d.cleanPayload(actionPayload); err != nil {
 		d.logger.Error(err)
 		return "", []byte{}, err
 	} else if action, payload, err := d.action.Receive(action, payload); err != nil {
@@ -105,7 +116,11 @@ func parseAction(action string) (db.DbAction, error) {
 	return db.DbAction(parsedAction[1]), nil
 }
 
-func cleanPayload(payload []byte) ([]byte, error) {
+func (d *DbPlugin) cleanPayload(payload []byte) ([]byte, error) {
+	if d.payloadClean {
+		return payload, nil
+	}
+
 	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
 	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
 	// so that we can murder its family

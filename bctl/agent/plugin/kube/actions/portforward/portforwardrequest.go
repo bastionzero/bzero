@@ -13,10 +13,12 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 )
 
 type PortForwardRequest struct {
+	tmb                  tomb.Tomb
 	logger               *logger.Logger
 	streamOutputChan     chan smsg.StreamMessage // output channel to send all of our stream messages directly to datachannel
 	streamMessageVersion smsg.SchemaVersion
@@ -29,12 +31,10 @@ type PortForwardRequest struct {
 	dataInChannel  chan []byte
 	errorInChannel chan []byte
 	doneChan       chan bool // Done channel so the go routines can communicate with eachother
-	parentDoneChan chan struct{}
 }
 
 func createPortForwardRequest(
 	logger *logger.Logger,
-	doneChan chan struct{},
 	streamOutputChan chan smsg.StreamMessage,
 	version smsg.SchemaVersion,
 	requestId string,
@@ -53,8 +53,12 @@ func createPortForwardRequest(
 		dataInChannel:  make(chan []byte),
 		errorInChannel: make(chan []byte),
 		doneChan:       make(chan bool),
-		parentDoneChan: doneChan,
 	}
+}
+
+func (p *PortForwardRequest) Kill() {
+	p.tmb.Kill(nil)
+	p.tmb.Wait()
 }
 
 func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string, errorHeaders map[string]string, podPort int64, streamConn httpstream.Connection) error {
@@ -88,110 +92,163 @@ func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string
 		return rerr
 	}
 
-	// We need to set up two listeners for our data/error-in channel (i.e. coming from the user)
-	go func() {
+	p.tmb.Go(func() error {
+		defer errorStream.Close()
+		defer dataStream.Close()
+		defer p.logger.Infof("DIED GRACEFULLY")
+
+		p.tmb.Go(func() error {
+			// Keep track of seq number
+			dataSeqNumber := 0
+			for {
+				select {
+				case <-p.tmb.Dying():
+					return nil
+				default:
+					if err := p.forwardStream(smsg.Data, dataStream, dataSeqNumber); err != nil {
+						p.logger.Error(err)
+						return err
+					}
+					dataSeqNumber += 1
+				}
+			}
+		})
+
+		p.tmb.Go(func() error {
+			// Keep track of seq number
+			errorSeqNumber := 0
+			for {
+				select {
+				case <-p.tmb.Dying():
+					return nil
+				default:
+					if err := p.forwardStream(smsg.Error, errorStream, errorSeqNumber); err != nil {
+						p.logger.Error(err)
+						return err
+					}
+					errorSeqNumber += 1
+				}
+			}
+		})
+
 		for {
 			select {
-			case <-p.parentDoneChan:
-				return
-			case <-p.doneChan:
-				errorStream.Close()
-				dataStream.Close()
-				return
+			case <-p.tmb.Dying():
+				return nil
 			case dataInMessage := <-p.dataInChannel:
 				// Make this request locally, and then return that info to the user
 				if _, err := io.Copy(dataStream, bytes.NewReader(dataInMessage)); err != nil {
-					p.logger.Error(fmt.Errorf("error writing to data stream: %s", err))
-					p.doneChan <- true
-					dataStream.Close()
-					return
+					p.logger.Errorf("error writing to data stream: %s", err)
+					return nil
 				}
 			case errorInMessage := <-p.errorInChannel:
 				// Make this request locally, and then return that info to the user
 				if _, err := io.Copy(errorStream, bytes.NewReader(errorInMessage)); err != nil {
-					p.logger.Error(fmt.Errorf("error writing to error stream: %s", err))
-
-					// Do not alert on anything
-					return
+					p.logger.Errorf("error writing to error stream: %s", err)
+					return nil
 				}
 			}
 		}
-	}()
+	})
 
-	// Set up a go routine to listen for to our dataStream and send to the client
-	go func() {
-		defer dataStream.Close()
+	// We need to set up two listeners for our data/error-in channel (i.e. coming from the user)
+	// go func() {
+	// 	for {
+	// 		select {
+	// 		case <-p.tmb.Dying():
+	// 			return
+	// 		case <-p.doneChan:
+	// 			errorStream.Close()
+	// 			dataStream.Close()
+	// 			return
+	// 		case dataInMessage := <-p.dataInChannel:
+	// 			// Make this request locally, and then return that info to the user
+	// 			if _, err := io.Copy(dataStream, bytes.NewReader(dataInMessage)); err != nil {
+	// 				p.logger.Error(fmt.Errorf("error writing to data stream: %s", err))
+	// 				p.doneChan <- true
+	// 				dataStream.Close()
+	// 				return
+	// 			}
+	// 		case errorInMessage := <-p.errorInChannel:
+	// 			// Make this request locally, and then return that info to the user
+	// 			if _, err := io.Copy(errorStream, bytes.NewReader(errorInMessage)); err != nil {
+	// 				p.logger.Error(fmt.Errorf("error writing to error stream: %s", err))
 
-		// Keep track of seq number
-		dataSeqNumber := 0
+	// 				// Do not alert on anything
+	// 				return
+	// 			}
+	// 		}
+	// 	}
+	// }()
 
-		for {
-			select {
-			case <-p.parentDoneChan:
-				return
-			default:
-				p.forwardStream(smsg.Data, dataStream, dataSeqNumber)
-				dataSeqNumber += 1
-			}
-		}
-	}()
+	// // Set up a go routine to listen for to our dataStream and send to the client
+	// go func() {
+	// 	defer dataStream.Close()
 
-	// Setup a go routine for the error stream as well
-	go func() {
-		defer errorStream.Close()
+	// 	// Keep track of seq number
+	// 	dataSeqNumber := 0
 
-		// Keep track of seq number
-		errorSeqNumber := 0
+	// 	for {
+	// 		select {
+	// 		case <-p.tmb.Dying():
+	// 			return
+	// 		default:
+	// 			p.forwardStream(smsg.Data, dataStream, dataSeqNumber)
+	// 			dataSeqNumber += 1
+	// 		}
+	// 	}
+	// }()
 
-		for {
-			select {
-			case <-p.parentDoneChan:
-				return
-			default:
-				p.forwardStream(smsg.Error, errorStream, errorSeqNumber)
-				errorSeqNumber += 1
-			}
-		}
-	}()
+	// // Setup a go routine for the error stream as well
+	// go func() {
+	// 	defer errorStream.Close()
+
+	// 	// Keep track of seq number
+	// 	errorSeqNumber := 0
+
+	// 	for {
+	// 		select {
+	// 		case <-p.tmb.Dying():
+	// 			return
+	// 		default:
+	// 			p.forwardStream(smsg.Error, errorStream, errorSeqNumber)
+	// 			errorSeqNumber += 1
+	// 		}
+	// 	}
+	// }()
 
 	return nil
 }
 
 // NOTE: we don't need to check version here because Portforward is broken on previous versions of bzero
 // thus, anyone using it at all is using the new version
-func (p *PortForwardRequest) forwardStream(streamType smsg.StreamType, stream httpstream.Stream, sequenceNumber int) {
+func (p *PortForwardRequest) forwardStream(streamType smsg.StreamType, stream httpstream.Stream, sequenceNumber int) error {
 	buf := make([]byte, portforward.DataStreamBufferSize)
-	n, err := stream.Read(buf)
-	if err != nil {
+
+	if n, err := stream.Read(buf); !p.tmb.Alive() {
+		return nil
+	} else if err != nil {
 		if err != io.EOF {
-			rerr := fmt.Errorf("error reading data from data stream: %s", err)
-			p.logger.Error(rerr)
+			err = fmt.Errorf("error reading data from data stream: %s", err)
 		} else if streamType == smsg.Data {
-			content, err := p.wrapStreamMessageContent([]byte{})
-			if err != nil {
-				p.logger.Error(err)
-
-				// Alert on our done channel
-				p.doneChan <- true
+			if content, err := p.wrapStreamMessageContent([]byte{}); err != nil {
+				return err
+			} else {
+				// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
+				p.sendStreamMessage(sequenceNumber, streamType, false, content)
 			}
-
-			// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
-			p.sendStreamMessage(sequenceNumber, streamType, false, content)
 		}
-		p.doneChan <- true
-		return
+		return err
+	} else {
+		// Send this data back to the bastion
+		if content, err := p.wrapStreamMessageContent(buf[:n]); err != nil {
+			return err
+		} else {
+			// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
+			p.sendStreamMessage(sequenceNumber, streamType, true, content)
+			return nil
+		}
 	}
-
-	// Send this data back to the bastion
-	content, err := p.wrapStreamMessageContent(buf[:n])
-	if err != nil {
-		p.logger.Error(err)
-
-		// Alert on our done channel
-		p.doneChan <- true
-	}
-	// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
-	p.sendStreamMessage(sequenceNumber, streamType, true, content)
 }
 
 func (p *PortForwardRequest) wrapStreamMessageContent(content []byte) (string, error) {
@@ -201,9 +258,7 @@ func (p *PortForwardRequest) wrapStreamMessageContent(content []byte) (string, e
 	}
 	streamMessageToSendBytes, err := json.Marshal(streamMessageToSend)
 	if err != nil {
-		rerr := fmt.Errorf("error marsheling stream message: %s", err)
-
-		return "", rerr
+		return "", fmt.Errorf("error marshalling stream message: %s", err)
 	}
 
 	return base64.StdEncoding.EncodeToString(streamMessageToSendBytes), nil

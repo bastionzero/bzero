@@ -188,6 +188,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 					return fmt.Errorf("unable to parse version")
 				} else {
 					k.dirtyPayload = c.Check(v)
+					k.logger.Infof("DIRTY PAYLOAD? %v", k.dirtyPayload)
 				}
 			}
 		case ksmsg.DataAck:
@@ -195,7 +196,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			if pair := k.pipelineMap.Oldest(); pair == nil {
 				return fmt.Errorf("where did this ack come from?! we're not waiting for a response to any messages")
 			} else if pair.Key != hpointer {
-				k.logger.Info("RECEIVED AN OUT OF ORDER ACK")
+				k.logger.Info("Received an out-of-order ack message")
 				if len(k.outOfOrderAcks) > pipelineLimit {
 					// we're missing an ack sometime in the past, let's try to recover
 					if _, err := k.BuildSyn("", []byte{}, true); err != nil {

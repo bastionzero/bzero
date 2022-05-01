@@ -118,6 +118,8 @@ func (p *PortForwardAction) httpStreamReceived(ctx context.Context, streams chan
 // removes the pair.
 func (p *PortForwardAction) monitorStreamPair(portforwardStreamPair *httpStreamPair, timeout <-chan time.Time) {
 	select {
+	case <-p.tmb.Dying():
+		return
 	case <-timeout:
 		p.logger.Error(fmt.Errorf("request %s, timed out waiting for streams", portforwardStreamPair.requestID))
 	case <-portforwardStreamPair.complete:

@@ -113,6 +113,7 @@ func New(
 
 		// wait for the syn/ack to our intial syn message or an error
 		if err := dc.handshakeOrTimeout(); err != nil {
+			dc.logger.Error(err)
 			return err
 		}
 		dc.logger.Info("Initial handshake complete")

@@ -221,8 +221,7 @@ func (k *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 
 	// Before processing, check if we're ready to process or if there's been an error
 	if k.exitMessage != "" {
-		msg := fmt.Sprintf("error on daemon: " + k.exitMessage)
-		k.bubbleUpError(w, msg, http.StatusInternalServerError)
+		k.bubbleUpError(w, k.exitMessage, http.StatusInternalServerError)
 		return
 	}
 
