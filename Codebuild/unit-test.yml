@@ -47,10 +47,10 @@ phases:
       - echo Build started on `date`
       - bzero-qa test -unit-tests
 reports:
-  # bzerolib-unittest-report:
-  #   files:
-  #     - 'bzerolib/bzerolibcoverage.xml'
-  #   file-format: 'COBERTURAXML'
+  bzerolib-unittest-report:
+    files:
+      - 'bzerolib/bzerolibcoverage.xml'
+    file-format: 'COBERTURAXML'
   bctl-unittest-report:
     files:
       - 'bctl/bctlcoverage.xml'
