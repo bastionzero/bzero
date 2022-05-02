@@ -188,7 +188,6 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 					return fmt.Errorf("unable to parse version")
 				} else {
 					k.dirtyPayload = c.Check(v)
-					k.logger.Infof("DIRTY PAYLOAD? %v", k.dirtyPayload)
 				}
 			}
 		case ksmsg.DataAck:

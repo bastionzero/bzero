@@ -66,35 +66,31 @@ func main() {
 
 	if logger, err := setupLogger(); err != nil {
 		reportError(logger, err)
+	} else if parseErr != nil {
+		// catch our parser errors now that we have a logger to print them
+		reportError(logger, err)
 	} else {
-		logger.AddAgentVersion(getAgentVersion())
 
-		if parseErr != nil {
-			// catch our parser errors now that we have a logger to print them
-			reportError(logger, err)
-		} else {
+		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
 
-			logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
+		// Check if the agent is registered or not.  If not, generate signing keys,
+		// check kube permissions and setup, and register with the Bastion.
+		if err := handleRegistration(logger); err != nil {
 
-			// Check if the agent is registered or not.  If not, generate signing keys,
-			// check kube permissions and setup, and register with the Bastion.
-			if err := handleRegistration(logger); err != nil {
+			// our systemd agent waits for a successful new registration
+			if wait {
+				vault.WaitForNewRegistration(logger)
+				logger.Infof("New registration detected. Loading registration information!")
 
-				// our systemd agent waits for a successful new registration
-				if wait {
-					vault.WaitForNewRegistration(logger)
-					logger.Infof("New registration detected. Loading registration information!")
-
-					// double check and set our local variables
-					if registered, err := isRegistered(); err != nil {
-						logger.Error(err)
-					} else if registered {
-						run(logger)
-					}
+				// double check and set our local variables
+				if registered, err := isRegistered(); err != nil {
+					logger.Error(err)
+				} else if registered {
+					run(logger)
 				}
-			} else {
-				run(logger)
 			}
+		} else {
+			run(logger)
 		}
 	}
 
@@ -141,7 +137,7 @@ func setupLogger() (*logger.Logger, error) {
 	// setup our loggers
 	writeToConsole := true
 	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile, writeToConsole); err != nil {
-		return logger, err
+		return nil, err
 	} else {
 		logger.AddAgentVersion(getAgentVersion())
 		return logger, nil

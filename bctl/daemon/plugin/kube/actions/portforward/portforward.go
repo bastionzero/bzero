@@ -37,6 +37,7 @@ type PortForwardAction struct {
 	logId           string
 	commandBeingRun string
 
+	cancelChan      chan struct{} // internal channel for shutting everything down
 	doneChan        chan struct{}
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
@@ -73,6 +74,7 @@ func New(
 		requestId:             requestId,
 		logId:                 logId,
 		commandBeingRun:       command,
+		cancelChan:            make(chan struct{}),
 		doneChan:              doneChan,
 		outputChan:            outputChan,
 		streamInputChan:       make(chan smsg.StreamMessage, 10),
@@ -83,8 +85,8 @@ func New(
 }
 
 func (p *PortForwardAction) Kill() {
-	p.tmb.Kill(nil)
-	p.tmb.Wait()
+	close(p.cancelChan)
+	<-p.doneChan
 }
 
 func (p *PortForwardAction) ReceiveKeysplitting(actionPayload []byte) {}
@@ -103,7 +105,7 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 	contentBytes, _ := base64.StdEncoding.DecodeString(stream.Content)
 	err := json.Unmarshal(contentBytes, &kubePortforwardStreamMessageContent)
 	if err != nil {
-		p.logger.Error(fmt.Errorf("error unmarshalling stream output for portforward action: %+v", err))
+		p.logger.Error(fmt.Errorf("error unmarshalling stream output for portforward action: %s", err))
 		return
 	}
 
@@ -120,8 +122,8 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 }
 
 func (p *PortForwardAction) Start(writer http.ResponseWriter, request *http.Request) error {
-	defer p.sendCloseMessage()
 	defer close(p.doneChan)
+	defer p.logger.Infof("RETURNING FROM START")
 
 	// Set our endpoint
 	p.endpoint = request.URL.String()
@@ -144,10 +146,9 @@ func (p *PortForwardAction) Start(writer http.ResponseWriter, request *http.Requ
 		Endpoint:             p.endpoint,
 		CommandBeingRun:      p.commandBeingRun,
 	}
-	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{
 		Action:        string(portforward.StartPortForward),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 
 	// Now wait for the ready message, incase we need to bubble up an error to the user
@@ -170,7 +171,7 @@ readyMessageLoop:
 	// Perform our http handshake
 	_, err := httpstream.Handshake(request, writer, []string{kubeutils.PortForwardProtocolV1Name})
 	if err != nil {
-		return fmt.Errorf("could not perform http handshake: %v", err.Error())
+		return fmt.Errorf("could not perform http handshake: %s", err)
 	}
 
 	// Now create our streamChan (where kubectl requests will come in)
@@ -186,10 +187,10 @@ readyMessageLoop:
 	defer conn.Close()
 
 	// Now listen for incoming kubectl portforward requests in the background
+	defer p.sendCloseMessage()
 	for {
 		select {
-		case <-p.tmb.Dying():
-			request.Body.Close()
+		case <-p.cancelChan:
 			return nil
 		case <-conn.CloseChan():
 			return nil
@@ -250,10 +251,9 @@ func (p *PortForwardAction) sendCloseRequestMessage(portforwardingRequestId stri
 		LogId:                p.logId,
 		PortForwardRequestId: portforwardingRequestId,
 	}
-	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{
 		Action:        string(portforward.StopPortForwardRequest),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 }
 
@@ -263,10 +263,9 @@ func (p *PortForwardAction) sendCloseMessage() {
 		RequestId: p.requestId,
 		LogId:     p.logId,
 	}
-	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{
 		Action:        string(portforward.StopPortForward),
-		ActionPayload: payloadBytes,
+		ActionPayload: payload,
 	}
 }
 
@@ -274,15 +273,19 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	// Make and update the stream channel for this requestId
 	p.requestMap[portforwardSession.requestID] = make(chan RequestMapStruct)
 
-	p.tmb.Go(func() error {
+	var tmb tomb.Tomb
+
+	tmb.Go(func() error {
 		// Set up the go routine to push error data to Bastion
-		p.tmb.Go(func() error {
+		tmb.Go(func() error {
 			defer portforwardSession.errorStream.Close()
 
 			buf := make([]byte, portforward.ErrorStreamBufferSize)
 			for {
 				select {
-				case <-p.tmb.Dying():
+				case <-p.cancelChan:
+					return nil
+				case <-tmb.Dying():
 					return nil
 				default:
 					if n, err := portforwardSession.errorStream.Read(buf); !p.tmb.Alive() {
@@ -298,10 +301,9 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 							Data:                 buf[:n],
 							PortForwardRequestId: portforwardSession.requestID,
 						}
-						payloadBytes, _ := json.Marshal(payload)
 						p.outputChan <- plugin.ActionWrapper{
 							Action:        string(portforward.ErrorPortForward),
-							ActionPayload: payloadBytes,
+							ActionPayload: payload,
 						}
 					}
 				}
@@ -314,10 +316,12 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 		buf := make([]byte, portforward.DataStreamBufferSize)
 		for {
 			select {
-			case <-p.tmb.Dying():
+			case <-p.cancelChan:
+				return nil
+			case <-tmb.Dying():
 				return nil
 			default:
-				if n, err := portforwardSession.dataStream.Read(buf); !p.tmb.Alive() {
+				if n, err := portforwardSession.dataStream.Read(buf); !tmb.Alive() {
 					return nil
 				} else if err != nil {
 					if err != io.EOF {
@@ -333,10 +337,9 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 						PortForwardRequestId: portforwardSession.requestID,
 						PodPort:              remotePort,
 					}
-					payloadBytes, _ := json.Marshal(payload)
 					p.outputChan <- plugin.ActionWrapper{
 						Action:        string(portforward.DataInPortForward),
-						ActionPayload: payloadBytes,
+						ActionPayload: payload,
 					}
 				}
 			}
@@ -353,7 +356,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	processDataMessage := func(content []byte) {
 		if _, err := io.Copy(portforwardSession.dataStream, bytes.NewReader(content)); err != nil {
 			p.logger.Errorf("error writing to stream data: %s", err)
-			p.tmb.Kill(nil)
+			tmb.Kill(nil)
 		}
 		expectedDataSeqNumber += 1
 	}
@@ -361,7 +364,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	processErrorMessage := func(content []byte) {
 		if _, err := io.Copy(portforwardSession.errorStream, bytes.NewReader(content)); err != nil {
 			p.logger.Errorf("error writing to stream error: %s", err)
-			p.tmb.Kill(nil)
+			tmb.Kill(nil)
 		}
 		expectedErrorSeqNumber += 1
 	}
@@ -376,7 +379,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	// Set up the function to listen to bastion messages and push to the user
 	for {
 		select {
-		case <-p.tmb.Dying():
+		case <-tmb.Dying():
 			// Delete the stream pair from our mapping
 			delete(p.requestMap, portforwardSession.requestID)
 			return nil
@@ -401,7 +404,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				}
 
 				if !requestMapStruct.streamMessage.More {
-					p.tmb.Kill(nil)
+					tmb.Kill(nil)
 					return nil
 				}
 

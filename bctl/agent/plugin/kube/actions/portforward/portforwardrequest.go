@@ -95,7 +95,6 @@ func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string
 	p.tmb.Go(func() error {
 		defer errorStream.Close()
 		defer dataStream.Close()
-		defer p.logger.Infof("DIED GRACEFULLY")
 
 		p.tmb.Go(func() error {
 			// Keep track of seq number
@@ -151,72 +150,6 @@ func (p *PortForwardRequest) openPortForwardStream(dataHeaders map[string]string
 		}
 	})
 
-	// We need to set up two listeners for our data/error-in channel (i.e. coming from the user)
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case <-p.tmb.Dying():
-	// 			return
-	// 		case <-p.doneChan:
-	// 			errorStream.Close()
-	// 			dataStream.Close()
-	// 			return
-	// 		case dataInMessage := <-p.dataInChannel:
-	// 			// Make this request locally, and then return that info to the user
-	// 			if _, err := io.Copy(dataStream, bytes.NewReader(dataInMessage)); err != nil {
-	// 				p.logger.Error(fmt.Errorf("error writing to data stream: %s", err))
-	// 				p.doneChan <- true
-	// 				dataStream.Close()
-	// 				return
-	// 			}
-	// 		case errorInMessage := <-p.errorInChannel:
-	// 			// Make this request locally, and then return that info to the user
-	// 			if _, err := io.Copy(errorStream, bytes.NewReader(errorInMessage)); err != nil {
-	// 				p.logger.Error(fmt.Errorf("error writing to error stream: %s", err))
-
-	// 				// Do not alert on anything
-	// 				return
-	// 			}
-	// 		}
-	// 	}
-	// }()
-
-	// // Set up a go routine to listen for to our dataStream and send to the client
-	// go func() {
-	// 	defer dataStream.Close()
-
-	// 	// Keep track of seq number
-	// 	dataSeqNumber := 0
-
-	// 	for {
-	// 		select {
-	// 		case <-p.tmb.Dying():
-	// 			return
-	// 		default:
-	// 			p.forwardStream(smsg.Data, dataStream, dataSeqNumber)
-	// 			dataSeqNumber += 1
-	// 		}
-	// 	}
-	// }()
-
-	// // Setup a go routine for the error stream as well
-	// go func() {
-	// 	defer errorStream.Close()
-
-	// 	// Keep track of seq number
-	// 	errorSeqNumber := 0
-
-	// 	for {
-	// 		select {
-	// 		case <-p.tmb.Dying():
-	// 			return
-	// 		default:
-	// 			p.forwardStream(smsg.Error, errorStream, errorSeqNumber)
-	// 			errorSeqNumber += 1
-	// 		}
-	// 	}
-	// }()
-
 	return nil
 }
 
@@ -229,13 +162,14 @@ func (p *PortForwardRequest) forwardStream(streamType smsg.StreamType, stream ht
 		return nil
 	} else if err != nil {
 		if err != io.EOF {
-			err = fmt.Errorf("error reading data from data stream: %s", err)
+			return fmt.Errorf("error reading data from %s stream: %s", streamType, err)
 		} else if streamType == smsg.Data {
 			if content, err := p.wrapStreamMessageContent([]byte{}); err != nil {
 				return err
 			} else {
 				// NOTE: we don't have to version this because this part of portforward is broken prior to 202204
 				p.sendStreamMessage(sequenceNumber, streamType, false, content)
+				return nil
 			}
 		}
 		return err

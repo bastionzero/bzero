@@ -138,7 +138,6 @@ func parseAction(action string) (bzkube.KubeAction, error) {
 }
 
 func (k *KubePlugin) cleanPayload(payload []byte) ([]byte, error) {
-	k.logger.Infof("CLEANING PAYLOAD? %s", k.payloadClean)
 	if k.payloadClean {
 		return payload, nil
 	}
