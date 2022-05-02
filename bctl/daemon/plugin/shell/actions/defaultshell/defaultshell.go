@@ -148,7 +148,7 @@ func (d *DefaultShell) readStdIn() {
 				d.tmb.Kill(fmt.Errorf("error reading last keypress from Stdin: %s", err))
 				return
 			}
-			d.logger.Infof("READ")
+			d.logger.Debugf("READ")
 
 			d.stdInChan <- b[0]
 		}

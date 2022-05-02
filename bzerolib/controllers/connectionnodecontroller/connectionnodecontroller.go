@@ -100,10 +100,11 @@ func (c *ConnectionNodeController) CreateShellConnection(connectionId string) (C
 	return c.createCnConnection(connectionId)
 }
 
-func (c *ConnectionNodeController) CreateSshConnection(targetId string) (ConnectionDetailsResponse, error) {
+func (c *ConnectionNodeController) CreateSshConnection(targetId string, targetUser string) (ConnectionDetailsResponse, error) {
 	// Create our request
-	createSshConnectionRequest := CreateConnectionRequest{
-		TargetId: targetId,
+	createSshConnectionRequest := CreateSshConnectionRequest{
+		TargetId:   targetId,
+		TargetUser: targetUser,
 	}
 
 	return c.createConnection(createSshConnectionRequest, "ssh")
@@ -197,5 +198,6 @@ func (c *ConnectionNodeController) createCnConnection(connectionId string) (Conn
 	response.ConnectionNodeId = getAuthDetailsResponse.ConnectionNodeId
 	response.AuthToken = getAuthDetailsResponse.AuthToken
 	response.ConnectionServiceUrl = getAuthDetailsResponse.ConnectionServiceUrl
+	c.logger.Errorf("I'll say it... THIS ROCKS!")
 	return response, nil
 }

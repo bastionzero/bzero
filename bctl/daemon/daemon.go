@@ -138,7 +138,8 @@ func startServer(logger *logger.Logger, headers map[string]string, params map[st
 func startSshServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	subLogger := logger.GetComponentLogger("sshserver")
 
-	params["connection_id"] = connectionId
+	params["target_id"] = targetId
+	params["target_user"] = targetUser
 
 	return sshserver.StartSshServer(
 		subLogger,
@@ -265,7 +266,7 @@ func parseFlags() error {
 
 	// Kube plugin variables
 	flag.StringVar(&targetGroupsRaw, "targetGroups", "", "Kube Group to Assume")
-	flag.StringVar(&targetUser, "targetUser", "", "Kube Role to Assume")
+	flag.StringVar(&targetUser, "targetUser", "", "Kube Role or OS user to Assume")
 	flag.StringVar(&localhostToken, "localhostToken", "", "Localhost Token to Validate Kubectl commands")
 	flag.StringVar(&certPath, "certPath", "", "Path to cert to use for our localhost server")
 	flag.StringVar(&keyPath, "keyPath", "", "Path to key to use for our localhost server")
@@ -304,6 +305,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
+		requiredFlags = append(requiredFlags, "targetUser", "targetId")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

@@ -250,7 +250,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 	case bzplugin.Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:
-		return fmt.Errorf("unrecognized plugin name")
+		return fmt.Errorf("unrecognized plugin name %s", string(pluginName))
 	}
 
 	if err != nil {

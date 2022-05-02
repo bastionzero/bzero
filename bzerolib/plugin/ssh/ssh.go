@@ -20,8 +20,7 @@ type SshOpenMessage struct {
 }
 
 type SshInputMessage struct {
-	SequenceNumber int    `json:"sequenceNumber"`
-	Data           string `json:"data"`
+	Data []byte `json:"data"`
 }
 
 type SshCloseMessage struct{}

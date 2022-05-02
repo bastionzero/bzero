@@ -232,8 +232,10 @@ func (w *Websocket) receive() error {
 
 	// Read incoming message(s)
 	_, rawMessage, err := w.client.ReadMessage()
+	//w.logger.Errorf("HOT PIE, I'M TALKING TO YOU   ---------------")
 
 	if err != nil {
+		w.logger.Error(err)
 		w.ready = false
 
 		// Check if it's a clean exit or we don't need to reconnect
@@ -252,7 +254,9 @@ func (w *Websocket) receive() error {
 		if messages, err := w.unwrapSignalR(rawMessage); err != nil {
 			return err
 		} else {
+			//w.logger.Errorf("hot pie, a these: %+v", messages)
 			for _, message := range messages {
+				//w.logger.Errorf("hot pie, a this: %+v", message)
 				switch message.Target {
 				case "CloseConnection":
 					rerr := errors.New("closing message received; websocket closed")
@@ -597,7 +601,7 @@ func (w *Websocket) connectSsh() error {
 		return fmt.Errorf("error creating cnController")
 	}
 
-	createConnectionResponse, err := cnController.CreateSshConnection(w.params["target_id"])
+	createConnectionResponse, err := cnController.CreateSshConnection(w.params["target_id"], w.params["target_user"])
 
 	return w.buildCnUrl(createConnectionResponse, err)
 }

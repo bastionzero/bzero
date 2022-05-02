@@ -29,7 +29,7 @@ type SshServer struct {
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	// TODO: revisit
-	//targetUser    string
+	targetUser string
 	//dataChannelId string
 
 	// fields for new datachannels
@@ -56,6 +56,7 @@ func StartSshServer(
 	server := &SshServer{
 		logger:              logger,
 		serviceUrl:          serviceUrl,
+		targetUser:          targetUser,
 		params:              params,
 		headers:             headers,
 		targetSelectHandler: targetSelectHandler,
@@ -63,6 +64,8 @@ func StartSshServer(
 		refreshTokenCommand: refreshTokenCommand,
 		agentPubKey:         agentPubKey,
 	}
+
+	server.logger.Errorf(" --------- %+v --------- ", params)
 
 	// Create a new websocket
 	if err := server.newWebsocket(uuid.New().String()); err != nil {
@@ -100,8 +103,10 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	s.logger.Infof("Creating new datachannel id: %s", dcId)
 
 	// TODO: revisit what might go in here
-	var a bzssh.SshActionParams
-	actionParamsMarshalled, _ := json.Marshal(a)
+	actionParams := bzssh.SshOpenMessage{
+		TargetUser: s.targetUser,
+	}
+	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
 	action = "ssh/" + action
 	if dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, s.refreshTokenCommand, s.configPath, action, actionParamsMarshalled, s.agentPubKey, attach); err != nil {

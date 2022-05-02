@@ -3,7 +3,6 @@ package ssh
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 
 	"gopkg.in/tomb.v2"
 
@@ -16,9 +15,8 @@ import (
 
 // Perhaps unnecessary but it is nice to make sure that each action is implementing a common function set
 type ISshDaemonAction interface {
-	ReceiveKeysplitting(wrappedAction plugin.ActionWrapper)
 	ReceiveStream(stream smsg.StreamMessage)
-	Start(tmb *tomb.Tomb, lconn *net.TCPConn) error
+	Start(tmb *tomb.Tomb) error
 }
 
 type SshDaemonPlugin struct {
@@ -73,6 +71,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzssh.SshActi
 			case <-sshDaemonPlugin.tmb.Dying():
 				return
 			case m, more := <-actOutputChan:
+				actLogger.Errorf("Got %+v //// %t", m, more)
 				if more {
 					sshDaemonPlugin.outputQueue <- m
 				} else {
@@ -83,12 +82,6 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzssh.SshActi
 			}
 		}
 	}()
-
-	// Start the ssh action
-	// FIXME: Help! I need a connection
-	if err := sshDaemonPlugin.action.Start(sshDaemonPlugin.tmb, &net.TCPConn{}); err != nil {
-		return &sshDaemonPlugin, fmt.Errorf("error starting the ssh action: %s", err)
-	}
 
 	return &sshDaemonPlugin, nil
 }
@@ -103,7 +96,7 @@ func (s *SshDaemonPlugin) processStream(smessage smsg.StreamMessage) error {
 		s.action.ReceiveStream(smessage)
 		return nil
 	} else {
-		return fmt.Errorf("Ssh plugin received stream message before an action was created. Ignoring")
+		return fmt.Errorf("ssh plugin received stream message before an action was created. Ignoring")
 	}
 }
 
