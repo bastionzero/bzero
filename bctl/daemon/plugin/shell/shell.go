@@ -19,7 +19,7 @@ type IShellAction interface {
 
 type ShellDaemonPlugin struct {
 	logger      *logger.Logger
-	outputQueue chan bzplugin.ActionWrapper
+	outboxQueue chan bzplugin.ActionWrapper
 	doneChan    chan struct{}
 	killed      bool
 	action      IShellAction
@@ -28,7 +28,7 @@ type ShellDaemonPlugin struct {
 func New(logger *logger.Logger) *ShellDaemonPlugin {
 	return &ShellDaemonPlugin{
 		logger:      logger,
-		outputQueue: make(chan bzplugin.ActionWrapper, 10),
+		outboxQueue: make(chan bzplugin.ActionWrapper, 10),
 		doneChan:    make(chan struct{}),
 		killed:      false,
 	}
@@ -41,7 +41,7 @@ func (s *ShellDaemonPlugin) StartAction(attach bool) error {
 
 	// Create the DefaultShell action
 	actLogger := s.logger.GetActionLogger(string(bzshell.DefaultShell))
-	s.action = defaultshell.New(actLogger, s.outputQueue, s.doneChan)
+	s.action = defaultshell.New(actLogger, s.outboxQueue, s.doneChan)
 
 	// Start the shell action
 	if err := s.action.Start(attach); err != nil {
@@ -63,7 +63,7 @@ func (s *ShellDaemonPlugin) Done() <-chan struct{} {
 }
 
 func (s *ShellDaemonPlugin) Outbox() <-chan bzplugin.ActionWrapper {
-	return s.outputQueue
+	return s.outboxQueue
 }
 
 func (s *ShellDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {

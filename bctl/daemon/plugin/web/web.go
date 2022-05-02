@@ -28,7 +28,7 @@ type WebDaemonPlugin struct {
 	killed   bool
 
 	// keysplitting output
-	outputQueue chan plugin.ActionWrapper
+	outboxQueue chan plugin.ActionWrapper
 
 	// Web-specific vars
 	remoteHost string
@@ -43,7 +43,7 @@ func New(logger *logger.Logger, remoteHost string, remotePort int) *WebDaemonPlu
 		logger:         logger,
 		doneChan:       make(chan struct{}),
 		killed:         false,
-		outputQueue:    make(chan plugin.ActionWrapper, 5),
+		outboxQueue:    make(chan plugin.ActionWrapper, 5),
 		remoteHost:     remoteHost,
 		remotePort:     remotePort,
 		sequenceNumber: 0,
@@ -63,9 +63,9 @@ func (w *WebDaemonPlugin) StartAction(action bzweb.WebAction, writer http.Respon
 
 	switch action {
 	case bzweb.Dial:
-		w.action = webdial.New(actLogger, requestId, w.outputQueue, w.doneChan)
+		w.action = webdial.New(actLogger, requestId, w.outboxQueue, w.doneChan)
 	case bzweb.Websocket:
-		w.action = webwebsocket.New(actLogger, requestId, w.outputQueue, w.doneChan)
+		w.action = webwebsocket.New(actLogger, requestId, w.outboxQueue, w.doneChan)
 	default:
 		rerr := fmt.Errorf("unrecognized web action: %s", action)
 		w.logger.Error(rerr)
@@ -83,7 +83,7 @@ func (w *WebDaemonPlugin) StartAction(action bzweb.WebAction, writer http.Respon
 }
 
 func (w *WebDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
-	return w.outputQueue
+	return w.outboxQueue
 }
 
 func (w *WebDaemonPlugin) Done() <-chan struct{} {

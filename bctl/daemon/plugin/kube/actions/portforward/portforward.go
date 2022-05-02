@@ -193,6 +193,8 @@ readyMessageLoop:
 			return nil
 		case <-conn.CloseChan():
 			return nil
+		case <-request.Context().Done():
+			return nil
 		case stream := <-streamChan:
 			// Extract the requestId and streamType from the stream
 			requestID, err := p.requestID(stream)

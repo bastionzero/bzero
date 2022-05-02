@@ -33,13 +33,13 @@ type DialAction struct {
 	doneChan chan struct{}
 }
 
-func New(logger *logger.Logger, requestId string, outputQueue chan plugin.ActionWrapper, doneChan chan struct{}) *DialAction {
+func New(logger *logger.Logger, requestId string, outboxQueue chan plugin.ActionWrapper, doneChan chan struct{}) *DialAction {
 
 	dial := &DialAction{
 		logger:    logger,
 		requestId: requestId,
 
-		outputChan:      outputQueue,
+		outputChan:      outboxQueue,
 		streamInputChan: make(chan smsg.StreamMessage, 10),
 		doneChan:        doneChan,
 	}

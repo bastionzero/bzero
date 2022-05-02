@@ -33,10 +33,10 @@ type DefaultShell struct {
 	stdInChan chan byte
 }
 
-func New(logger *logger.Logger, outputQueue chan plugin.ActionWrapper, doneChan chan struct{}) *DefaultShell {
+func New(logger *logger.Logger, outboxQueue chan plugin.ActionWrapper, doneChan chan struct{}) *DefaultShell {
 	return &DefaultShell{
 		logger:     logger,
-		outputChan: outputQueue,
+		outputChan: outboxQueue,
 		doneChan:   doneChan,
 		stdInChan:  make(chan byte, InputBufferSize),
 	}

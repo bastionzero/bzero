@@ -29,7 +29,7 @@ type KubeDaemonPlugin struct {
 	killed   bool
 
 	// outbox channel
-	outputQueue chan plugin.ActionWrapper
+	outboxQueue chan plugin.ActionWrapper
 
 	// Kube-specific vars
 	targetUser   string
@@ -41,7 +41,7 @@ func New(logger *logger.Logger, targetUser string, targetGroups []string) *KubeD
 		logger:       logger,
 		doneChan:     make(chan struct{}),
 		killed:       false,
-		outputQueue:  make(chan plugin.ActionWrapper, 25),
+		outboxQueue:  make(chan plugin.ActionWrapper, 25),
 		targetUser:   targetUser,
 		targetGroups: targetGroups,
 	}
@@ -59,7 +59,7 @@ func (k *KubeDaemonPlugin) Done() <-chan struct{} {
 }
 
 func (k *KubeDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
-	return k.outputQueue
+	return k.outboxQueue
 }
 
 func (k *KubeDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
@@ -84,13 +84,13 @@ func (k *KubeDaemonPlugin) StartAction(action bzkube.KubeAction, logId string, c
 
 	switch action {
 	case bzkube.Exec:
-		k.action = exec.New(actLogger, k.outputQueue, k.doneChan, requestId, logId, command)
+		k.action = exec.New(actLogger, k.outboxQueue, k.doneChan, requestId, logId, command)
 	case bzkube.Stream:
-		k.action = stream.New(actLogger, k.outputQueue, k.doneChan, requestId, logId, command)
+		k.action = stream.New(actLogger, k.outboxQueue, k.doneChan, requestId, logId, command)
 	case bzkube.RestApi:
-		k.action = restapi.New(actLogger, k.outputQueue, k.doneChan, requestId, logId, command)
+		k.action = restapi.New(actLogger, k.outboxQueue, k.doneChan, requestId, logId, command)
 	case bzkube.PortForward:
-		k.action = portforward.New(actLogger, k.outputQueue, k.doneChan, requestId, logId, command)
+		k.action = portforward.New(actLogger, k.outboxQueue, k.doneChan, requestId, logId, command)
 	default:
 		rerr := fmt.Errorf("unrecognized kubectl action: %s", action)
 		k.logger.Error(rerr)

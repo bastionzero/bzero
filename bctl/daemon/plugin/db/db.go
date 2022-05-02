@@ -29,7 +29,7 @@ type DbDaemonPlugin struct {
 	killed   bool
 
 	// outbox
-	outputQueue chan plugin.ActionWrapper
+	outboxQueue chan plugin.ActionWrapper
 
 	// Db-specific vars
 	sequenceNumber int
@@ -40,7 +40,7 @@ func New(logger *logger.Logger) *DbDaemonPlugin {
 		logger:         logger,
 		doneChan:       make(chan struct{}),
 		killed:         false,
-		outputQueue:    make(chan plugin.ActionWrapper, 5),
+		outboxQueue:    make(chan plugin.ActionWrapper, 5),
 		sequenceNumber: 0,
 	}
 }
@@ -55,7 +55,7 @@ func (d *DbDaemonPlugin) StartAction(action bzdb.DbAction, conn *net.TCPConn) er
 
 	switch action {
 	case bzdb.Dial:
-		d.action = dial.New(actLogger, requestId, d.outputQueue, d.doneChan)
+		d.action = dial.New(actLogger, requestId, d.outboxQueue, d.doneChan)
 	default:
 		return fmt.Errorf("unrecognized db action: %s", action)
 	}
@@ -82,7 +82,7 @@ func (d *DbDaemonPlugin) Done() <-chan struct{} {
 }
 
 func (d *DbDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
-	return d.outputQueue
+	return d.outboxQueue
 }
 
 func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
