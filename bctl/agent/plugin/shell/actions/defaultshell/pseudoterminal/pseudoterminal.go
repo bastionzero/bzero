@@ -18,7 +18,6 @@
 package pseudoterminal
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -169,7 +168,7 @@ func (p *PseudoTerminal) StdIn() io.Writer {
 }
 
 func (p *PseudoTerminal) StdOut() io.Reader {
-	return bufio.NewReader(p.ptyFile)
+	return p.ptyFile
 }
 
 // SetSize sets size of console terminal window.

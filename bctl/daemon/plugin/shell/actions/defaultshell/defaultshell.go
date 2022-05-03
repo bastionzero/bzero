@@ -76,9 +76,13 @@ func (d *DefaultShell) Start(attach bool) error {
 
 	// reading Stdin in raw mode and forward keypresses after debouncing
 	go d.sendStdIn()
+	go func() {
+		defer close(d.doneChan)
+		<-d.tmb.Dying()
+	}()
+
 	d.tmb.Go(func() error {
 		defer d.logger.Infof("closing action: %s", d.tmb.Err())
-		defer close(d.doneChan)
 
 		// switch stdin into 'raw' mode
 		// https://pkg.go.dev/golang.org/x/term#pkg-overview
@@ -133,7 +137,6 @@ func (d *DefaultShell) ReceiveStream(smessage smsg.StreamMessage) {
 		}
 	case smsg.Stop:
 		d.tmb.Kill(fmt.Errorf("received shell quit stream message"))
-		d.tmb.Wait()
 		return
 	default:
 		d.logger.Errorf("unhandled stream type: %s", smessage.Type)

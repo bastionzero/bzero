@@ -73,8 +73,9 @@ func New(
 	doneChan chan struct{},
 	runAsUser string) (*DefaultShell, error) {
 	return &DefaultShell{
-		runAsUser:            runAsUser,
 		logger:               logger,
+		runAsUser:            runAsUser,
+		doneChan:             doneChan,
 		streamOutputChan:     ch,
 		streamSequenceNumber: 1,
 	}, nil
