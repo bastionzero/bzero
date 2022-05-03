@@ -88,7 +88,7 @@ func (d *DefaultShell) Kill() {
 }
 
 // Receive takes input from a client using the MRZAP datachannel and returns output via the MRZAP datachannel
-func (d *DefaultShell) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (d *DefaultShell) Receive(action string, actionPayload []byte) ([]byte, error) {
 	d.logger.Infof("Plugin received Data message with %v action", action)
 
 	switch bzshell.ShellSubAction(action) {
@@ -99,7 +99,7 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) (string, []b
 		// based on the SYN message when the datachannel is first opened.
 		if err := d.open(); err != nil {
 			d.logger.Error(err)
-			return "", []byte{}, err
+			return []byte{}, err
 		}
 	case bzshell.ShellClose:
 		d.terminal.Kill()
@@ -108,37 +108,37 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &shellInput); err != nil {
 			rerr := fmt.Errorf("malformed shell input payload: %s %+v", err, actionPayload)
 			d.logger.Error(rerr)
-			return action, []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		if err := d.writeToTerminal(shellInput.Data); err != nil {
 			d.logger.Error(err)
-			return action, []byte{}, err
+			return []byte{}, err
 		}
 	case bzshell.ShellResize:
 		var shellResize bzshell.ShellResizeMessage
 		if err := json.Unmarshal(actionPayload, &shellResize); err != nil {
 			rerr := fmt.Errorf("malformed shell resize payload: %s %+v", err, actionPayload)
 			d.logger.Error(rerr)
-			return action, []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		if err := d.setSize(shellResize.Cols, shellResize.Rows); err != nil {
 			d.logger.Error(err)
-			return action, []byte{}, err
+			return []byte{}, err
 		}
 	case bzshell.ShellReplay:
 		if replayBytes, err := d.stdoutbuff.ReadAll(); err != nil {
-			return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
+			return []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
 		} else {
-			return action, replayBytes, nil
+			return replayBytes, nil
 		}
 
 	default:
-		return action, []byte{}, fmt.Errorf("unrecognized shell action received: %s", action)
+		return []byte{}, fmt.Errorf("unrecognized shell action received: %s", action)
 	}
 
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
 func (d *DefaultShell) open() error {

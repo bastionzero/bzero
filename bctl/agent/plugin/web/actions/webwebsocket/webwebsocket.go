@@ -55,7 +55,7 @@ func (w *WebWebsocket) Kill() {
 	w.tmb.Wait()
 }
 
-func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (w *WebWebsocket) Receive(action string, actionPayload []byte) ([]byte, error) {
 	switch webwebsocket.WebWebsocketSubAction(action) {
 	case webwebsocket.Start:
 		// Deserialize the action payload, the only action passed is DataIn
@@ -63,7 +63,7 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &webWebsocketStartRequest); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
 			w.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		return w.startWebsocket(webWebsocketStartRequest, action)
@@ -73,7 +73,7 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &webWebsocketDataIn); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
 			w.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		return w.dataInWebsocket(webWebsocketDataIn, action)
@@ -84,7 +84,7 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &webWebsocketDaemonStop); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal daemonStop message: %s", err)
 			w.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		if w.ws != nil {
@@ -93,31 +93,31 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 			w.logger.Info("Attempted to close websocket connection that does not exist")
 		}
 
-		return action, []byte{}, nil
+		return []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled stream action: %v", action)
 		w.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 }
 
-func (w *WebWebsocket) dataInWebsocket(webWebsocketDataIn webwebsocket.WebWebsocketDataInActionPayload, action string) (string, []byte, error) {
+func (w *WebWebsocket) dataInWebsocket(webWebsocketDataIn webwebsocket.WebWebsocketDataInActionPayload, action string) ([]byte, error) {
 	// Decode the message
 	messageDecoded, err := base64.StdEncoding.DecodeString(webWebsocketDataIn.Message)
 	if err != nil {
-		return "", []byte{}, err
+		return []byte{}, err
 	}
 
 	// Write the message to the websocket
 	wsWriteError := w.ws.WriteMessage(webWebsocketDataIn.MessageType, messageDecoded)
 	if wsWriteError != nil {
-		return "", []byte{}, wsWriteError
+		return []byte{}, wsWriteError
 	}
 
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
-func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebWebsocketStartActionPayload, action string) (string, []byte, error) {
+func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebWebsocketStartActionPayload, action string) ([]byte, error) {
 	// keep track of who we're talking to
 	w.requestId = webWebsocketStartRequest.RequestId
 	w.logger.Infof("Setting request id: %s", w.requestId)
@@ -130,7 +130,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 	remoteHostUrl, parseErr := url.Parse(baseAddress)
 	if parseErr != nil {
 		w.logger.Errorf("error parsing remote host url: %s", parseErr)
-		return "", []byte{}, parseErr
+		return []byte{}, parseErr
 	}
 	if remoteHostUrl.Scheme == "https" {
 		scheme = "wss"
@@ -153,7 +153,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 		default:
 			w.sendStreamMessage(0, smsg.Stop, false, []byte{})
 		}
-		return action, []byte{}, nil
+		return []byte{}, nil
 	}
 
 	// set our class variable so we can close it later
@@ -204,7 +204,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 		}
 	})
 
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
 func (w *WebWebsocket) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {

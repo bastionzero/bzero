@@ -80,7 +80,7 @@ func (p *PortForwardAction) Kill() {
 	<-p.doneChan
 }
 
-func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (p *PortForwardAction) Receive(action string, actionPayload []byte) ([]byte, error) {
 	p.logger.Infof("PortForward action received message with action: %s", action)
 	switch portforward.PortForwardSubAction(action) {
 
@@ -90,7 +90,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		if err := json.Unmarshal(actionPayload, &startPortForwardRequest); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal start portforward message: %s", string(actionPayload))
 			p.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		return p.startPortForward(startPortForwardRequest)
@@ -99,7 +99,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		if err := json.Unmarshal(actionPayload, &dataInputAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling datain: %s", err)
 			p.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		// See if we already have a session for this portforwardRequestId, else create it
@@ -122,19 +122,19 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 			if err := newRequest.openPortForwardStream(p.DataHeaders, p.ErrorHeaders, dataInputAction.PodPort, p.streamConn); err != nil {
 				rerr := fmt.Errorf("error opening stream for new portforward request: %s", err)
 				p.logger.Error(rerr)
-				return "", []byte{}, rerr
+				return []byte{}, rerr
 			}
 			p.requestMap[dataInputAction.PortForwardRequestId] = newRequest
 			newRequest.dataInChannel <- dataInputAction.Data
 		}
 
-		return string(action), []byte{}, nil
+		return []byte{}, nil
 	case portforward.StopPortForwardRequest:
 		var stopRequestAction portforward.KubePortForwardStopRequestActionPayload
 		if err := json.Unmarshal(actionPayload, &stopRequestAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stop request: %s", err)
 			p.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		// Alert on the done channel
@@ -145,19 +145,19 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		// Else update our requestMap
 		delete(p.requestMap, stopRequestAction.PortForwardRequestId)
 
-		return string(portforward.StopPortForwardRequest), []byte{}, nil
+		return []byte{}, nil
 	case portforward.StopPortForward:
 		p.Kill()
 
-		return string(portforward.StopPortForward), []byte{}, nil
+		return []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled portforward action: %v", action)
 		p.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 }
 
-func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) (string, []byte, error) {
+func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) ([]byte, error) {
 	// Update our object to keep track of the pod and url information
 	p.DataHeaders = startPortForwardRequest.DataHeaders
 	p.ErrorHeaders = startPortForwardRequest.ErrorHeaders
@@ -176,14 +176,14 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 	if err != nil {
 		rerr := fmt.Errorf("error creating in-custer config: %s", err)
 		p.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 
 	// Always ensure that our targetUser is set
 	if p.targetUser == "" {
 		rerr := fmt.Errorf("target user field is not set")
 		p.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 
 	// Add our impersonation information
@@ -198,7 +198,7 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 	if err != nil {
 		rerr := fmt.Errorf("error creating spdy RoundTripper: %s", err)
 		p.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 
 	hostIP := strings.TrimLeft(config.Host, "htps:/")
@@ -231,7 +231,7 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 		close(p.doneChan)
 	}()
 
-	return string(portforward.StartPortForward), []byte{}, nil
+	return []byte{}, nil
 }
 
 func (p *PortForwardAction) sendReadyMessage(streamType smsg.StreamType, errorMessage string) {

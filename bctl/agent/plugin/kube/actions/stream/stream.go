@@ -54,7 +54,7 @@ func (s *StreamAction) Kill() {
 	close(s.doneChan)
 }
 
-func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (s *StreamAction) Receive(action string, actionPayload []byte) ([]byte, error) {
 	switch stream.StreamSubAction(action) {
 
 	// Start exec message required before anything else
@@ -63,7 +63,7 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
 			s.logger.Error(rerr)
-			return action, []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		return s.startStream(streamActionRequest, action)
@@ -72,21 +72,21 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &streamActionRequest); err != nil {
 			rerr := fmt.Errorf("malformed Kube Stream Action payload %v", actionPayload)
 			s.logger.Error(rerr)
-			return action, []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		s.logger.Info("Stopping Stream Action")
 		close(s.doneChan) // close the go routines
 
-		return "", []byte{}, nil
+		return []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled stream action: %v", action)
 		s.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 }
 
-func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPayload, action string) (string, []byte, error) {
+func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPayload, action string) ([]byte, error) {
 	// keep track of who we're talking to
 	s.requestId = streamActionRequest.RequestId
 	s.logger.Infof("Setting request id: %s", s.requestId)
@@ -100,7 +100,7 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 	if err != nil {
 		defer cancel()
 		s.logger.Error(err)
-		return action, []byte{}, err
+		return []byte{}, err
 	}
 
 	// Make the request and wait for the body to close
@@ -111,7 +111,7 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 		defer cancel()
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		s.logger.Error(rerr)
-		return action, []byte{}, rerr
+		return []byte{}, rerr
 	}
 
 	// Send our first message with the headers
@@ -198,7 +198,7 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 		cancel()
 	}()
 
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
 func (s *StreamAction) buildHttpRequest(endpoint, body, method string, headers map[string][]string) (*http.Request, error) {

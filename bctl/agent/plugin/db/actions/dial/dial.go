@@ -64,7 +64,7 @@ func (d *Dial) Kill() {
 	d.tmb.Wait()
 }
 
-func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (d *Dial) Receive(action string, actionPayload []byte) ([]byte, error) {
 	var err error
 
 	// Update the logger action
@@ -106,7 +106,7 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			break
 		}
 		d.remoteConnection.Close()
-		return action, actionPayload, nil
+		return actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %v", action)
 	}
@@ -114,10 +114,10 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 	if err != nil {
 		d.logger.Error(err)
 	}
-	return "", []byte{}, err
+	return []byte{}, err
 }
 
-func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (string, []byte, error) {
+func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) ([]byte, error) {
 	// keep track of who we're talking to
 	d.requestId = dialActionRequest.RequestId
 	d.logger.Infof("Setting request id: %s", d.requestId)
@@ -127,7 +127,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 	// For each start, call the dial the TCP address
 	if remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress); err != nil {
 		d.logger.Errorf("Failed to dial remote address: %s", err)
-		return action, []byte{}, err
+		return []byte{}, err
 	} else {
 		d.remoteConnection = remoteConnection
 	}
@@ -135,6 +135,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
 	d.tmb.Go(func() error {
 		defer d.remoteConnection.Close()
+		defer close(d.doneChan)
 
 		sequenceNumber := 0
 		buff := make([]byte, chunkSize)
@@ -178,7 +179,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 	})
 
 	// Update our remote connection
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
 func (d *Dial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {

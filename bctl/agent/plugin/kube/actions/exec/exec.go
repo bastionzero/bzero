@@ -76,7 +76,7 @@ func (e *ExecAction) Kill() {
 	}
 }
 
-func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (e *ExecAction) Receive(action string, actionPayload []byte) ([]byte, error) {
 	switch bzexec.ExecSubAction(action) {
 
 	// Start exec message required before anything else
@@ -85,7 +85,7 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 		if err := json.Unmarshal(actionPayload, &startExecRequest); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal start exec message: %s", err)
 			e.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		return e.StartExec(startExecRequest)
@@ -95,7 +95,7 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 		if err := json.Unmarshal(actionPayload, &execInputAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stdin: %s", err)
 			e.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		// Always feed in the exec stdin a chunk at a time (i.e. break up the byte array into chunks)
@@ -106,36 +106,36 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			}
 			e.execStdinChannel <- execInputAction.Stdin[i:end]
 		}
-		return string(bzexec.ExecInput), []byte{}, nil
+		return []byte{}, nil
 
 	case bzexec.ExecResize:
 		var execResizeAction bzexec.KubeExecResizeActionPayload
 		if err := json.Unmarshal(actionPayload, &execResizeAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling resize message: %s", err)
 			e.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		e.execResizeChannel <- execResizeAction
-		return string(bzexec.ExecResize), []byte{}, nil
+		return []byte{}, nil
 	case bzexec.ExecStop:
 		var execStopAction bzexec.KubeExecStopActionPayload
 		if err := json.Unmarshal(actionPayload, &execStopAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stop message: %s", err)
 			e.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		e.stdinReader.Close()
-		return string(bzexec.ExecStop), []byte{}, nil
+		return []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled exec action: %v", action)
 		e.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 }
 
-func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayload) (string, []byte, error) {
+func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayload) ([]byte, error) {
 	// keep track of who we're talking to
 	e.requestId = startExecRequest.RequestId
 	e.logger.Infof("Setting request id: %s", e.requestId)
@@ -149,14 +149,14 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	if err != nil {
 		rerr := fmt.Errorf("error creating in-custer config: %s", err)
 		e.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 
 	// Always ensure that our targetUser is set
 	if e.targetUser == "" {
 		rerr := fmt.Errorf("target user field is not set")
 		e.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 
 	// Add our impersonation information
@@ -171,13 +171,13 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	if err != nil {
 		rerr := fmt.Errorf("could not parse kube exec url: %s", err)
 		e.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 
 	// Turn it into a SPDY executor
 	exec, err := remotecommand.NewSPDYExecutor(config, "POST", kubeExecApiUrlParsed)
 	if err != nil {
-		return string(bzexec.ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
+		return []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}
 
 	// NOTE: don't need to version this because Type is not read on the other end
@@ -218,5 +218,5 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 		stdoutWriter.Write([]byte(bzexec.EscChar))
 	}()
 
-	return string(bzexec.ExecStart), []byte{}, nil
+	return []byte{}, nil
 }

@@ -1,13 +1,11 @@
 package kube
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/Masterminds/semver"
 	kuberest "k8s.io/client-go/rest"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube/actions/exec"
@@ -20,7 +18,7 @@ import (
 )
 
 type IKubeAction interface {
-	Receive(action string, actionPayload []byte) (string, []byte, error)
+	Receive(action string, actionPayload []byte) ([]byte, error)
 	Kill()
 }
 
@@ -35,9 +33,6 @@ type KubePlugin struct {
 	kubeHost            string
 	targetUser          string
 	targetGroups        []string
-
-	// versioning constraint for extra quotes in payload bug
-	payloadClean bool
 }
 
 func New(
@@ -75,14 +70,6 @@ func New(
 		targetGroups:        synPayload.TargetGroups,
 	}
 
-	if c, err := semver.NewConstraint(">= 2.0"); err != nil {
-		return nil, fmt.Errorf("unable to create versioning constraint")
-	} else if v, err := semver.NewVersion(version); err != nil {
-		return nil, fmt.Errorf("unable to parse version")
-	} else {
-		plugin.payloadClean = c.Check(v)
-	}
-
 	// Start up the action for this plugin
 	subLogger := plugin.logger.GetActionLogger(action)
 	if parsedAction, err := parseAction(action); err != nil {
@@ -116,16 +103,13 @@ func (k *KubePlugin) Kill() {
 	}
 }
 
-func (k *KubePlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (k *KubePlugin) Receive(action string, actionPayload []byte) ([]byte, error) {
 	k.logger.Debugf("Kube plugin received message with %s action", action)
 
-	if safePayload, err := k.cleanPayload(actionPayload); err != nil {
-		k.logger.Error(err)
-		return "", []byte{}, err
-	} else if action, payload, err := k.action.Receive(action, safePayload); err != nil {
-		return "", []byte{}, err
+	if payload, err := k.action.Receive(action, actionPayload); err != nil {
+		return []byte{}, err
 	} else {
-		return action, payload, err
+		return payload, err
 	}
 }
 
@@ -135,24 +119,4 @@ func parseAction(action string) (bzkube.KubeAction, error) {
 		return "", fmt.Errorf("malformed action: %s", action)
 	}
 	return bzkube.KubeAction(parsedAction[1]), nil
-}
-
-func (k *KubePlugin) cleanPayload(payload []byte) ([]byte, error) {
-	if k.payloadClean {
-		return payload, nil
-	}
-
-	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
-	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
-	// so that we can murder its family
-	if len(payload) > 0 {
-		payload = payload[1 : len(payload)-1]
-	}
-
-	// Json unmarshalling encodes bytes in base64
-	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
-		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
-	} else {
-		return payloadSafe, nil
-	}
 }

@@ -62,7 +62,7 @@ func (w *WebDial) Kill() {
 	w.tmb.Wait()
 }
 
-func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (w *WebDial) Receive(action string, actionPayload []byte) ([]byte, error) {
 	var rerr error
 	switch bzwebdial.WebDialSubAction(action) {
 	case bzwebdial.WebDialStart:
@@ -71,24 +71,24 @@ func (w *WebDial) Receive(action string, actionPayload []byte) (string, []byte, 
 			rerr = fmt.Errorf("malformed web dial action payload: %s", actionPayload)
 		} else {
 			w.start(webDialActionRequest)
-			return action, []byte{}, nil
+			return []byte{}, nil
 		}
 	case bzwebdial.WebDialInput:
 		var input bzwebdial.WebInputActionPayload
 		if err := json.Unmarshal(actionPayload, &input); err != nil {
 			rerr = fmt.Errorf("unable to unmarshal web dial input message: %s", err)
 		} else {
-			return "", []byte{}, w.handleRequest(input)
+			return []byte{}, w.handleRequest(input)
 		}
 	case bzwebdial.WebDialInterrupt:
 		w.interruptChan <- true
-		return action, actionPayload, nil
+		return actionPayload, nil
 	default:
 		rerr = fmt.Errorf("unhandled stream action: %v", action)
 	}
 
 	w.logger.Error(rerr)
-	return "", []byte{}, rerr
+	return []byte{}, rerr
 }
 
 func (w *WebDial) start(webDialActionRequest bzwebdial.WebDialActionPayload) {

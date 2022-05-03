@@ -42,6 +42,7 @@ const (
 
 	prodServiceUrl = "https://cloud.bastionzero.com/"
 
+	// we replace "bzero-agent" at build with process name
 	bzeroLogFilePath = "/var/log/bzero/bzero-agent.log"
 )
 
@@ -131,7 +132,7 @@ func setupLogger() (*logger.Logger, error) {
 	// if this is systemd, output files
 	logFile := ""
 	if agentType == Bzero {
-		logFile = bzeroLogFilePath // bzero-agent is protect here because we replace at build with process name
+		logFile = bzeroLogFilePath
 	}
 
 	// setup our loggers

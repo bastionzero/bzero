@@ -2,6 +2,8 @@ package message
 
 import (
 	"encoding/base64"
+	"fmt"
+	"time"
 
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
@@ -34,5 +36,6 @@ func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (S
 		TargetPublicKey:       pubKey,
 		Nonce:                 util.Nonce(),
 		HPointer:              hash,
+		Timestamp:             fmt.Sprint(time.Now().Unix()),
 	}, nil
 }

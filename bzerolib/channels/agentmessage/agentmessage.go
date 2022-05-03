@@ -5,14 +5,12 @@ structs: the 4 types of keysplitting messages and agent output streams.
 */
 package agentmessage
 
-const (
-	SchemaVersion = "042022"
-)
+const CurrentVersion = "1.0"
 
 type AgentMessage struct {
 	ChannelId      string `json:"channelId"` // acts like a session id to tie messages to a keysplitting hash chain
 	MessageType    string `json:"messageType"`
-	SchemaVersion  string `json:"schemaVersion" default:"042022"`
+	SchemaVersion  string `json:"schemaVersion" default:"1.0"`
 	MessagePayload []byte `json:"messagePayload"`
 }
 

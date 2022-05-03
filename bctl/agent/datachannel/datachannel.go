@@ -1,12 +1,14 @@
 package datachannel
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver"
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/db"
@@ -28,7 +30,7 @@ type IKeysplitting interface {
 }
 
 type IPlugin interface {
-	Receive(action string, actionPayload []byte) (string, []byte, error)
+	Receive(action string, actionPayload []byte) ([]byte, error)
 	Done() <-chan struct{}
 	Kill()
 }
@@ -46,6 +48,9 @@ type DataChannel struct {
 	// incoming and outgoing message channels
 	inputChan  chan am.AgentMessage
 	outputChan chan am.AgentMessage
+
+	// backward compatability code for when the payload used to come with extra quotes
+	payloadClean bool
 }
 
 func New(
@@ -100,19 +105,22 @@ func New(
 		for {
 			select {
 			case <-parentTmb.Dying(): // control channel is dying
+				datachannel.plugin.Kill()
 				return errors.New("agent was orphaned too young and can't be batman :'(")
 			case <-datachannel.tmb.Dying():
 				datachannel.plugin.Kill()
 				return nil
 			case <-datachannel.plugin.Done():
-				// LUCIE: on this side, I do think this strategy is legit
-				select {
-				// LUCIE: do we only want to send keysplitting messages?
-				case agentMessage := <-datachannel.outputChan:
-					// Push message to websocket channel output
-					datachannel.websocket.Send(agentMessage)
-				case <-time.After(1 * time.Second):
-					return fmt.Errorf("datachannel's sole plugin is closed")
+				for {
+					// LUCIE: on this side, I do think this strategy is legit
+					select {
+					// LUCIE: do we only want to send keysplitting messages?
+					case agentMessage := <-datachannel.outputChan:
+						// Push message to websocket channel output
+						datachannel.websocket.Send(agentMessage)
+					case <-time.After(1 * time.Second):
+						return fmt.Errorf("datachannel's sole plugin is closed")
+					}
 				}
 			case agentMessage := <-datachannel.outputChan:
 				// Push message to websocket channel output
@@ -136,7 +144,7 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 	agentMessage := am.AgentMessage{
 		ChannelId:      d.id,
 		MessageType:    string(messageType),
-		SchemaVersion:  am.SchemaVersion,
+		SchemaVersion:  am.CurrentVersion,
 		MessagePayload: messageBytes,
 	}
 
@@ -228,9 +236,19 @@ func (d *DataChannel) handleKeysplittingMessage(keysplittingMessage *ksmsg.Keysp
 			return rerr
 		}
 
+		// optionally clean our action payload to compensate for old bug that added extra quotes
+		actionPayload := dataPayload.ActionPayload
+		if !d.payloadClean {
+			if cleaned, err := cleanPayload(actionPayload); err != nil {
+				return fmt.Errorf("failed to clean payload: %s", err)
+			} else {
+				actionPayload = cleaned
+			}
+		}
+
 		// Send message to plugin and catch response action payload
 		// TODO: if we're ignoring the action we should really not be sending it up here
-		if _, returnPayload, err := d.plugin.Receive(dataPayload.Action, dataPayload.ActionPayload); err == nil {
+		if returnPayload, err := d.plugin.Receive(dataPayload.Action, actionPayload); err == nil {
 
 			// Build and send response
 			d.sendKeysplitting(keysplittingMessage, dataPayload.Action, returnPayload)
@@ -285,7 +303,29 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 		d.logger.Error(rerr)
 		return rerr
 	} else {
+		if c, err := semver.NewConstraint(">= 2.0"); err != nil {
+			return fmt.Errorf("unable to create versioning constraint")
+		} else if v, err := semver.NewVersion(version); err != nil {
+			return fmt.Errorf("unable to parse version")
+		} else {
+			d.payloadClean = c.Check(v)
+		}
+
 		d.logger.Infof("%s plugin started!", pluginName)
 		return nil
+	}
+}
+
+func cleanPayload(payload []byte) ([]byte, error) {
+	// TODO: remove once all daemon's are updated
+	if len(payload) > 0 {
+		payload = payload[1 : len(payload)-1]
+	}
+
+	// Json unmarshalling encodes bytes in base64
+	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
+		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
+	} else {
+		return payloadSafe, nil
 	}
 }

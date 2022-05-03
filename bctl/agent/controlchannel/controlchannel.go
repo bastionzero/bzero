@@ -119,7 +119,7 @@ func Start(logger *logger.Logger,
 					wsMetadata.Client.Send(am.AgentMessage{
 						MessageType:    string(am.CloseDaemonWebsocket),
 						MessagePayload: []byte{},
-						SchemaVersion:  am.SchemaVersion,
+						SchemaVersion:  am.CurrentVersion,
 						ChannelId:      "-1", // Channel Id does not since this applies to all datachannels
 					})
 
@@ -157,7 +157,7 @@ func (c *ControlChannel) send(messageType am.MessageType, messagePayload interfa
 	agentMessage := am.AgentMessage{
 		ChannelId:      c.id,
 		MessageType:    string(messageType),
-		SchemaVersion:  am.SchemaVersion,
+		SchemaVersion:  am.CurrentVersion,
 		MessagePayload: messageBytes,
 	}
 

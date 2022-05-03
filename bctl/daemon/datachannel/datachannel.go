@@ -122,6 +122,7 @@ func New(
 			select {
 			case <-parentTmb.Dying(): // daemon is dying
 				dc.logger.Info("Datachannel was orphaned too young and can't be batman :'(")
+				dc.plugin.Kill()
 				return nil
 			case <-dc.tmb.Dying():
 				dc.logger.Infof("Datachannel dying: %s", dc.tmb.Err().Error())
@@ -266,7 +267,7 @@ func (d *DataChannel) send(messageType am.MessageType, messagePayload interface{
 		agentMessage := am.AgentMessage{
 			ChannelId:      d.id,
 			MessageType:    string(messageType),
-			SchemaVersion:  am.SchemaVersion,
+			SchemaVersion:  am.CurrentVersion,
 			MessagePayload: messageBytes,
 		}
 
