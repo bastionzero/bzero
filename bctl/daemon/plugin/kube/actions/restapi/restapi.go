@@ -77,7 +77,7 @@ func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 	// send action payload to plugin to be sent to agent
 	payloadBytes, _ := json.Marshal(payload)
 	r.outputChan <- plugin.ActionWrapper{
-		Action:        kuberest.RestRequest,
+		Action:        string(kuberest.RestRequest),
 		ActionPayload: payloadBytes,
 	}
 

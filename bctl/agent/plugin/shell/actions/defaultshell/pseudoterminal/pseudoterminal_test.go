@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"bastionzero.com/bctl/v1/bzerolib/logger/mock"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -93,7 +93,7 @@ func TestDoesUserExist(t *testing.T) {
 }
 
 func getPseudoTerminal() (*PseudoTerminal, error) {
-	logger := mock.MockLogger()
+	logger := logger.MockLogger()
 	runAsUser, err := whoAmI()
 	if err != nil {
 		return nil, fmt.Errorf("failed to grab current user")

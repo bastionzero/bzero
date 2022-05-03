@@ -16,6 +16,15 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
+// wrap this code so at test time we can inject a mock executor / config
+var getExecutor = func(config *rest.Config, method string, url *url.URL) (remotecommand.Executor, error) {
+	return remotecommand.NewSPDYExecutor(config, method, url)
+}
+
+var getConfig = func() (*rest.Config, error) {
+	return rest.InClusterConfig()
+}
+
 type ExecAction struct {
 	logger *logger.Logger
 	tmb    *tomb.Tomb
@@ -75,7 +84,7 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 			return "", []byte{}, rerr
 		}
 
-		return e.StartExec(startExecRequest)
+		return e.startExec(startExecRequest)
 
 	case bzexec.ExecInput:
 		var execInputAction bzexec.KubeStdinActionPayload
@@ -122,7 +131,7 @@ func (e *ExecAction) Receive(action string, actionPayload []byte) (string, []byt
 	}
 }
 
-func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayload) (string, []byte, error) {
+func (e *ExecAction) startExec(startExecRequest bzexec.KubeExecStartActionPayload) (string, []byte, error) {
 	// keep track of who we're talking to
 	e.requestId = startExecRequest.RequestId
 	e.logger.Infof("Setting request id: %s", e.requestId)
@@ -132,7 +141,7 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 
 	// Now open up our local exec session
 	// Create the in-cluster config
-	config, err := rest.InClusterConfig()
+	config, err := getConfig()
 	if err != nil {
 		rerr := fmt.Errorf("error creating in-custer config: %s", err)
 		e.logger.Error(rerr)
@@ -162,7 +171,7 @@ func (e *ExecAction) StartExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	}
 
 	// Turn it into a SPDY executor
-	exec, err := remotecommand.NewSPDYExecutor(config, "POST", kubeExecApiUrlParsed)
+	exec, err := getExecutor(config, "POST", kubeExecApiUrlParsed)
 	if err != nil {
 		return string(bzexec.ExecStart), []byte{}, fmt.Errorf("error creating Spdy executor: %s", err)
 	}
