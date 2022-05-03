@@ -29,9 +29,8 @@ type SshDaemonPlugin struct {
 
 	action ISshDaemonAction
 
-	// TODO: remove?
-	// Db-specific vars
-	//sequenceNumber int
+	// TODO: revisit
+	targetUser string
 }
 
 func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzssh.SshActionParams) (*SshDaemonPlugin, error) {
@@ -40,6 +39,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzssh.SshActi
 		logger:          logger,
 		streamInputChan: make(chan smsg.StreamMessage, 25),
 		outputQueue:     make(chan plugin.ActionWrapper, 25),
+		targetUser:      actionParams.TargetUser,
 	}
 
 	// listener for processing any incoming stream messages, since they are not treated as part of
@@ -60,8 +60,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzssh.SshActi
 	// Create the DefaultSsh action
 	actLogger := logger.GetActionLogger(string(bzssh.DefaultSsh))
 	var actOutputChan chan plugin.ActionWrapper
-	// FIXME: Help! I need an action
-	sshDaemonPlugin.action, actOutputChan = defaultssh.New(actLogger)
+	sshDaemonPlugin.action, actOutputChan = defaultssh.New(actLogger, actionParams.TargetUser)
 
 	// listen to ssh action output channel and push to outputqueue. If output
 	// channel is done then close the ssh daemon plugin
@@ -71,7 +70,6 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzssh.SshActi
 			case <-sshDaemonPlugin.tmb.Dying():
 				return
 			case m, more := <-actOutputChan:
-				actLogger.Errorf("Got %+v //// %t", m, more)
 				if more {
 					sshDaemonPlugin.outputQueue <- m
 				} else {
@@ -82,6 +80,11 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzssh.SshActi
 			}
 		}
 	}()
+
+	// Start the shell action
+	if err := sshDaemonPlugin.action.Start(sshDaemonPlugin.tmb); err != nil {
+		return &sshDaemonPlugin, fmt.Errorf("error starting the default ssh action: %s", err)
+	}
 
 	return &sshDaemonPlugin, nil
 }
@@ -128,8 +131,6 @@ func (s *SshDaemonPlugin) ReceiveKeysplitting(action string, actionPayload []byt
 }
 
 func (s *SshDaemonPlugin) processKeysplitting(action string, actionPayload []byte) error {
-	s.logger.Infof("Ssh plugin received keysplitting message with action: %s", action)
-
 	// currently the only keysplitting message we care about is the acknowledgement of our request for the agent to stop the dial action
 	// but since we don't do anything with it we log it, make a comment, and return nil
 	return nil

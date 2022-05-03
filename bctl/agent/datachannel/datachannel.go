@@ -10,9 +10,10 @@ import (
 	"gopkg.in/tomb.v2"
 
 	plgn "bastionzero.com/bctl/v1/bctl/agent/plugin"
-	db "bastionzero.com/bctl/v1/bctl/agent/plugin/db"
-	kube "bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/db"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -247,6 +248,8 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 		plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case bzplugin.Shell:
 		plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+	case bzplugin.Ssh:
+		plugin, err = ssh.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	case bzplugin.Web:
 		plugin, err = web.New(&d.tmb, subLogger, streamOutputChan, action, payload)
 	default:

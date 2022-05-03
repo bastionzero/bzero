@@ -31,9 +31,11 @@ type DefaultSsh struct {
 
 	// channel where we push each individual keypress byte from StdIn
 	stdInChan chan byte
+
+	targetUser string
 }
 
-func New(logger *logger.Logger) (*DefaultSsh, chan plugin.ActionWrapper) {
+func New(logger *logger.Logger, targetUser string) (*DefaultSsh, chan plugin.ActionWrapper) {
 
 	shellAction := &DefaultSsh{
 		logger: logger,
@@ -41,6 +43,8 @@ func New(logger *logger.Logger) (*DefaultSsh, chan plugin.ActionWrapper) {
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 30),
 		stdInChan:       make(chan byte, InputBufferSize),
+
+		targetUser: targetUser,
 	}
 
 	return shellAction, shellAction.outputChan
@@ -50,11 +54,7 @@ func (d *DefaultSsh) Start(tmb *tomb.Tomb) error {
 	d.tmb = tmb
 
 	sshOpenMessage := bzssh.SshOpenMessage{
-		// note the TargetUser in this data message is ignored by the agent
-		// because it is policy-checked by bzero when its sent in the SYN
-		// message when opening the datachannel and should never be changed
-		// afterwards
-		TargetUser: "",
+		TargetUser: d.targetUser,
 	}
 	d.sendOutputMessage(bzssh.SshOpen, sshOpenMessage)
 
@@ -91,6 +91,10 @@ func (d *DefaultSsh) handleStreamMessages() {
 				}
 			case smsg.Stop:
 				d.tmb.Kill(fmt.Errorf("received ssh quit stream message"))
+				return
+			case smsg.Error:
+				// TODO: revisit
+				d.tmb.Kill(fmt.Errorf("received an error from the agent"))
 				return
 			default:
 				d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)

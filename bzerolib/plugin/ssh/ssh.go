@@ -8,7 +8,9 @@ const (
 	DefaultSsh SshAction = "default"
 )
 
-type SshActionParams struct{}
+type SshActionParams struct {
+	TargetUser string `json:"targetUser"`
+}
 
 type SshFood struct {
 	Action SshAction
