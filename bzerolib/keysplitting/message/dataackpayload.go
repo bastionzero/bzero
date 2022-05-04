@@ -10,6 +10,7 @@ type DataAckPayload struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Type          string `json:"type"`
 	Action        string `json:"action"`
+	Timestamp     string `json:"timestamp"`
 
 	// Unique to DataAck Payload
 	TargetPublicKey       string `json:"targetPublicKey"`

@@ -75,9 +75,10 @@ func (r *RestApiAction) Start(writer http.ResponseWriter, request *http.Request)
 		CommandBeingRun: r.commandBeingRun,
 	}
 	// send action payload to plugin to be sent to agent
+	payloadBytes, _ := json.Marshal(payload)
 	r.outputChan <- plugin.ActionWrapper{
 		Action:        kuberest.RestRequest,
-		ActionPayload: payload,
+		ActionPayload: &payloadBytes,
 	}
 
 	// wait for response to our sent message

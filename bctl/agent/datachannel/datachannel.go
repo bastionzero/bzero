@@ -167,10 +167,11 @@ func (d *DataChannel) sendError(errType bzerror.ErrorType, err error, hash strin
 	d.logger.Error(err)
 
 	errMsg := bzerror.ErrorMessage{
-		Timestamp: time.Now().Unix(),
-		Type:      string(errType),
-		Message:   err.Error(),
-		HPointer:  hash,
+		SchemaVersion: bzerror.CurrentVersion,
+		Timestamp:     time.Now().Unix(),
+		Type:          string(errType),
+		Message:       err.Error(),
+		HPointer:      hash,
 	}
 	d.send(am.Error, errMsg)
 }
@@ -315,7 +316,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 }
 
 func cleanPayload(payload []byte) ([]byte, error) {
-	// TODO: remove once all daemon's are updated
+	// TODO: CWC-1819: remove once all daemon's are updated
 	if len(payload) > 0 {
 		payload = payload[1 : len(payload)-1]
 	}

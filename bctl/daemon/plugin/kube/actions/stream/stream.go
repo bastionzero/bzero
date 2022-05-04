@@ -90,9 +90,10 @@ func (s *StreamAction) Start(writer http.ResponseWriter, request *http.Request) 
 	}
 
 	// Send payload to plugin output queue
+	payloadBytes, _ := json.Marshal(payload)
 	s.outputChan <- plugin.ActionWrapper{
 		Action:        string(stream.StreamStart),
-		ActionPayload: payload,
+		ActionPayload: &payloadBytes,
 	}
 
 	// Wait for our initial message to determine what headers to use
@@ -146,10 +147,10 @@ waitForHeaders:
 				RequestId: s.requestId,
 				LogId:     s.logId,
 			}
-
+			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
 				Action:        string(stream.StreamStop),
-				ActionPayload: payload,
+				ActionPayload: &payloadBytes,
 			}
 
 			close(s.doneChan)

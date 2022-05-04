@@ -153,7 +153,7 @@ func (k *KubeServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (k *KubeServer) newDataChannel(action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin) error {
+func (k *KubeServer) newDataChannel(action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin, writer http.ResponseWriter) error {
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	dcId := uuid.New().String()
 	attach := false
@@ -185,9 +185,9 @@ func (k *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 				case <-dcTmb.Dead():
 					// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
 					if err := dcTmb.Err(); err != nil {
-						// LUCIE: maybe we need to add a disconnect and reconnect here? that's what the user's going to have to do
 						errs := strings.Split(dcTmb.Err().Error(), ": ")
-						k.exitMessage = fmt.Sprintf("error: %s", errs[len(errs)-1])
+						msg := fmt.Sprintf("error: %s", errs[len(errs)-1])
+						k.bubbleUpError(writer, msg, 500)
 					}
 
 					// notify agent to close the datachannel
@@ -197,11 +197,6 @@ func (k *KubeServer) newDataChannel(action string, websocket *websocket.Websocke
 						MessageType: string(am.CloseDataChannel),
 					}
 					k.websocket.Send(cdMessage)
-
-					// close our websocket if the datachannel we closed was the last and it's not rest api
-					if k.websocket.SubscriberCount() == 0 {
-						k.websocket.Close(errors.New("all datachannels closed, closing websocket"))
-					}
 					return
 				}
 			}
@@ -218,12 +213,6 @@ func (k *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode
 
 func (k *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
 	k.logger.Infof("Handling %s - %s\n", r.URL.Path, r.Method)
-
-	// Before processing, check if we're ready to process or if there's been an error
-	if k.exitMessage != "" {
-		k.bubbleUpError(w, k.exitMessage, http.StatusInternalServerError)
-		return
-	}
 
 	// First verify our token and extract any commands if we can
 	tokenToValidate := r.Header.Get("Authorization")
@@ -253,7 +242,7 @@ func (k *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 	pluginLogger := logger.GetPluginLogger(bzplugin.Kube)
 	plugin := kube.New(pluginLogger, k.targetUser, k.targetGroups)
 
-	if err := k.newDataChannel(string(action), k.websocket, plugin); err != nil {
+	if err := k.newDataChannel(string(action), k.websocket, plugin, w); err != nil {
 		k.logger.Error(err)
 	}
 

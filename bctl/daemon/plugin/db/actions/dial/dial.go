@@ -2,6 +2,7 @@ package dial
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -160,9 +161,10 @@ func (d *DialAction) Kill() {
 
 func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interface{}) {
 	// Send payload to plugin output queue
+	payloadBytes, _ := json.Marshal(payload)
 	d.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
-		ActionPayload: payload,
+		ActionPayload: &payloadBytes,
 	}
 }
 

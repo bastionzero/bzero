@@ -2,7 +2,7 @@ package plugin
 
 type ActionWrapper struct {
 	Action        string
-	ActionPayload interface{}
+	ActionPayload *[]byte
 }
 
 type PluginName string

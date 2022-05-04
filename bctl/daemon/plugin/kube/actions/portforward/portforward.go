@@ -145,10 +145,7 @@ func (p *PortForwardAction) Start(writer http.ResponseWriter, request *http.Requ
 		Endpoint:             p.endpoint,
 		CommandBeingRun:      p.commandBeingRun,
 	}
-	p.outputChan <- plugin.ActionWrapper{
-		Action:        string(portforward.StartPortForward),
-		ActionPayload: payload,
-	}
+	p.outbox(portforward.StartPortForward, payload)
 
 	// Now wait for the ready message, incase we need to bubble up an error to the user
 readyMessageLoop:
@@ -208,7 +205,7 @@ readyMessageLoop:
 			// Now attempt to make our stream pair (error, data)
 			portforwardSession, created := p.getStreamPair(requestID)
 
-			// If this was a new stream pair that was created, start a go routine to ensure it finishes (i.e. gets the error/data strema)
+			// If this was a new stream pair that was created, start a go routine to ensure it finishes (i.e. gets the error/data stream)
 			if created {
 				go p.monitorStreamPair(portforwardSession, time.After(p.streamCreationTimeout))
 			}
@@ -227,9 +224,6 @@ readyMessageLoop:
 // portForward invokes the portForwardProxy's forwarder.PortForward
 // function for the given stream pair.
 func (p *PortForwardAction) portForward(portforwardSession *httpStreamPair) {
-	defer portforwardSession.dataStream.Close()
-	defer portforwardSession.errorStream.Close()
-
 	portString := portforwardSession.dataStream.Headers().Get(kubeutils.PortHeader)
 	port, _ := strconv.ParseInt(portString, 10, 32)
 
@@ -250,10 +244,7 @@ func (p *PortForwardAction) sendCloseRequestMessage(portforwardingRequestId stri
 		LogId:                p.logId,
 		PortForwardRequestId: portforwardingRequestId,
 	}
-	p.outputChan <- plugin.ActionWrapper{
-		Action:        string(portforward.StopPortForwardRequest),
-		ActionPayload: payload,
-	}
+	p.outbox(portforward.StopPortForwardRequest, payload)
 }
 
 func (p *PortForwardAction) sendCloseMessage() {
@@ -262,22 +253,22 @@ func (p *PortForwardAction) sendCloseMessage() {
 		RequestId: p.requestId,
 		LogId:     p.logId,
 	}
-	p.outputChan <- plugin.ActionWrapper{
-		Action:        string(portforward.StopPortForward),
-		ActionPayload: payload,
-	}
+	p.outbox(portforward.StopPortForward, payload)
 }
 
 func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair, remotePort int64) error {
 	// Make and update the stream channel for this requestId
 	p.requestMap[portforwardSession.requestID] = make(chan RequestMapStruct)
 
+	// set up our defers to close our streams
+	defer portforwardSession.dataStream.Close()
+	defer portforwardSession.errorStream.Close()
+
 	var tmb tomb.Tomb
 
 	tmb.Go(func() error {
 		// Set up the go routine to push error data to Bastion
 		tmb.Go(func() error {
-			defer portforwardSession.errorStream.Close()
 
 			buf := make([]byte, portforward.ErrorStreamBufferSize)
 			for {
@@ -300,18 +291,13 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 							Data:                 buf[:n],
 							PortForwardRequestId: portforwardSession.requestID,
 						}
-						p.outputChan <- plugin.ActionWrapper{
-							Action:        string(portforward.ErrorPortForward),
-							ActionPayload: payload,
-						}
+						p.outbox(portforward.ErrorPortForward, payload)
 					}
 				}
 			}
 		})
 
 		// Set up the go routine to push regular data to Bastion from the data stream
-		defer portforwardSession.dataStream.Close()
-
 		buf := make([]byte, portforward.DataStreamBufferSize)
 		for {
 			select {
@@ -336,10 +322,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 						PortForwardRequestId: portforwardSession.requestID,
 						PodPort:              remotePort,
 					}
-					p.outputChan <- plugin.ActionWrapper{
-						Action:        string(portforward.DataInPortForward),
-						ActionPayload: payload,
-					}
+					p.outbox(portforward.DataInPortForward, payload)
 				}
 			}
 		}
@@ -427,6 +410,15 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				p.logger.Errorf("unhandled stream type: %s", requestMapStruct.streamMessage.Type)
 			}
 		}
+	}
+}
+
+func (p *PortForwardAction) outbox(action portforward.PortForwardSubAction, payload interface{}) {
+	// Send payload to plugin output queue
+	payloadBytes, _ := json.Marshal(payload)
+	p.outputChan <- plugin.ActionWrapper{
+		Action:        string(action),
+		ActionPayload: &payloadBytes,
 	}
 }
 

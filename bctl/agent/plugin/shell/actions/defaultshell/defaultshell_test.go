@@ -76,9 +76,8 @@ func createPseudoTerminal() MockPseudoTerminal {
 func shellOpen(t *testing.T, dshell *DefaultShell) {
 	action := string(bzshell.ShellOpen)
 	actionPayload := []byte{}
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, retActionPayload, actionPayload)
 	assert.NotNil(t, dshell.terminal)
 }
@@ -91,9 +90,8 @@ func shellInput(t *testing.T, dshell *DefaultShell, testContent string) {
 	actionPayload, err := json.Marshal(inputMessage)
 	assert.Nil(t, err)
 
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, retActionPayload, []byte{})
 }
 
@@ -120,9 +118,8 @@ func TestShellClose(t *testing.T) {
 
 	action := string(bzshell.ShellClose)
 	actionPayload := []byte{}
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, retActionPayload, actionPayload)
 
 	<-mockPT.Done()
@@ -168,9 +165,8 @@ func TestShellResize(t *testing.T) {
 	assert.Nil(t, err)
 
 	// send our shell resize message
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, retActionPayload, []byte{})
 }
 
@@ -197,8 +193,7 @@ func TestShellReplay(t *testing.T) {
 	// request shell replay
 	action := string(bzshell.ShellReplay)
 	actionPayload := []byte{}
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, string(retActionPayload), testContent)
 }

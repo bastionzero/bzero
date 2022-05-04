@@ -38,7 +38,7 @@ type IKeysplitting interface {
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
 	Recover(errorMessage rrr.ErrorMessage) error
 	Recovering() bool
-	Inbox(action string, actionPayload interface{}) error
+	Inbox(action string, actionPayload []byte) error
 	Outbox() <-chan *ksmsg.KeysplittingMessage
 	Release()
 }
@@ -213,7 +213,7 @@ func (d *DataChannel) zapPluginOutput() error {
 			return nil
 		case wrapper := <-d.plugin.Outbox():
 			// Build and send response
-			if err := d.keysplitter.Inbox(wrapper.Action, wrapper.ActionPayload); err != nil {
+			if err := d.keysplitter.Inbox(wrapper.Action, *wrapper.ActionPayload); err != nil {
 				d.logger.Errorf("could not build response message: %s", err)
 			}
 		}
@@ -221,7 +221,6 @@ func (d *DataChannel) zapPluginOutput() error {
 }
 
 func (d *DataChannel) Close(reason error) {
-	d.logger.Infof("killing datachannel tomb")
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
 }
 

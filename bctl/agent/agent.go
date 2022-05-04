@@ -65,7 +65,7 @@ func main() {
 		case Bzero:
 			fmt.Printf("%s\n", bzeroLogFilePath)
 		case Cluster:
-			fmt.Printf("Bzero Agent logs can be accessed via\n") // LUCIE: Ask Sid
+			fmt.Printf("BZero Agent logs can be accessed via the Kube API server by tailing the pods logs\n")
 		}
 		return
 	} else {

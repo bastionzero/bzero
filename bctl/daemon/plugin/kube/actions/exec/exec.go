@@ -74,7 +74,7 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 	isTty := kubeutils.IsQueryParamPresent(request, "tty")
 
 	// Now since we made our local connection to kubectl, initiate a connection with Bastion
-	e.outputChan <- wrapStartPayload(isTty, e.requestId, e.logId, request.URL.Query()["command"], request.URL.String())
+	e.sendStartPayload(isTty, e.requestId, e.logId, request.URL.Query()["command"], request.URL.String())
 
 	// Set up a go function for stdout
 	e.tmb.Go(func() error {
@@ -117,13 +117,11 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 				}
 			case <-closeChan:
 				// Send message to agent to close the stream
-				e.outputChan <- plugin.ActionWrapper{
-					Action: string(exec.ExecStop),
-					ActionPayload: exec.KubeExecStopActionPayload{
-						RequestId: e.requestId,
-						LogId:     e.logId,
-					},
+				payload := exec.KubeExecStopActionPayload{
+					RequestId: e.requestId,
+					LogId:     e.logId,
 				}
+				e.outbox(exec.ExecStop, payload)
 				return nil
 			}
 		}
@@ -160,7 +158,7 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 					}
 				}
 				// Send message to agent
-				e.outputChan <- wrapStdinPayload(e.requestId, e.logId, buffer)
+				e.sendStdinPayload(e.requestId, e.logId, buffer)
 			}
 		}
 	}()
@@ -184,7 +182,7 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 						}
 					} else {
 						// Emit this as a new resize event
-						e.outputChan <- wrapResizePayload(e.requestId, e.logId, size.Width, size.Height)
+						e.sendResizePayload(e.requestId, e.logId, size.Width, size.Height)
 					}
 				}
 			}
@@ -194,39 +192,42 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 	return nil
 }
 
-func wrapStartPayload(isTty bool, requestId string, logId string, command []string, endpoint string) plugin.ActionWrapper {
-	return plugin.ActionWrapper{
-		Action: string(exec.ExecStart),
-		ActionPayload: exec.KubeExecStartActionPayload{
-			RequestId:            requestId,
-			StreamMessageVersion: smsg.CurrentSchema,
-			LogId:                logId,
-			IsTty:                isTty,
-			Command:              command,
-			Endpoint:             endpoint,
-		},
+func (e *ExecAction) outbox(action exec.ExecSubAction, payload interface{}) {
+	// Send payload to plugin output queue
+	payloadBytes, _ := json.Marshal(payload)
+	e.outputChan <- plugin.ActionWrapper{
+		Action:        string(action),
+		ActionPayload: &payloadBytes,
 	}
 }
 
-func wrapResizePayload(requestId string, logId string, width uint16, height uint16) plugin.ActionWrapper {
-	return plugin.ActionWrapper{
-		Action: string(exec.ExecResize),
-		ActionPayload: exec.KubeExecResizeActionPayload{
-			RequestId: requestId,
-			LogId:     logId,
-			Width:     width,
-			Height:    height,
-		},
+func (e *ExecAction) sendStartPayload(isTty bool, requestId string, logId string, command []string, endpoint string) {
+	payload := exec.KubeExecStartActionPayload{
+		RequestId:            requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+		LogId:                logId,
+		IsTty:                isTty,
+		Command:              command,
+		Endpoint:             endpoint,
 	}
+	e.outbox(exec.ExecStart, payload)
 }
 
-func wrapStdinPayload(requestId string, logId string, stdin []byte) plugin.ActionWrapper {
-	return plugin.ActionWrapper{
-		Action: string(exec.ExecInput),
-		ActionPayload: exec.KubeStdinActionPayload{
-			RequestId: requestId,
-			LogId:     logId,
-			Stdin:     stdin,
-		},
+func (e *ExecAction) sendResizePayload(requestId string, logId string, width uint16, height uint16) {
+	payload := exec.KubeExecResizeActionPayload{
+		RequestId: requestId,
+		LogId:     logId,
+		Width:     width,
+		Height:    height,
 	}
+	e.outbox(exec.ExecResize, payload)
+}
+
+func (e *ExecAction) sendStdinPayload(requestId string, logId string, stdin []byte) {
+	payload := exec.KubeStdinActionPayload{
+		RequestId: requestId,
+		LogId:     logId,
+		Stdin:     stdin,
+	}
+	e.outbox(exec.ExecInput, payload)
 }

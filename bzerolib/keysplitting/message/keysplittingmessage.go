@@ -147,8 +147,6 @@ func (k *KeysplittingMessage) VerifySignature(publicKey string) error {
 
 	sigBits, _ := base64.StdEncoding.DecodeString(k.Signature)
 
-	//log.Printf("\npubkey: %v\nhash: %v\nsignature: %v", publicKey, string(hashBits), k.Signature)
-
 	if ok := ed.Verify(pubkey, hashBits, sigBits); ok {
 		return nil
 	} else {

@@ -59,12 +59,7 @@ func (w *WebWebsocketAction) Start(writer http.ResponseWriter, request *http.Req
 		Endpoint:             request.URL.String(),
 		Method:               request.Method,
 	}
-
-	// Send payload to plugin output queue
-	w.outputChan <- plugin.ActionWrapper{
-		Action:        string(webwebsocket.Start),
-		ActionPayload: payload,
-	}
+	w.outbox(webwebsocket.Start, payload)
 
 	return w.handleWebsocketRequest(writer, request)
 }
@@ -107,29 +102,25 @@ func (w *WebWebsocketAction) handleWebsocketRequest(writer http.ResponseWriter, 
 		if mt, message, err := conn.ReadMessage(); !w.tmb.Alive() {
 			return nil
 		} else if err != nil {
-			w.logger.Infof("Read failed: %s", err)
+			w.logger.Errorf("web websocket connection read failed: %s", err)
 
 			// Let the agent know to close the websocket
-			w.outputChan <- plugin.ActionWrapper{
-				Action: string(webwebsocket.DaemonStop),
-				ActionPayload: webwebsocket.WebWebsocketDaemonStopActionPayload{
-					RequestId: w.requestId,
-				},
+			payload := webwebsocket.WebWebsocketDaemonStopActionPayload{
+				RequestId: w.requestId,
 			}
+			w.outbox(webwebsocket.DaemonStop, payload)
 			return fmt.Errorf("failed to read from connection: %s", err)
 		} else {
 			// Convert the message to a string
 			messageBase64 := base64.StdEncoding.EncodeToString(message)
 
 			// Send payload to plugin output queue
-			w.outputChan <- plugin.ActionWrapper{
-				Action: string(webwebsocket.DataIn),
-				ActionPayload: webwebsocket.WebWebsocketDataInActionPayload{
-					RequestId:   w.requestId,
-					Message:     messageBase64,
-					MessageType: mt,
-				},
+			payload := webwebsocket.WebWebsocketDataInActionPayload{
+				RequestId:   w.requestId,
+				Message:     messageBase64,
+				MessageType: mt,
 			}
+			w.outbox(webwebsocket.DataIn, payload)
 		}
 	}
 }
@@ -169,4 +160,13 @@ func (w *WebWebsocketAction) writeOutData(conn *websocket.Conn, content string) 
 		w.logger.Errorf("error writing to websocket: %s", err)
 	}
 	return nil
+}
+
+func (w *WebWebsocketAction) outbox(action webwebsocket.WebWebsocketSubAction, payload interface{}) {
+	// Send payload to plugin output queue
+	payloadBytes, _ := json.Marshal(payload)
+	w.outputChan <- plugin.ActionWrapper{
+		Action:        string(action),
+		ActionPayload: &payloadBytes,
+	}
 }

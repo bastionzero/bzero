@@ -18,11 +18,9 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
-const (
-	// the number of messages we're allowed to precalculate and send without having
-	// received an ack
-	pipelineLimit = 8
-)
+// the number of messages we're allowed to precalculate and send without having
+// received an ack
+var pipelineLimit = 8
 
 type ZLIConfig struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`
@@ -70,7 +68,9 @@ type Keysplitting struct {
 	recovering bool
 
 	// we need to know the version the agent is using so we can do icky things
-	dirtyPayload bool
+	// TODO: CWC-1820: remove once all agents have updated
+	prePipeliningAgent bool
+	synAction          string
 }
 
 func New(
@@ -91,6 +91,7 @@ func New(
 		outboxQueue:            make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
 		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
 		recovering:             false,
+		synAction:              "initial",
 	}
 	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
 
@@ -111,10 +112,14 @@ func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
 
 func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 	// only recover from this error message if it corresponds to a message we've actually sent
-	if errMessage.HPointer == "" {
-		return fmt.Errorf("error message hpointer empty")
-	} else if pair := k.pipelineMap.GetPair(errMessage.HPointer); pair == nil {
-		return fmt.Errorf("agent error is not on a message sent by this datachannel")
+	// our old error messages weren't setting hpointers correctly
+	// TODO: CWC-1818: remove schema version check
+	if errMessage.SchemaVersion != "" {
+		if errMessage.HPointer == "" {
+			return fmt.Errorf("error message hpointer empty")
+		} else if pair := k.pipelineMap.GetPair(errMessage.HPointer); pair == nil {
+			return fmt.Errorf("agent error is not on a message sent by this datachannel")
+		}
 	}
 
 	k.recovering = true
@@ -184,12 +189,17 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 				// check to see if we're talking with an agent that's using pre-2.0 keysplitting because
 				// we'll need to dirty the payload by adding extra quotes around it
+				// TODO: CWC-1820: remove once all daemon's are updated
 				if c, err := semver.NewConstraint("< 2.0"); err != nil {
 					return fmt.Errorf("unable to create versioning constraint")
 				} else if v, err := semver.NewVersion(msg.SchemaVersion); err != nil {
 					return fmt.Errorf("unable to parse version")
 				} else {
-					k.dirtyPayload = c.Check(v)
+					k.prePipeliningAgent = c.Check(v)
+
+					if k.prePipeliningAgent {
+						pipelineLimit = 1
+					}
 				}
 			}
 		case ksmsg.DataAck:
@@ -233,14 +243,14 @@ func (k *Keysplitting) processOutOfOrderAcks() {
 	}
 }
 
-func (k *Keysplitting) Inbox(action string, actionPayload interface{}) error {
+func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
 	k.pipelineLock.Lock()
 	defer k.pipelineLock.Unlock()
 
 	return k.pipeline(action, actionPayload)
 }
 
-func (k *Keysplitting) pipeline(action string, actionPayload interface{}) error {
+func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	if action == "" {
 		return fmt.Errorf("i'm not allowed to build a keysplitting message with empty action")
 	}
@@ -277,18 +287,28 @@ func (k *Keysplitting) pipeline(action string, actionPayload interface{}) error 
 	}
 }
 
-func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, payload interface{}) (ksmsg.KeysplittingMessage, error) {
-	payloadBytes, err := json.Marshal(payload)
+func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, payload []byte) (ksmsg.KeysplittingMessage, error) {
+	// payloadBytes, err := json.Marshal(payload)
 
-	if err != nil {
-		return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to marshal action params")
-	} else if k.dirtyPayload {
+	if k.prePipeliningAgent {
 		// if we're talking with an old agent, then we have to add extra quotes
-		dirty := "\"" + base64.StdEncoding.EncodeToString(payloadBytes) + "\""
-		payloadBytes = []byte(dirty)
+		// TODO: CWC-1820: remove once all daemon's are updated
+
+		// sometimes go will extra marshal big things, but because we need to compensate for an old
+		// extra marshaling bug on our part, we have to make sure that we are marshaling things the
+		// correct number of times which means that we have to unmarshal the things that got extra
+		// marshaled and then fancy marshal them in the special broken way we have to reproduce for
+		// backwards compatability with old agents
+		var preMarshal []byte
+		if err := json.Unmarshal(payload, &preMarshal); err == nil {
+			payload = preMarshal
+		}
+
+		encoded := base64.StdEncoding.EncodeToString(payload)
+		payload, _ = json.Marshal(string(encoded))
 	}
 
-	if responseMessage, err := ksMessage.BuildUnsignedResponse(action, payloadBytes, k.bzcertHash); err != nil {
+	if responseMessage, err := ksMessage.BuildUnsignedResponse(action, payload, k.bzcertHash); err != nil {
 		return responseMessage, err
 	} else if err := responseMessage.Sign(k.clientSecretKey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
@@ -317,6 +337,9 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
 	// lock our pipeline because nothing can be calculated until we get our synack
 	k.pipelineLock.Lock()
+	if k.synAction == "initial" {
+		k.synAction = action
+	}
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -339,7 +362,7 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 	synPayload := ksmsg.SynPayload{
 		SchemaVersion: ksmsg.SchemaVersion,
 		Type:          string(ksmsg.Syn),
-		Action:        action,
+		Action:        k.synAction,
 		ActionPayload: payloadBytes,
 		TargetId:      k.agentPubKey,
 		Nonce:         util.Nonce(),
