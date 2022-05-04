@@ -33,7 +33,8 @@ var (
 	logLevel                         string
 	forceReRegistration              bool
 	wait                             bool
-	printVersion, listLogFile        bool
+	printVersion                     bool
+	listLogFile                      bool
 )
 
 const (
@@ -51,11 +52,15 @@ func main() {
 
 	parseErr := parseFlags()
 
-	// see if the user is asking for any helpful info and just print that
-	if parseErr == nil && printVersion {
+	if logger, err := setupLogger(); err != nil {
+		reportError(logger, err)
+	} else if parseErr != nil {
+		// catch our parser errors now that we have a logger to print them
+		reportError(logger, err)
+	} else if printVersion {
 		fmt.Printf("%s\n", getAgentVersion())
 		return
-	} else if parseErr == nil && listLogFile {
+	} else if listLogFile {
 		switch agentType {
 		case Bzero:
 			fmt.Printf("%s\n", bzeroLogFilePath)
@@ -63,13 +68,6 @@ func main() {
 			fmt.Printf("Bzero Agent logs can be accessed via\n") // LUCIE: Ask Sid
 		}
 		return
-	}
-
-	if logger, err := setupLogger(); err != nil {
-		reportError(logger, err)
-	} else if parseErr != nil {
-		// catch our parser errors now that we have a logger to print them
-		reportError(logger, err)
 	} else {
 
 		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
@@ -108,7 +106,6 @@ func main() {
 
 func run(logger *logger.Logger) {
 	defer func() {
-
 		// recover in case the agent panics
 		if msg := recover(); msg != nil {
 			reportError(logger, fmt.Errorf("bzero agent crashed with panic: %+v", msg))
@@ -149,6 +146,8 @@ func setupLogger() (*logger.Logger, error) {
 func reportError(logger *logger.Logger, errorReport error) {
 	if logger != nil {
 		logger.Error(errorReport)
+	} else {
+		fmt.Println(errorReport.Error())
 	}
 
 	hostname, err := os.Hostname()
@@ -162,7 +161,7 @@ func reportError(logger *logger.Logger, errorReport error) {
 		Message:   errorReport.Error(),
 		State: map[string]string{
 			"activationToken":       activationToken,
-			"registrationKeyLength": fmt.Sprintf("%v", (len(registrationKey))),
+			"registrationKeyLength": fmt.Sprintf("%v", len(registrationKey)),
 			"targetName":            targetName,
 			"targetHostName":        hostname,
 			"goos":                  runtime.GOOS,

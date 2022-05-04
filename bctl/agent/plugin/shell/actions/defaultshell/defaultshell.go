@@ -1,6 +1,7 @@
 package defaultshell
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -84,6 +85,7 @@ func New(
 func (d *DefaultShell) Kill() {
 	if d.terminal != nil {
 		d.terminal.Kill()
+		d.terminal = nil
 		<-d.doneChan
 	}
 }
@@ -103,7 +105,7 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) ([]byte, err
 			return []byte{}, err
 		}
 	case bzshell.ShellClose:
-		d.terminal.Kill()
+		d.Kill()
 	case bzshell.ShellInput:
 		var shellInput bzshell.ShellInputMessage
 		if err := json.Unmarshal(actionPayload, &shellInput); err != nil {
@@ -187,6 +189,7 @@ func (d *DefaultShell) setSize(cols, rows uint32) error {
 
 // writePump reads from pty stdout and writes to datachannel.
 func (d *DefaultShell) writePump() {
+	defer d.Kill()
 	defer close(d.doneChan)
 	defer func() {
 		if err := recover(); err != nil {
@@ -223,11 +226,12 @@ func (d *DefaultShell) writePump() {
 }
 
 func (d *DefaultShell) sendStreamMessage(streamType smsg.StreamType, content []byte) {
+	withoutNull := bytes.TrimLeft(content, "\x00")
 	message := smsg.StreamMessage{
 		Action:         "shell/default",
 		Type:           streamType,
 		SequenceNumber: d.streamSequenceNumber,
-		Content:        base64.StdEncoding.EncodeToString(content),
+		Content:        base64.StdEncoding.EncodeToString(withoutNull),
 	}
 
 	d.streamOutputChan <- message

@@ -55,10 +55,12 @@ type Keysplitting struct {
 	zliRefreshTokenCommand string
 
 	// ordered hash map to keep track of sent keysplitting messages
-	pipelineMap   *orderedmap.OrderedMap
-	pipelineQueue chan *ksmsg.KeysplittingMessage
-	pipelineLock  sync.Mutex
-	pipelineOpen  *sync.Cond
+	pipelineMap  *orderedmap.OrderedMap
+	pipelineLock sync.Mutex
+	pipelineOpen *sync.Cond
+
+	// a channel for all the messages we give the datachannel to send
+	outboxQueue chan *ksmsg.KeysplittingMessage
 
 	// not the last ack we've received but the last ack we've received *in order*
 	lastAck        *ksmsg.KeysplittingMessage
@@ -86,7 +88,7 @@ func New(
 		agentPubKey:            agentPubKey,
 		ackPublicKey:           "",
 		pipelineMap:            orderedmap.New(),
-		pipelineQueue:          make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
+		outboxQueue:            make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
 		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
 		recovering:             false,
 	}
@@ -104,7 +106,7 @@ func (k *Keysplitting) Release() {
 }
 
 func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
-	return k.pipelineQueue
+	return k.outboxQueue
 }
 
 func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
@@ -270,7 +272,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload interface{}) error 
 	} else if err := k.addToPipelineMap(newMessage); err != nil {
 		return err
 	} else {
-		k.pipelineQueue <- &newMessage
+		k.outboxQueue <- &newMessage
 		return nil
 	}
 }
@@ -356,7 +358,7 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 		return nil, err
 	} else {
 		if send {
-			k.pipelineQueue <- &ksMessage
+			k.outboxQueue <- &ksMessage
 		}
 		return &ksMessage, nil
 	}

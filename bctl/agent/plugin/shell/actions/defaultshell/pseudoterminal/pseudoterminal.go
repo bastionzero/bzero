@@ -145,7 +145,6 @@ func buildCommand(commandstr string, shellCommand string, shellCommandArgs []str
 	} else {
 		cmd.Dir = currentUser.HomeDir
 	}
-	//cmd.Dir = fmt.Sprintf("/home/%s", runAsUser)
 
 	return cmd, nil
 }

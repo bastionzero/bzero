@@ -59,13 +59,7 @@ func (d *DefaultShell) Start(attach bool) error {
 	} else {
 		// If we are not attaching then send a ShellOpen data message to start
 		// the pty on the target
-		openShellDataMessage := bzshell.ShellActionParams{
-			// note the TargetUser in this data message is ignored by the agent
-			// because it is policy-checked by bzero when its sent in the SYN
-			// message when opening the datachannel and should never be changed
-			// afterwards
-			TargetUser: "",
-		}
+		openShellDataMessage := bzshell.ShellOpenMessage{}
 		d.sendOutputMessage(bzshell.ShellOpen, openShellDataMessage)
 	}
 

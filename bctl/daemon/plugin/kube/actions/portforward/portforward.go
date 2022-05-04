@@ -123,7 +123,6 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 
 func (p *PortForwardAction) Start(writer http.ResponseWriter, request *http.Request) error {
 	defer close(p.doneChan)
-	defer p.logger.Infof("RETURNING FROM START")
 
 	// Set our endpoint
 	p.endpoint = request.URL.String()

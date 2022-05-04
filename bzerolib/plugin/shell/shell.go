@@ -20,7 +20,6 @@ const (
 )
 
 type ShellActionParams struct {
-	Attach     bool   `json:"attach"`
 	TargetUser string `json:"targetUser"`
 }
 

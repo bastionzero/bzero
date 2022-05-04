@@ -159,7 +159,6 @@ func (d *DialAction) Kill() {
 }
 
 func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interface{}) {
-	d.logger.Info("TRYING TO SEND OUTPUT MESSAGE")
 	// Send payload to plugin output queue
 	d.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
