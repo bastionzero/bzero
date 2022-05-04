@@ -60,7 +60,7 @@ func New(parentTmb *tomb.Tomb, logger *logger.Logger, actionParams bzssh.SshActi
 	// Create the DefaultSsh action
 	actLogger := logger.GetActionLogger(string(bzssh.DefaultSsh))
 	var actOutputChan chan plugin.ActionWrapper
-	sshDaemonPlugin.action, actOutputChan = defaultssh.New(actLogger, actionParams.TargetUser)
+	sshDaemonPlugin.action, actOutputChan = defaultssh.New(actLogger, actionParams.TargetUser, actionParams.IdentityFile)
 
 	// listen to ssh action output channel and push to outputqueue. If output
 	// channel is done then close the ssh daemon plugin

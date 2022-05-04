@@ -41,6 +41,9 @@ var (
 	// Shell specific arguments
 	connectionId  string
 	dataChannelId string
+
+	// SSH specific arguments
+	identityFile string
 )
 
 const (
@@ -152,6 +155,7 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 		headers,
 		agentPubKey,
 		targetSelectHandler,
+		identityFile,
 	)
 }
 
@@ -282,6 +286,9 @@ func parseFlags() error {
 	flag.StringVar(&connectionId, "connectionId", "", "The bzero connection id for the shell connection")
 	flag.StringVar(&dataChannelId, "dataChannelId", "", "The datachannel id to attach to an existing shell connection")
 
+	// SSH plugin variables
+	flag.StringVar(&identityFile, "identityFile", "", "Path to an SSH IdentityFile")
+
 	flag.Parse()
 
 	// Make sure our service url is correctly formatted
@@ -305,7 +312,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
-		requiredFlags = append(requiredFlags, "targetUser", "targetId")
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

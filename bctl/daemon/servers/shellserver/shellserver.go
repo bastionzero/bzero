@@ -108,6 +108,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	subLogger := ss.logger.GetDatachannelLogger(ss.dataChannelId)
 
 	// Build the action payload to send in the syn message when opening the datachannel
+	// FIXME: why is this an openMessage and not ActionParams?
 	actionParams := bzshell.ShellOpenMessage{
 		TargetUser: ss.targetUser,
 	}

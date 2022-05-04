@@ -15,6 +15,7 @@ require (
 	github.com/gorilla/websocket v1.4.2
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/build v0.0.0-20211108163316-3ce30f35b9aa
+	golang.org/x/crypto v0.0.0-20210711020723-a769d52b0f97
 	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
 	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
 	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637

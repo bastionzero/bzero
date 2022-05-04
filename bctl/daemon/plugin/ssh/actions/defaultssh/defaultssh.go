@@ -32,10 +32,11 @@ type DefaultSsh struct {
 	// channel where we push each individual keypress byte from StdIn
 	stdInChan chan byte
 
-	targetUser string
+	targetUser   string
+	identityFile string
 }
 
-func New(logger *logger.Logger, targetUser string) (*DefaultSsh, chan plugin.ActionWrapper) {
+func New(logger *logger.Logger, targetUser string, identityFile string) (*DefaultSsh, chan plugin.ActionWrapper) {
 
 	shellAction := &DefaultSsh{
 		logger: logger,
@@ -44,7 +45,8 @@ func New(logger *logger.Logger, targetUser string) (*DefaultSsh, chan plugin.Act
 		streamInputChan: make(chan smsg.StreamMessage, 30),
 		stdInChan:       make(chan byte, InputBufferSize),
 
-		targetUser: targetUser,
+		targetUser:   targetUser,
+		identityFile: identityFile,
 	}
 
 	return shellAction, shellAction.outputChan
@@ -53,8 +55,13 @@ func New(logger *logger.Logger, targetUser string) (*DefaultSsh, chan plugin.Act
 func (d *DefaultSsh) Start(tmb *tomb.Tomb) error {
 	d.tmb = tmb
 
+	// FIXME: sub in identity file
+	publicKey, _ := GenerateKeys(d.identityFile)
+	d.logger.Errorf("oh hi mark it's a %s", publicKey)
+
 	sshOpenMessage := bzssh.SshOpenMessage{
 		TargetUser: d.targetUser,
+		PublicKey:  publicKey,
 	}
 	d.sendOutputMessage(bzssh.SshOpen, sshOpenMessage)
 
