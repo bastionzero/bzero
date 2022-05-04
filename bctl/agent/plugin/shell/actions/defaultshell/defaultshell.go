@@ -1,7 +1,6 @@
 package defaultshell
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -61,7 +60,7 @@ type DefaultShell struct {
 	streamSequenceNumber int
 
 	// stdout circular buffer
-	stdoutbuff *ringbuffer.RingBuffer
+	ringBuffer *ringbuffer.RingBuffer
 
 	// interface for interacting with pty
 	terminal IPseudoTerminal
@@ -131,7 +130,7 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) ([]byte, err
 			return []byte{}, err
 		}
 	case bzshell.ShellReplay:
-		if replayBytes, err := d.stdoutbuff.ReadAll(); err != nil {
+		if replayBytes, err := d.ringBuffer.ReadAll(); err != nil {
 			return []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
 		} else {
 			return replayBytes, nil
@@ -197,8 +196,9 @@ func (d *DefaultShell) writePump() {
 		}
 	}()
 
-	d.stdoutbuff = ringbuffer.New(shellStdOutBuffCapacity)
-	stdoutBytes := make([]byte, streamDataPayloadSize)
+	d.ringBuffer = ringbuffer.New(shellStdOutBuffCapacity)
+	stdoutBuff := make([]byte, streamDataPayloadSize)
+	stdOut := d.terminal.StdOut()
 
 	// Wait for all input commands to run.
 	time.Sleep(time.Second)
@@ -210,13 +210,13 @@ func (d *DefaultShell) writePump() {
 			d.sendStreamMessage(smsg.Stop, []byte{})
 			return
 		default:
-			if stdoutBytesLen, err := d.terminal.StdOut().Read(stdoutBytes); err != nil {
-				d.sendStreamMessage(smsg.Stop, stdoutBytes[:stdoutBytesLen])
+			if stdoutBytesLen, err := stdOut.Read(stdoutBuff); err != nil {
+				d.sendStreamMessage(smsg.Stop, stdoutBuff[:stdoutBytesLen])
 				d.logger.Errorf("error reading from stdout: %s", err)
 				return
 			} else {
-				d.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
-				d.sendStreamMessage(smsg.StdOut, stdoutBytes[:stdoutBytesLen])
+				d.ringBuffer.Write(stdoutBuff[:stdoutBytesLen])
+				d.sendStreamMessage(smsg.StdOut, stdoutBuff[:stdoutBytesLen])
 			}
 
 			// Wait for stdout to process more data
@@ -226,12 +226,11 @@ func (d *DefaultShell) writePump() {
 }
 
 func (d *DefaultShell) sendStreamMessage(streamType smsg.StreamType, content []byte) {
-	withoutNull := bytes.TrimLeft(content, "\x00")
 	message := smsg.StreamMessage{
 		Action:         "shell/default",
 		Type:           streamType,
 		SequenceNumber: d.streamSequenceNumber,
-		Content:        base64.StdEncoding.EncodeToString(withoutNull),
+		Content:        base64.StdEncoding.EncodeToString(content),
 	}
 
 	d.streamOutputChan <- message
