@@ -31,6 +31,7 @@ type SshServer struct {
 	// TODO: revisit
 	targetUser   string
 	identityFile string
+	publicKey    string
 
 	// fields for new datachannels
 	params              map[string]string
@@ -52,7 +53,8 @@ func StartSshServer(
 	headers map[string]string,
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
-	identityFile string) error {
+	identityFile string,
+	publicKey string) error {
 
 	server := &SshServer{
 		logger:              logger,
@@ -65,6 +67,7 @@ func StartSshServer(
 		refreshTokenCommand: refreshTokenCommand,
 		agentPubKey:         agentPubKey,
 		identityFile:        identityFile,
+		publicKey:           publicKey,
 	}
 
 	// Create a new websocket
@@ -108,6 +111,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	actionParams := bzssh.SshActionParams{
 		TargetUser:   s.targetUser,
 		IdentityFile: s.identityFile,
+		PublicKey:    s.publicKey,
 	}
 	actionParamsMarshalled, _ := json.Marshal(actionParams)
 

@@ -11,6 +11,7 @@ const (
 type SshActionParams struct {
 	TargetUser   string `json:"targetUser"`
 	IdentityFile string `json:"identityFile"`
+	PublicKey    string `json:"publicKey"`
 }
 
 type SshFood struct {

@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"io/ioutil"
 	"log"
 
@@ -30,6 +31,11 @@ func GenerateKeys(identityFile string) ([]byte, error) {
 	privateKeyBytes := encodePrivateKeyToPEM(privateKey)
 
 	err = writeKeyToFile(privateKeyBytes, identityFile)
+	if err != nil {
+		return nil, err
+	}
+
+	err = writeKeyToFile(publicKeyBytes, fmt.Sprintf("%s.pub", identityFile))
 	if err != nil {
 		return nil, err
 	}

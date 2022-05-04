@@ -43,7 +43,7 @@ var (
 	dataChannelId string
 
 	// SSH specific arguments
-	identityFile string
+	identityFile, publicKey string
 )
 
 const (
@@ -156,6 +156,7 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 		agentPubKey,
 		targetSelectHandler,
 		identityFile,
+		publicKey,
 	)
 }
 
@@ -288,6 +289,7 @@ func parseFlags() error {
 
 	// SSH plugin variables
 	flag.StringVar(&identityFile, "identityFile", "", "Path to an SSH IdentityFile")
+	flag.StringVar(&publicKey, "publicKey", "", "SSH public key contents")
 
 	flag.Parse()
 
@@ -312,7 +314,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
-		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile")
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "publicKey")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}
