@@ -213,7 +213,7 @@ func (d *DataChannel) zapPluginOutput() error {
 			return nil
 		case wrapper := <-d.plugin.Outbox():
 			// Build and send response
-			if err := d.keysplitter.Inbox(wrapper.Action, *wrapper.ActionPayload); err != nil {
+			if err := d.keysplitter.Inbox(wrapper.Action, wrapper.ActionPayload); err != nil {
 				d.logger.Errorf("could not build response message: %s", err)
 			}
 		}

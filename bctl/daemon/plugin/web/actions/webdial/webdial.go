@@ -178,7 +178,7 @@ func (w *WebDialAction) outbox(action bzwebdial.WebDialSubAction, payload interf
 	payloadBytes, _ := json.Marshal(payload)
 	w.outboxQueue <- plugin.ActionWrapper{
 		Action:        string(action),
-		ActionPayload: &payloadBytes,
+		ActionPayload: payloadBytes,
 	}
 }
 

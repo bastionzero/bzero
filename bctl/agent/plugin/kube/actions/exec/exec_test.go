@@ -15,7 +15,6 @@ import (
 	bzexec "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"gopkg.in/tomb.v2"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 )
@@ -73,8 +72,8 @@ var _ = Describe("Agent Exec action", Ordered, func() {
 	})
 
 	logger := logger.MockLogger()
-	var tmb tomb.Tomb
 	outputChan := make(chan smsg.StreamMessage, 5)
+	doneChan := make(chan struct{})
 
 	requestId := "rid"
 	logId := "lid"
@@ -86,18 +85,14 @@ var _ = Describe("Agent Exec action", Ordered, func() {
 		mockExecutor.On("Stream", stdoutWriter).Return(nil)
 		setGetExecutor(mockExecutor)
 		setGetConfig()
-		e, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
+		e := New(logger, outputChan, doneChan, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
 
 		It("handles the exec session correctly", func() {
-			By("starting without error")
-			Expect(err).To(BeNil())
-
 			startPayloadBytes := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
 
 			By("receiving an Exec request without error")
-			action, responsePayload, err := e.Receive(string(bzexec.ExecStart), startPayloadBytes)
+			responsePayload, err := e.Receive(string(bzexec.ExecStart), startPayloadBytes)
 			Expect(err).To(BeNil())
-			Expect(action).To(Equal(string(bzexec.ExecStart)))
 			Expect(responsePayload).To(Equal([]byte{}))
 
 			readyMessage := <-outputChan
@@ -107,17 +102,13 @@ var _ = Describe("Agent Exec action", Ordered, func() {
 
 			By("expecting input from stdin")
 			stdinPayloadBytes := buildStdinActionPayload(requestId, []byte(testString))
-			action, responsePayload, err = e.Receive(string(bzexec.ExecInput), stdinPayloadBytes)
+			responsePayload, err = e.Receive(string(bzexec.ExecInput), stdinPayloadBytes)
 			Expect(err).To(BeNil())
-			Expect(action).To(Equal(string(bzexec.ExecInput)))
 			Expect(responsePayload).To(Equal([]byte{}))
 
 			By("reporting output from stdout and stderr")
 			tests.ExpectNextMessageHasContent(outputChan, testString)
 			tests.ExpectNextMessageHasContent(outputChan, fmt.Sprintf("error: %s", testString))
-
-			By("informing the datachannel it has closed")
-			Expect(e.Closed()).To(BeTrue())
 
 			By("writing messages via the stdout writer")
 			mockExecutor.AssertExpectations(GinkgoT())

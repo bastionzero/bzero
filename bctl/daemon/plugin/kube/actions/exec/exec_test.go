@@ -11,11 +11,11 @@ import (
 	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"gopkg.in/tomb.v2"
 )
 
 // inject our mock object
@@ -37,8 +37,10 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 		NewSPDYService = oldNewSPDYService
 	})
 
-	var tmb tomb.Tomb
 	logger := logger.MockLogger()
+	doneChan := make(chan struct{})
+	outputChan := make(chan plugin.ActionWrapper, 1)
+
 	requestId := "rid"
 	logId := "lid"
 	command := "exec"
@@ -78,12 +80,12 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 	writer := tests.MockResponseWriter{}
 
 	Context("Happy path", func() {
-		e, outputChan := New(logger, requestId, logId, command)
+		e := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
 		It("handles the exec session correctly", func() {
 			By("starting without error")
-			err := e.Start(&tmb, &writer, &request)
+			err := e.Start(&writer, &request)
 			Expect(err).To(BeNil())
 
 			startMessage := <-outputChan

@@ -3,7 +3,6 @@ package portforward
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -13,12 +12,12 @@ import (
 	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
 	"golang.org/x/build/kubernetes/api"
-	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 )
 
@@ -63,8 +62,10 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 		performHandshake = oldPerformHandshake
 	})
 
-	var tmb tomb.Tomb
 	logger := logger.MockLogger()
+	doneChan := make(chan struct{})
+	outputChan := make(chan plugin.ActionWrapper, 1)
+
 	requestId := "rid"
 	logId := "lid"
 	command := "logs"
@@ -110,7 +111,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 		mockStreamConnection.On("CreateStream", dataHeaders).Return(mockDataStream, nil)
 		mockStreamConnection.On("CreateStream", errorHeaders).Return(mockErrorStream, nil)
 
-		p, outputChan := New(logger, requestId, logId, command)
+		p := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
 		It("handles the portforwarding session correclty", func() {
@@ -189,10 +190,10 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 					More:           true,
 				})
 
-				time.Sleep(time.Second)
+				// time.Sleep(time.Second)
 
-				By("ending when its tomb is killed")
-				tmb.Kill(errors.New("test kill"))
+				// By("ending when its tomb is killed")
+				// tmb.Kill(errors.New("test kill"))
 
 				time.Sleep(time.Second)
 
@@ -216,7 +217,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 			}()
 
 			By("starting without error")
-			err := p.Start(&tmb, &writer, &request)
+			err := p.Start(&writer, &request)
 			Expect(err).To(BeNil())
 		})
 
@@ -236,7 +237,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 
 		writer.On("Write", errorJson).Return(len(errorJson), nil)
 
-		p, outputChan := New(logger, requestId, logId, command)
+		p := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		It("stops if the ready message from the agent contains an error", func() {
 			go func() {
@@ -258,7 +259,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 			}()
 
 			By("returning an error to the datachannel")
-			err := p.Start(&tmb, &writer, &request)
+			err := p.Start(&writer, &request)
 			Expect(err).To(Equal(fmt.Errorf("error starting portforward stream: %s", errorStr)))
 		})
 	})

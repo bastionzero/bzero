@@ -167,6 +167,6 @@ func (w *WebWebsocketAction) outbox(action webwebsocket.WebWebsocketSubAction, p
 	payloadBytes, _ := json.Marshal(payload)
 	w.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
-		ActionPayload: &payloadBytes,
+		ActionPayload: payloadBytes,
 	}
 }

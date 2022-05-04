@@ -15,7 +15,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 // what stream action will receive from "bastion"
@@ -51,7 +50,7 @@ func TestStream(t *testing.T) {
 
 var _ = Describe("Agent Stream action", Ordered, func() {
 	logger := logger.MockLogger()
-	var tmb tomb.Tomb
+	doneChan := make(chan struct{})
 	outputChan := make(chan smsg.StreamMessage, 10)
 
 	requestId := "rid"
@@ -64,17 +63,13 @@ var _ = Describe("Agent Stream action", Ordered, func() {
 	Context("Happy path", func() {
 		// respond with a 4kb string
 		setMakeRequest(200, headers, strings.Repeat(testString, 1024))
-		s, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
+		s := New(logger, outputChan, doneChan, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
 
 		It("streams a 4kb message in chunks", func() {
-			By("starting without error")
-			Expect(err).To(BeNil())
-
 			By("receiving a stream request without error")
 			payload := buildActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
-			action, responsePayload, err := s.Receive(string(stream.StreamStart), payload)
+			responsePayload, err := s.Receive(string(stream.StreamStart), payload)
 			Expect(err).To(BeNil())
-			Expect(action).To(Equal(string(stream.StreamStart)))
 			Expect(responsePayload).To(Equal([]byte{}))
 
 			By("first returning a message with the stream's headers")

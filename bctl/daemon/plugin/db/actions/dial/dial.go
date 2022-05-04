@@ -164,7 +164,7 @@ func (d *DialAction) sendOutputMessage(action dial.DialSubAction, payload interf
 	payloadBytes, _ := json.Marshal(payload)
 	d.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
-		ActionPayload: &payloadBytes,
+		ActionPayload: payloadBytes,
 	}
 }
 

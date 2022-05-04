@@ -181,7 +181,7 @@ func (d *DefaultShell) sendOutputMessage(action bzshell.ShellSubAction, payload 
 	payloadBytes, _ := json.Marshal(payload)
 	d.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
-		ActionPayload: &payloadBytes,
+		ActionPayload: payloadBytes,
 	}
 }
 

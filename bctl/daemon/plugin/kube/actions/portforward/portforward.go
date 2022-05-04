@@ -422,7 +422,7 @@ func (p *PortForwardAction) outbox(action portforward.PortForwardSubAction, payl
 	payloadBytes, _ := json.Marshal(payload)
 	p.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
-		ActionPayload: &payloadBytes,
+		ActionPayload: payloadBytes,
 	}
 }
 

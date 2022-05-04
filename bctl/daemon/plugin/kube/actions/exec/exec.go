@@ -200,7 +200,7 @@ func (e *ExecAction) outbox(action exec.ExecSubAction, payload interface{}) {
 	payloadBytes, _ := json.Marshal(payload)
 	e.outputChan <- plugin.ActionWrapper{
 		Action:        string(action),
-		ActionPayload: &payloadBytes,
+		ActionPayload: payloadBytes,
 	}
 }
 
