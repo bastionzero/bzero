@@ -74,7 +74,7 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 	isTty := kubeutils.IsQueryParamPresent(request, "tty")
 
 	// Now since we made our local connection to kubectl, initiate a connection with Bastion
-	e.sendStartPayload(isTty, e.requestId, e.logId, request.URL.Query()["command"], request.URL.String())
+	e.sendStartMessage(isTty, request.URL.Query()["command"], request.URL.String())
 
 	// Set up a go function for stdout
 	e.tmb.Go(func() error {
@@ -161,7 +161,7 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 					}
 				}
 				// Send message to agent
-				e.sendStdinPayload(e.requestId, e.logId, buffer)
+				e.sendStdinMessage(buffer)
 			}
 		}
 	}()
@@ -185,7 +185,7 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 						}
 					} else {
 						// Emit this as a new resize event
-						e.sendResizePayload(e.requestId, e.logId, size.Width, size.Height)
+						e.sendResizeMessage(size.Width, size.Height)
 					}
 				}
 			}
@@ -204,32 +204,33 @@ func (e *ExecAction) outbox(action exec.ExecSubAction, payload interface{}) {
 	}
 }
 
-func (e *ExecAction) sendStartPayload(isTty bool, requestId string, logId string, command []string, endpoint string) {
+func (e *ExecAction) sendStartMessage(isTty bool, command []string, endpoint string) {
 	payload := exec.KubeExecStartActionPayload{
-		RequestId:            requestId,
+		RequestId:            e.requestId,
 		StreamMessageVersion: smsg.CurrentSchema,
-		LogId:                logId,
+		LogId:                e.logId,
 		IsTty:                isTty,
 		Command:              command,
 		Endpoint:             endpoint,
+		CommandBeingRun:      e.commandBeingRun,
 	}
 	e.outbox(exec.ExecStart, payload)
 }
 
-func (e *ExecAction) sendResizePayload(requestId string, logId string, width uint16, height uint16) {
+func (e *ExecAction) sendResizeMessage(width uint16, height uint16) {
 	payload := exec.KubeExecResizeActionPayload{
-		RequestId: requestId,
-		LogId:     logId,
+		RequestId: e.requestId,
+		LogId:     e.logId,
 		Width:     width,
 		Height:    height,
 	}
 	e.outbox(exec.ExecResize, payload)
 }
 
-func (e *ExecAction) sendStdinPayload(requestId string, logId string, stdin []byte) {
+func (e *ExecAction) sendStdinMessage(stdin []byte) {
 	payload := exec.KubeStdinActionPayload{
-		RequestId: requestId,
-		LogId:     logId,
+		RequestId: e.requestId,
+		LogId:     e.logId,
 		Stdin:     stdin,
 	}
 	e.outbox(exec.ExecInput, payload)

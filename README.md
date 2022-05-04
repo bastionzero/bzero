@@ -41,7 +41,7 @@ To run all daemon/agent unit tests:
 
 ```
 cd bctl // you can also run more specific tests by cd'ing into a more specific directory like bctl/daemon
-go test -v ./...
+go test -v ./... -timeout 5000ms
 ```
 
 To run bzerolib unit tests:
@@ -51,3 +51,12 @@ cd bzerolib
 go test -v ./...
 ```
 
+You can also run tests for the entire package from the root directory:
+```
+sh run-tests.sh
+```
+
+### Test coverage
+
+In VSCode's Go settings, you can also toggle "Cover on Save" or "Cover on Test Package" to see highlighting of which lines of all these files are covered by the tests!
+![A screenshot of a source file, with blue highlighting on lines covered by tests, and red highlighting on lines that are not covered](img/test-coverage.png)
