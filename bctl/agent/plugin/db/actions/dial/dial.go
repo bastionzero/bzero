@@ -98,13 +98,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) ([]byte, error) {
 		}
 
 	case dial.DialStop:
-
-		// Deserialize the action payload
-		var dataEnd dial.DialActionPayload
-		if nerr := json.Unmarshal(actionPayload, &dataEnd); nerr != nil {
-			err = fmt.Errorf("unable to unmarshal dial input message: %s", nerr)
-			break
-		}
 		d.remoteConnection.Close()
 		return actionPayload, nil
 	default:

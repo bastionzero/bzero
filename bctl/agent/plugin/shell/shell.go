@@ -31,7 +31,6 @@ func New(
 	ch chan smsg.StreamMessage,
 	action string,
 	payload []byte,
-	version string,
 ) (*ShellPlugin, error) {
 
 	// Unmarshal the Syn payload

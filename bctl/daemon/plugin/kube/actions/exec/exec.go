@@ -145,8 +145,11 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 					if n, err := spdy.stdinStream.Read(chunkSizeBuffer); !e.tmb.Alive() {
 						return
 					} else if err == io.EOF {
+						buffer = append(buffer, chunkSizeBuffer[:n]...)
 						// Always return if we see a EOF
-						break // LUCIE: if we hit an eof, we would still want to send whatever's in the buffer...right?
+						break
+					} else if err != nil {
+						e.logger.Errorf("failed reading stdin: %s", err)
 					} else {
 						// Append the new chunk to our buffer
 						buffer = append(buffer, chunkSizeBuffer[:n]...)

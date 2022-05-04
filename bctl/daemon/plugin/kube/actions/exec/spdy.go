@@ -56,7 +56,7 @@ func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *
 	if err != nil {
 		return nil, fmt.Errorf("could not complete http stream handshake: %s", err)
 	}
-	logger.Infof("Using protocol: %s", protocol)
+	logger.Tracef("Using protocol: %s", protocol)
 
 	// Now make our stream channel
 	streamCh := make(chan streamAndReply)

@@ -40,7 +40,6 @@ func New(
 	ch chan smsg.StreamMessage,
 	action string,
 	payload []byte,
-	version string,
 ) (*KubePlugin, error) {
 
 	// Unmarshal the Syn payload

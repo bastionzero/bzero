@@ -32,7 +32,6 @@ func New(logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	action string,
 	payload []byte,
-	version string,
 ) (*DbPlugin, error) {
 
 	// Unmarshal the Syn payload
