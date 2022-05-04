@@ -247,6 +247,13 @@ func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
 	k.pipelineLock.Lock()
 	defer k.pipelineLock.Unlock()
 
+	// we only want to pipeline up to the maximum allowed amount
+	if k.pipelineMap.Len() >= pipelineLimit {
+		k.logger.Debug("Pipeline full, waiting to send next message")
+		k.pipelineOpen.Wait()
+		k.logger.Debug("Pipeline open, sending message")
+	}
+
 	return k.pipeline(action, actionPayload)
 }
 
@@ -321,14 +328,6 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 	if hash := ksMessage.Hash(); hash == "" {
 		return fmt.Errorf("failed to hash message")
 	} else {
-		// we only want to pipeline up to the maximum allowed amount
-		// EXCEPT if it's a syn OR we're recovering, then there's always room
-		if k.pipelineMap.Len() == pipelineLimit && ksMessage.Type != ksmsg.Syn && !k.recovering {
-			k.logger.Debug("Pipeline full, waiting to send next message")
-			k.pipelineOpen.Wait()
-			k.logger.Debug("Pipeline open, sending message")
-		}
-
 		k.pipelineMap.Set(hash, ksMessage)
 		return nil
 	}
