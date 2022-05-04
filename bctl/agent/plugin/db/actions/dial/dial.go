@@ -60,7 +60,9 @@ func New(logger *logger.Logger,
 
 func (d *Dial) Kill() {
 	d.tmb.Kill(nil)
-	d.remoteConnection.Close()
+	if d.remoteConnection != nil {
+		d.remoteConnection.Close()
+	}
 	d.tmb.Wait()
 }
 
