@@ -284,7 +284,7 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 		return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to marshal action params")
 	} else if k.dirtyPayload {
 		// if we're talking with an old agent, then we have to add extra quotes
-		dirty := "\"" + string(payloadBytes) + "\""
+		dirty := "\"" + base64.StdEncoding.EncodeToString(payloadBytes) + "\""
 		payloadBytes = []byte(dirty)
 	}
 
