@@ -23,8 +23,6 @@ func TestRestApi(t *testing.T) {
 
 var _ = Describe("Daemon RestApi action", func() {
 	logger := logger.MockLogger()
-	doneChan := make(chan struct{})
-	outputChan := make(chan plugin.ActionWrapper, 1)
 
 	requestId := "rid"
 	logId := "lid"
@@ -34,6 +32,9 @@ var _ = Describe("Daemon RestApi action", func() {
 	urlPath := "test-path"
 
 	Context("Receiving a successful API response", func() {
+
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
 		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 		writer := tests.MockResponseWriter{}
 		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
@@ -71,6 +72,8 @@ var _ = Describe("Daemon RestApi action", func() {
 	})
 
 	Context("Receiving an API error", func() {
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
 		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 		writer := tests.MockResponseWriter{}
 		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)

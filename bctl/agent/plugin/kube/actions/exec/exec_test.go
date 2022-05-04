@@ -72,14 +72,14 @@ var _ = Describe("Agent Exec action", Ordered, func() {
 	})
 
 	logger := logger.MockLogger()
-	outputChan := make(chan smsg.StreamMessage, 5)
-	doneChan := make(chan struct{})
 
 	requestId := "rid"
 	logId := "lid"
 	testString := "echo hi"
 
 	Context("Happy path", func() {
+		outputChan := make(chan smsg.StreamMessage, 5)
+		doneChan := make(chan struct{})
 		mockExecutor := MockExecutor{}
 		stdoutWriter := NewStdWriter(outputChan, smsg.CurrentSchema, requestId, string(kube.Exec), smsg.StdOut, logId)
 		mockExecutor.On("Stream", stdoutWriter).Return(nil)

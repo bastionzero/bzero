@@ -63,8 +63,6 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 	})
 
 	logger := logger.MockLogger()
-	doneChan := make(chan struct{})
-	outputChan := make(chan plugin.ActionWrapper, 1)
 
 	requestId := "rid"
 	logId := "lid"
@@ -79,6 +77,9 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 	request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 
 	Context("Happy path", func() {
+
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
 
 		headers := http.Header{}
 		headers.Set(kubeutils.PortForwardRequestIDHeader, requestId)
@@ -99,13 +100,13 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 		mockDataStream := tests.MockStream{MyStreamData: streamData}
 		mockDataStream.On("Headers").Return(dataHeaders)
 		mockDataStream.On("Close").Return(nil)
-		mockDataStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(len(streamData), nil)
+		mockDataStream.On("Read").Return(len(streamData), nil).Times(20)
 		mockDataStream.On("Write", []byte(testData)).Return(len(testData), nil).Times(3)
 
 		mockErrorStream := tests.MockStream{MyStreamData: streamError}
 		mockErrorStream.On("Headers").Return(errorHeaders)
 		mockErrorStream.On("Close").Return(nil)
-		mockErrorStream.On("Read", make([]byte, portforward.ErrorStreamBufferSize)).Return(len(streamError), nil)
+		mockErrorStream.On("Read").Return(len(streamError), nil).Times(20)
 		mockErrorStream.On("Write", []byte(testData)).Return(len(testData), nil)
 
 		mockStreamConnection.On("CreateStream", dataHeaders).Return(mockDataStream, nil)
@@ -130,11 +131,12 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 				})
 
 				By("registering incoming data and error streams")
-				// these might come in either order
+				// these will come in any order and as many times as we ask for them
 				n := 0
 				receivedDataIn := false
 				receivedError := false
-				for n < 2 {
+				// technically this is nondeterministic, but it'll only fail one in a million times
+				for n < 20 {
 					msg := <-outputChan
 					switch msg.Action {
 					case string(portforward.DataInPortForward):
@@ -190,10 +192,8 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 					More:           true,
 				})
 
-				// time.Sleep(time.Second)
-
-				// By("ending when its tomb is killed")
-				// tmb.Kill(errors.New("test kill"))
+				By("ending when it is killed")
+				go p.Kill()
 
 				time.Sleep(time.Second)
 
@@ -224,6 +224,10 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 	})
 
 	Context("Agent-side error", func() {
+
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
+
 		writer := tests.MockResponseWriter{}
 		writer.On("WriteHeader", http.StatusForbidden).Return()
 		writer.On("Header").Return(make(map[string][]string))

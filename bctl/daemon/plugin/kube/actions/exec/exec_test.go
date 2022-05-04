@@ -13,7 +13,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
-	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
 )
@@ -38,8 +37,6 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 	})
 
 	logger := logger.MockLogger()
-	doneChan := make(chan struct{})
-	outputChan := make(chan plugin.ActionWrapper, 1)
 
 	requestId := "rid"
 	logId := "lid"
@@ -50,7 +47,7 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 	urlPath := "test-path"
 
 	mockStdinStream := tests.MockStream{MyStreamData: streamData}
-	mockStdinStream.On("Read", make([]byte, kubeutils.ExecChunkSize)).Return(len(streamData), nil)
+	mockStdinStream.On("Read").Return(len(streamData), nil)
 
 	mockStdoutStream := tests.MockStream{}
 	mockStdoutStream.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
@@ -80,6 +77,8 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 	writer := tests.MockResponseWriter{}
 
 	Context("Happy path", func() {
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
 		e := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes

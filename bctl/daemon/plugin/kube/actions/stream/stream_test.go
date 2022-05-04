@@ -23,8 +23,6 @@ func TestSteam(t *testing.T) {
 
 var _ = Describe("Daemon Stream action", func() {
 	logger := logger.MockLogger()
-	doneChan := make(chan struct{})
-	outputChan := make(chan plugin.ActionWrapper, 1)
 	requestId := "rid"
 	logId := "lid"
 	command := "logs"
@@ -35,6 +33,8 @@ var _ = Describe("Daemon Stream action", func() {
 	urlPath := "test-path"
 
 	Context("Happy path", func() {
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
 		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 		writer := tests.MockResponseWriter{}
 		writer.On("Write", []byte(receiveData1)).Return(12, nil)

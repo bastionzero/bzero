@@ -50,8 +50,6 @@ func TestStream(t *testing.T) {
 
 var _ = Describe("Agent Stream action", Ordered, func() {
 	logger := logger.MockLogger()
-	doneChan := make(chan struct{})
-	outputChan := make(chan smsg.StreamMessage, 10)
 
 	requestId := "rid"
 	testString := "test"
@@ -61,6 +59,8 @@ var _ = Describe("Agent Stream action", Ordered, func() {
 	}
 
 	Context("Happy path", func() {
+		doneChan := make(chan struct{})
+		outputChan := make(chan smsg.StreamMessage, 10)
 		// respond with a 4kb string
 		setMakeRequest(200, headers, strings.Repeat(testString, 1024))
 		s := New(logger, outputChan, doneChan, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")

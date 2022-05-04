@@ -63,7 +63,6 @@ var _ = Describe("Agent RestApi action", Ordered, func() {
 	})
 
 	logger := logger.MockLogger()
-	doneChan := make(chan struct{})
 
 	statusCode := 200
 	requestId := "rid"
@@ -74,6 +73,7 @@ var _ = Describe("Agent RestApi action", Ordered, func() {
 	}
 
 	Context("Happy path", func() {
+		doneChan := make(chan struct{})
 		setMakeRequest(statusCode, headers, testString)
 		r := New(logger, doneChan, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
 

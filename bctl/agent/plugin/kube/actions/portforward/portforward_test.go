@@ -89,14 +89,14 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 	})
 
 	logger := logger.MockLogger()
-	outputChan := make(chan smsg.StreamMessage, 1)
-	doneChan := make(chan struct{})
 
 	requestId := "rid"
 	portForwardRequestId := "pid"
 	testData := "test data"
 
 	Context("Happy path", func() {
+		outputChan := make(chan smsg.StreamMessage, 1)
+		doneChan := make(chan struct{})
 		mockStream := tests.MockStream{MyStreamData: testData}
 		mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
 		mockStream.On("Write", []byte(testData)).Return(len(testData), nil)
