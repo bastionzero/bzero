@@ -172,8 +172,6 @@ func (d *DataChannel) handshakeOrTimeout() error {
 }
 
 func (d *DataChannel) waitOrTimeout() error {
-	// LUCIE: this is a maybe okay solution for waiting for all incoming messages to receive before dying
-	// the purpose is more to absorb any errors than anything
 	idleTimeout := 2 * time.Second
 	absoluteTimeout := time.NewTicker(10 * time.Second)
 	defer absoluteTimeout.Stop()

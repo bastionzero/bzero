@@ -112,9 +112,7 @@ func New(
 				return nil
 			case <-datachannel.plugin.Done():
 				for {
-					// LUCIE: on this side, I do think this strategy is legit
 					select {
-					// LUCIE: do we only want to send keysplitting messages?
 					case agentMessage := <-datachannel.outputChan:
 						// Push message to websocket channel output
 						datachannel.websocket.Send(agentMessage)
