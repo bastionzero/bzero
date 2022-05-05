@@ -86,7 +86,6 @@ func (p *PortForwardAction) Kill() {
 	if p.streamConn != nil {
 		p.streamConn.Close()
 	}
-	<-p.doneChan
 }
 
 func (p *PortForwardAction) Receive(action string, actionPayload []byte) ([]byte, error) {

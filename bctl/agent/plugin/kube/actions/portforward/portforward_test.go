@@ -20,7 +20,7 @@ import (
 
 // what portforward action will receive from "bastion"
 func buildStartActionPayload(headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
-	payloadBytes, _ := json.Marshal(portforward.PortForwardStartActionPayload{
+	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStartActionPayload{
 		Endpoint:             "test/endpoint",
 		DataHeaders:          make(map[string]string),
 		ErrorHeaders:         make(map[string]string),
@@ -34,7 +34,7 @@ func buildStartActionPayload(headers map[string][]string, requestId string, vers
 
 // what portforward action will receive from "bastion"
 func buildActionPayload(bodyText string, requestId string, portForwardRequestId string) []byte {
-	payloadBytes, _ := json.Marshal(portforward.PortForwardActionPayload{
+	payloadBytes, _ := json.Marshal(portforward.KubePortForwardActionPayload{
 		RequestId:            requestId,
 		LogId:                "lid",
 		Data:                 []byte(bodyText),
@@ -46,7 +46,7 @@ func buildActionPayload(bodyText string, requestId string, portForwardRequestId 
 
 // what portforward action will receive from "bastion"
 func buildStopRequestActionPayload(requestId string, portForwardRequestId string) []byte {
-	payloadBytes, _ := json.Marshal(portforward.PortForwardStopRequestActionPayload{
+	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStopRequestActionPayload{
 		RequestId:            requestId,
 		LogId:                "lid",
 		PortForwardRequestId: portForwardRequestId,
@@ -56,7 +56,7 @@ func buildStopRequestActionPayload(requestId string, portForwardRequestId string
 
 // what portforward action will receive from "bastion"
 func buildStopActionPayload(requestId string) []byte {
-	payloadBytes, _ := json.Marshal(portforward.PortForwardStopActionPayload{
+	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStopActionPayload{
 		RequestId: requestId,
 		LogId:     "lid",
 	})
@@ -137,7 +137,7 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 
 			By("forwarding data to the daemon")
 			wrappedContent, _ := base64.StdEncoding.DecodeString(dataMessage.Content)
-			var content portforward.PortForwardStreamMessageContent
+			var content portforward.KubePortForwardStreamMessageContent
 			json.Unmarshal(wrappedContent, &content)
 			Expect(string(content.Content)).To(Equal(testData))
 

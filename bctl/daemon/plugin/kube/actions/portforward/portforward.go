@@ -95,7 +95,6 @@ func New(
 
 func (p *PortForwardAction) Kill() {
 	close(p.cancelChan)
-	<-p.doneChan
 }
 
 func (p *PortForwardAction) ReceiveKeysplitting(actionPayload []byte) {}
