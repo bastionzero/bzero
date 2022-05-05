@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"golang.org/x/term"
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -30,7 +29,7 @@ type DefaultSsh struct {
 	streamInputChan chan smsg.StreamMessage
 
 	// channel where we push each individual keypress byte from StdIn
-	stdInChan chan byte
+	stdInChan chan []byte
 
 	targetUser   string
 	identityFile string
@@ -44,7 +43,7 @@ func New(logger *logger.Logger, targetUser string, identityFile string, publicKe
 
 		outputChan:      make(chan plugin.ActionWrapper, 10),
 		streamInputChan: make(chan smsg.StreamMessage, 30),
-		stdInChan:       make(chan byte, InputBufferSize),
+		stdInChan:       make(chan []byte, InputBufferSize),
 
 		targetUser:   targetUser,
 		identityFile: identityFile,
@@ -94,6 +93,7 @@ func (d *DefaultSsh) handleStreamMessages() {
 				if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 					d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 				} else {
+					d.logger.Errorf("\nI wrote this: %s\n", contentBytes)
 					if _, err = os.Stdout.Write(contentBytes); err != nil {
 						d.logger.Errorf("Error writing to Stdout: %s", err)
 					}
@@ -114,30 +114,27 @@ func (d *DefaultSsh) handleStreamMessages() {
 
 // Reads from StdIn and pushes to an input channel
 func (d *DefaultSsh) readStdIn() {
-	// switch stdin into 'raw' mode
-	// https://pkg.go.dev/golang.org/x/term#pkg-overview
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		d.logger.Errorf("Error switching std to raw mode: %s", err)
-		return
-	}
-	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
-	b := make([]byte, 1)
+	b := make([]byte, InputBufferSize)
+	b = b[:0]
 
+	d.logger.Infof("Oh I'm running all right $$$$$$")
 	for {
 		select {
 		case <-d.tmb.Dying():
 			return
 		default:
 			n, err := os.Stdin.Read(b)
-			if err != nil || n != 1 {
+			if err != nil {
 				d.tmb.Kill(fmt.Errorf("error reading last keypress from Stdin: %s", err))
 				return
 			}
-			d.logger.Infof("READ")
+			if n > 0 {
+				d.logger.Infof("$$$ I'm a good dog and I did the reading: %s $$$", b)
 
-			d.stdInChan <- b[0]
+				d.stdInChan <- b[:n]
+				b = b[:0]
+			}
 		}
 	}
 }
@@ -145,13 +142,14 @@ func (d *DefaultSsh) readStdIn() {
 // processes input channel by debouncing all keypresses within a time interval
 func (d *DefaultSsh) sendStdIn() {
 	inputBuf := make([]byte, InputBufferSize)
+	inputBuf = inputBuf[:0]
 
 	for {
 		select {
 		case <-d.tmb.Dying():
 			return
 		case b := <-d.stdInChan:
-			inputBuf = append(inputBuf, b)
+			inputBuf = append(inputBuf, b...)
 		case <-time.After(InputDebounceTime):
 			if len(inputBuf) >= 1 {
 				// Send all accumulated keypresses in a shellInput data message

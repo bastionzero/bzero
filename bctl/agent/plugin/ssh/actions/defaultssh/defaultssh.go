@@ -149,6 +149,7 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) (strin
 		for {
 			// this line blocks until it reads output or error
 			n, err := d.remoteConnection.Read(buff)
+			d.logger.Debugf("Look what I read... %s -- with error %s", buff, err)
 
 			if d.closed {
 				return
