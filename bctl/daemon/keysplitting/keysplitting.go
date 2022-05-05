@@ -18,6 +18,9 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
+// max number of times we will try to resend after an error message
+const maxErrorRecoveryTries = 3
+
 // the number of messages we're allowed to precalculate and send without having
 // received an ack
 var pipelineLimit = 8
@@ -71,6 +74,9 @@ type Keysplitting struct {
 	// TODO: CWC-1820: remove once all agents have updated
 	prePipeliningAgent bool
 	synAction          string
+
+	// keep track of how many times we've tried to recover
+	errorRecoveryAttempt int
 }
 
 func New(
@@ -92,14 +98,11 @@ func New(
 		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
 		recovering:             false,
 		synAction:              "initial",
+		errorRecoveryAttempt:   0,
 	}
 	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
 
 	return keysplitter, nil
-}
-
-func (k *Keysplitting) Recovering() bool {
-	return k.recovering
 }
 
 func (k *Keysplitting) Release() {
@@ -117,9 +120,22 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 	if errMessage.SchemaVersion != "" {
 		if errMessage.HPointer == "" {
 			return fmt.Errorf("error message hpointer empty")
-		} else if pair := k.pipelineMap.GetPair(errMessage.HPointer); pair == nil {
-			return fmt.Errorf("agent error is not on a message sent by this datachannel")
+		} else if pair := k.pipelineMap.GetPair(errMessage.HPointer); pair == nil && !k.recovering {
+			k.logger.Infof("agent error is not on a message sent by this datachannel")
+			return nil // not a fatal error
+		} else if msg, ok := pair.Value.(ksmsg.KeysplittingMessage); ok && msg.Type == ksmsg.Syn {
+			return fmt.Errorf("unable to recover because we hit an error on our recovery attempt: %s", errMessage.Message)
+		} else if k.recovering {
+			k.logger.Infof("ignoring error message because we're already in recovery")
+			return nil // not a fatal error
 		}
+	}
+
+	if k.errorRecoveryAttempt >= maxErrorRecoveryTries {
+		return fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
+	} else {
+		k.errorRecoveryAttempt++
+		k.logger.Infof("Attempting to recover from error, attempt #%d", k.errorRecoveryAttempt)
 	}
 
 	k.recovering = true
@@ -222,6 +238,10 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				k.lastAck = ksMessage
 				k.pipelineMap.Delete(hpointer)
 				k.processOutOfOrderAcks()
+
+				// If we're here, it means that the previous data message that caused the error was accepted
+				k.errorRecoveryAttempt = 0
+
 				k.pipelineOpen.Broadcast()
 			}
 		}

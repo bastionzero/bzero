@@ -17,9 +17,6 @@ import (
 )
 
 const (
-	// max number of times we will try to resend after an error message
-	maxErrorRecoveryTries = 3
-
 	// amount of time we're willing to wait for our first keysplitting message
 	handshakeTimeout = 20 * time.Second
 
@@ -37,7 +34,6 @@ type IKeysplitting interface {
 	BuildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error)
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
 	Recover(errorMessage rrr.ErrorMessage) error
-	Recovering() bool
 	Inbox(action string, actionPayload []byte) error
 	Outbox() <-chan *ksmsg.KeysplittingMessage
 	Release()
@@ -64,8 +60,7 @@ type DataChannel struct {
 	inputChan chan *am.AgentMessage
 
 	// if we receive an error than we ignore all messages in the mrzap queue until we hit a syn
-	ignoreMrZAP          bool
-	errorRecoveryAttempt int
+	ignoreMrZAP bool
 }
 
 func New(
@@ -81,14 +76,13 @@ func New(
 ) (*DataChannel, *tomb.Tomb, error) {
 
 	dc := &DataChannel{
-		logger:               logger,
-		id:                   id,
-		websocket:            websocket,
-		keysplitter:          keysplitter,
-		plugin:               plugin,
-		inputChan:            make(chan *am.AgentMessage, 50),
-		ignoreMrZAP:          false,
-		errorRecoveryAttempt: 0,
+		logger:      logger,
+		id:          id,
+		websocket:   websocket,
+		keysplitter: keysplitter,
+		plugin:      plugin,
+		inputChan:   make(chan *am.AgentMessage, 50),
+		ignoreMrZAP: false,
 	}
 
 	// register with websocket so datachannel can send and receive messages
@@ -308,25 +302,11 @@ func (d *DataChannel) handleError(agentMessage *am.AgentMessage) error {
 		return fmt.Errorf("could not unmarshal error message: %s", err)
 	}
 
-	switch {
-	case d.keysplitter.Recovering():
-		d.logger.Debugf("ignoring error message because we're already in recovery")
-		return nil
-	case d.errorRecoveryAttempt >= maxErrorRecoveryTries:
-		return fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
-	case rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError:
+	if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError {
 		// stop processing keysplitting messages until we start recovery with a syn
 		d.ignoreMrZAP = true
-
-		if err := d.keysplitter.Recover(errMessage); err != nil {
-			d.logger.Debugf("ignoring error because %s", err)
-			return nil
-		} else {
-			d.errorRecoveryAttempt++
-			d.logger.Infof("Attempting to recover from error, attempt #%d", d.errorRecoveryAttempt)
-			return nil
-		}
-	default:
+		return d.keysplitter.Recover(errMessage)
+	} else {
 		return fmt.Errorf("received fatal %s error from agent: %s", errMessage.Type, errMessage.Message)
 	}
 }
@@ -356,9 +336,6 @@ func (d *DataChannel) handleKeysplitting(agentMessage *am.AgentMessage) error {
 	switch ksMessage.KeysplittingPayload.(type) {
 	case ksmsg.SynAckPayload:
 	case ksmsg.DataAckPayload:
-		// If we're here, it means that the previous data message that caused the error was accepted
-		d.errorRecoveryAttempt = 0
-
 		// Send message to plugin's input message handler
 		if err := d.plugin.ReceiveKeysplitting(ksMessage.GetAction(), ksMessage.GetActionPayload()); err != nil {
 			return err
