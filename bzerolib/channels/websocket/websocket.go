@@ -307,11 +307,11 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 				message := w.messagesWaitingResponse[invocationId]
 
 				if completionMessage.Error != nil {
-					w.logger.Errorf("Error invoking Agent message type %s on datachannel %s. Unhandled Server Error: %s", message.MessageType, message.ChannelId, *completionMessage.Error)
+					w.logger.Errorf("Error invoking Agent message type %s on channel %s. Unhandled Server Error: %s", message.MessageType, message.ChannelId, *completionMessage.Error)
 				}
 				if completionMessage.Result != nil {
 					if completionMessage.Result.Error {
-						w.logger.Errorf("Error invoking Agent message type %s. Error: %s", message.MessageType, message.ChannelId, *completionMessage.Result.ErrorMessage)
+						w.logger.Errorf("Error invoking Agent message type %s for channel %s: %s", message.MessageType, message.ChannelId, *completionMessage.Result.ErrorMessage)
 					} else {
 						w.logger.Tracef("Successfully completed invocation for Agent message type %s", message.MessageType)
 					}
