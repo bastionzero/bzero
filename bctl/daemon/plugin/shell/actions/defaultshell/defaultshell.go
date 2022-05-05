@@ -142,6 +142,9 @@ func (d *DefaultShell) ReceiveStream(smessage smsg.StreamMessage) {
 func (d *DefaultShell) sendStdIn() {
 	inputBuf := make([]byte, InputBufferSize)
 
+	// slice the inputBuf to len 0 (but still keep capacity allocated)
+	inputBuf = inputBuf[:0]
+
 	for {
 		select {
 		case <-d.tmb.Dying():
