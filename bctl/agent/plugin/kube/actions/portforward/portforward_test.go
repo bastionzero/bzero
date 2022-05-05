@@ -20,7 +20,7 @@ import (
 
 // what portforward action will receive from "bastion"
 func buildStartActionPayload(headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
-	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStartActionPayload{
+	payloadBytes, _ := json.Marshal(portforward.PortForwardStartActionPayload{
 		Endpoint:             "test/endpoint",
 		DataHeaders:          make(map[string]string),
 		ErrorHeaders:         make(map[string]string),
@@ -34,7 +34,7 @@ func buildStartActionPayload(headers map[string][]string, requestId string, vers
 
 // what portforward action will receive from "bastion"
 func buildActionPayload(bodyText string, requestId string, portForwardRequestId string) []byte {
-	payloadBytes, _ := json.Marshal(portforward.KubePortForwardActionPayload{
+	payloadBytes, _ := json.Marshal(portforward.PortForwardActionPayload{
 		RequestId:            requestId,
 		LogId:                "lid",
 		Data:                 []byte(bodyText),
@@ -46,7 +46,7 @@ func buildActionPayload(bodyText string, requestId string, portForwardRequestId 
 
 // what portforward action will receive from "bastion"
 func buildStopRequestActionPayload(requestId string, portForwardRequestId string) []byte {
-	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStopRequestActionPayload{
+	payloadBytes, _ := json.Marshal(portforward.PortForwardStopRequestActionPayload{
 		RequestId:            requestId,
 		LogId:                "lid",
 		PortForwardRequestId: portForwardRequestId,
@@ -56,7 +56,7 @@ func buildStopRequestActionPayload(requestId string, portForwardRequestId string
 
 // what portforward action will receive from "bastion"
 func buildStopActionPayload(requestId string) []byte {
-	payloadBytes, _ := json.Marshal(portforward.KubePortForwardStopActionPayload{
+	payloadBytes, _ := json.Marshal(portforward.PortForwardStopActionPayload{
 		RequestId: requestId,
 		LogId:     "lid",
 	})
@@ -95,10 +95,10 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 	testData := "test data"
 
 	Context("Happy path", func() {
-		outputChan := make(chan smsg.StreamMessage, 1)
+		outputChan := make(chan smsg.StreamMessage, 5)
 		doneChan := make(chan struct{})
 		mockStream := tests.MockStream{MyStreamData: testData}
-		mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
+		mockStream.On("Read").Return(len(testData), nil).Times(7)
 		mockStream.On("Write", []byte(testData)).Return(len(testData), nil)
 		mockStream.On("Close").Return(nil)
 
@@ -108,6 +108,8 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 			"Requestid": []string{portForwardRequestId},
 		}).Return(mockStream, nil)
 		mockStreamConnection.On("Close").Return(nil)
+		closeChan := make(chan bool)
+		mockStreamConnection.On("CloseChan").Return(closeChan)
 
 		setDoDial(mockStreamConnection)
 		setGetConfig()
@@ -122,7 +124,7 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 			Expect(responsePayload).To(Equal([]byte{}))
 
 			readyMessage := <-outputChan
-			By("by alerting that it has started the portforward interaction with the kube server")
+			By("alerting that it has started the portforward interaction with the kube server")
 			Expect(readyMessage.Content).To(Equal(""))
 
 			payload = buildActionPayload(testData, requestId, portForwardRequestId)
@@ -135,7 +137,7 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 
 			By("forwarding data to the daemon")
 			wrappedContent, _ := base64.StdEncoding.DecodeString(dataMessage.Content)
-			var content portforward.KubePortForwardStreamMessageContent
+			var content portforward.PortForwardStreamMessageContent
 			json.Unmarshal(wrappedContent, &content)
 			Expect(string(content.Content)).To(Equal(testData))
 

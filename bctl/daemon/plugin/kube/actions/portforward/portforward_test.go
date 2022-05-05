@@ -88,7 +88,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 
 		mockStreamConnection := tests.MockStreamConnection{}
 		mockStreamConnection.On("SetIdleTimeout", kubeutils.DefaultIdleTimeout).Return()
-		var closeChan <-chan bool
+		closeChan := make(chan bool)
 		mockStreamConnection.On("CloseChan").Return(closeChan)
 		mockStreamConnection.On("Close").Return(nil)
 
@@ -121,7 +121,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 
 				By("sending a PortForward pyaload to the agent")
 				Expect(startMessage.Action).To(Equal(string(portforward.StartPortForward)))
-				var payload portforward.KubePortForwardStartActionPayload
+				var payload portforward.PortForwardStartActionPayload
 				err := json.Unmarshal(startMessage.ActionPayload, &payload)
 				Expect(err).To(BeNil())
 
@@ -140,13 +140,13 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 					msg := <-outputChan
 					switch msg.Action {
 					case string(portforward.DataInPortForward):
-						var dataInPayload portforward.KubePortForwardActionPayload
+						var dataInPayload portforward.PortForwardActionPayload
 						err = json.Unmarshal(msg.ActionPayload, &dataInPayload)
 						Expect(err).To(BeNil())
 						Expect(dataInPayload.Data).To(Equal([]byte(streamData)))
 						receivedDataIn = true
 					case string(portforward.ErrorPortForward):
-						var errorInPayload portforward.KubePortForwardActionPayload
+						var errorInPayload portforward.PortForwardActionPayload
 						err = json.Unmarshal(msg.ActionPayload, &errorInPayload)
 						Expect(err).To(BeNil())
 						Expect(errorInPayload.Data).To(Equal([]byte(streamError)))
@@ -157,9 +157,9 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 				Expect(receivedDataIn).To(BeTrue())
 				Expect(receivedError).To(BeTrue())
 
-				streamMessageToSend := portforward.KubePortForwardStreamMessageContent{
-					PortForwardRequestId: requestId,
-					Content:              []byte(testData),
+				streamMessageToSend := portforward.PortForwardStreamMessageContent{
+					RequestId: requestId,
+					Content:   []byte(testData),
 				}
 				streamMessageToSendBytes, _ := json.Marshal(streamMessageToSend)
 				encodedContent := base64.StdEncoding.EncodeToString(streamMessageToSendBytes)

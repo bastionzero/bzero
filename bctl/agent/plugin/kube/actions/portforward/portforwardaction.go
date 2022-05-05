@@ -86,16 +86,15 @@ func (p *PortForwardAction) Kill() {
 	if p.streamConn != nil {
 		p.streamConn.Close()
 	}
-	<-p.doneChan
 }
 
 func (p *PortForwardAction) Receive(action string, actionPayload []byte) ([]byte, error) {
-	p.logger.Infof("PortForward action received message with action: %s", action)
+	p.logger.Infof("Port Forward action received message with action: %s", action)
 	switch portforward.PortForwardSubAction(action) {
 
 	// Start portforward message required before anything else
 	case portforward.StartPortForward:
-		var startPortForwardRequest portforward.KubePortForwardStartActionPayload
+		var startPortForwardRequest portforward.PortForwardStartActionPayload
 		if err := json.Unmarshal(actionPayload, &startPortForwardRequest); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal start portforward message: %s", string(actionPayload))
 			p.logger.Error(rerr)
@@ -104,7 +103,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) ([]byte
 
 		return p.startPortForward(startPortForwardRequest)
 	case portforward.DataInPortForward, portforward.ErrorInPortForward:
-		var dataInputAction portforward.KubePortForwardActionPayload
+		var dataInputAction portforward.PortForwardActionPayload
 		if err := json.Unmarshal(actionPayload, &dataInputAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling datain: %s", err)
 			p.logger.Error(rerr)
@@ -127,7 +126,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) ([]byte
 				dataInputAction.PortForwardRequestId,
 			)
 
-			p.logger.Infof("Starting port forwarding for %s on port %d. PortforwardRequestId: %s", p.Endpoint, dataInputAction.PodPort, dataInputAction.PortForwardRequestId)
+			p.logger.Infof("Starting port forwarding for %s on port %d. Request Id: %s", p.Endpoint, dataInputAction.PodPort, dataInputAction.PortForwardRequestId)
 			if err := newRequest.openPortForwardStream(p.DataHeaders, p.ErrorHeaders, dataInputAction.PodPort, p.streamConn); err != nil {
 				rerr := fmt.Errorf("error opening stream for new portforward request: %s", err)
 				p.logger.Error(rerr)
@@ -139,25 +138,24 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) ([]byte
 
 		return []byte{}, nil
 	case portforward.StopPortForwardRequest:
-		var stopRequestAction portforward.KubePortForwardStopRequestActionPayload
-		if err := json.Unmarshal(actionPayload, &stopRequestAction); err != nil {
+		var stopRequest portforward.PortForwardStopRequestActionPayload
+		if err := json.Unmarshal(actionPayload, &stopRequest); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stop request: %s", err)
 			p.logger.Error(rerr)
 			return []byte{}, rerr
 		}
 
 		// Alert on the done channel
-		if portForwardRequest, ok := p.requestMap[stopRequestAction.PortForwardRequestId]; ok {
+		if portForwardRequest, ok := p.requestMap[stopRequest.PortForwardRequestId]; ok {
 			portForwardRequest.Kill()
 		}
 
 		// Else update our requestMap
-		delete(p.requestMap, stopRequestAction.PortForwardRequestId)
+		delete(p.requestMap, stopRequest.PortForwardRequestId)
 
 		return []byte{}, nil
 	case portforward.StopPortForward:
 		p.Kill()
-
 		return []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled portforward action: %v", action)
@@ -166,7 +164,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) ([]byte
 	}
 }
 
-func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) ([]byte, error) {
+func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward.PortForwardStartActionPayload) ([]byte, error) {
 	// Update our object to keep track of the pod and url information
 	p.DataHeaders = startPortForwardRequest.DataHeaders
 	p.ErrorHeaders = startPortForwardRequest.ErrorHeaders

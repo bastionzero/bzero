@@ -10,7 +10,7 @@ const (
 )
 
 // Portforward payload for the "kube/portforward/start" action
-type KubePortForwardStartActionPayload struct {
+type PortForwardStartActionPayload struct {
 	RequestId            string             `json:"requestId"`
 	StreamMessageVersion smsg.SchemaVersion `json:"streamMessageVersion"` // informs Agent what SchemaVersion to use
 	LogId                string             `json:"logId"`
@@ -21,7 +21,7 @@ type KubePortForwardStartActionPayload struct {
 }
 
 // Portforward payload for the "kube/portforward/datain" action
-type KubePortForwardActionPayload struct {
+type PortForwardActionPayload struct {
 	RequestId            string `json:"requestId"`
 	LogId                string `json:"logId"`
 	Data                 []byte `json:"data"`
@@ -29,21 +29,21 @@ type KubePortForwardActionPayload struct {
 	PodPort              int64  `json:"podPort"`
 }
 
-// Portforward payload for the "kube/portforward/request/sop" action
-type KubePortForwardStopRequestActionPayload struct {
+// Portforward payload for the "kube/portforward/request/stop" action
+type PortForwardStopRequestActionPayload struct {
 	RequestId            string `json:"requestId"`
 	LogId                string `json:"logId"`
 	PortForwardRequestId string `json:"portForwardRequestId"`
 }
 
 // Portforward payload for the "kube/portforward/stop" action
-type KubePortForwardStopActionPayload struct {
+type PortForwardStopActionPayload struct {
 	RequestId string `json:"requestId"`
 	LogId     string `json:"logId"`
 }
 
 // Portforward payload for stream messages
-type KubePortForwardStreamMessageContent struct {
-	PortForwardRequestId string `json:"portForwardRequestId"`
-	Content              []byte `json:"content"`
+type PortForwardStreamMessageContent struct {
+	RequestId string `json:"portForwardRequestId"`
+	Content   []byte `json:"content"`
 }

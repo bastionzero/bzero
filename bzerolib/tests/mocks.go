@@ -49,7 +49,7 @@ func (m *MockStreamConnection) Close() error {
 }
 func (m *MockStreamConnection) CloseChan() <-chan bool {
 	args := m.Called()
-	return args.Get(0).(<-chan bool)
+	return args.Get(0).(chan bool)
 }
 func (m *MockStreamConnection) SetIdleTimeout(timeout time.Duration) {
 	m.Called(timeout)
