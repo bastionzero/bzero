@@ -38,10 +38,9 @@ func (k *KeysplittingMessage) Hash() string {
 	}
 }
 
-func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (KeysplittingMessage, error) {
-	switch msg := k.KeysplittingPayload.(type) {
-	case SynPayload:
-		if synAckPayload, err := msg.BuildResponsePayload(payload, pubKey); err != nil {
+func (k *KeysplittingMessage) BuildUnsignedSynAck(payload []byte, pubKey string, nonce string) (KeysplittingMessage, error) {
+	if msg, ok := k.KeysplittingPayload.(SynPayload); ok {
+		if synAckPayload, err := msg.BuildResponsePayload(payload, pubKey, nonce); err != nil {
 			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
@@ -49,7 +48,13 @@ func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (K
 				KeysplittingPayload: synAckPayload,
 			}, nil
 		}
-	case DataPayload:
+	} else {
+		return KeysplittingMessage{}, fmt.Errorf("can't build syn/ack off a message that isn't a syn")
+	}
+}
+
+func (k *KeysplittingMessage) BuildUnsignedDataAck(payload []byte, pubKey string) (KeysplittingMessage, error) {
+	if msg, ok := k.KeysplittingPayload.(DataPayload); ok {
 		if dataAckPayload, err := msg.BuildResponsePayload(payload, pubKey); err != nil {
 			return KeysplittingMessage{}, err
 		} else {
@@ -58,12 +63,12 @@ func (k *KeysplittingMessage) BuildUnsignedAck(payload []byte, pubKey string) (K
 				KeysplittingPayload: dataAckPayload,
 			}, nil
 		}
-	default:
-		return KeysplittingMessage{}, fmt.Errorf("can't build ack for message type: %T", k.KeysplittingPayload)
+	} else {
+		return KeysplittingMessage{}, fmt.Errorf("can't build data/ack off a message that isn't a data")
 	}
 }
 
-func (k *KeysplittingMessage) BuildUnsignedResponse(action string, actionPayload []byte, bzcertHash string) (KeysplittingMessage, error) {
+func (k *KeysplittingMessage) BuildUnsignedData(action string, actionPayload []byte, bzcertHash string) (KeysplittingMessage, error) {
 	switch msg := k.KeysplittingPayload.(type) {
 	case SynAckPayload:
 		if dataPayload, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash); err != nil {
@@ -84,7 +89,7 @@ func (k *KeysplittingMessage) BuildUnsignedResponse(action string, actionPayload
 			}, nil
 		}
 	default:
-		return KeysplittingMessage{}, fmt.Errorf("can't build responses for message type: %T", k.KeysplittingPayload)
+		return KeysplittingMessage{}, fmt.Errorf("can't build data responses for message type: %T", k.KeysplittingPayload)
 	}
 }
 

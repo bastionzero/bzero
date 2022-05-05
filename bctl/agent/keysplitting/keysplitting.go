@@ -6,6 +6,7 @@ import (
 
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"github.com/Masterminds/semver"
 )
@@ -21,6 +22,7 @@ type BZCertMetadata struct {
 
 type Keysplitting struct {
 	logger           *logger.Logger
+	lastDataMessage  *ksmsg.KeysplittingMessage
 	expectedHPointer string
 	bzCert           BZCertMetadata // only for one client
 	publickey        string
@@ -117,6 +119,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		if dataPayload.HPointer != k.expectedHPointer {
 			return fmt.Errorf("DATA's hash pointer %s did not match expected hash pointer %s", dataPayload.HPointer, k.expectedHPointer)
 		}
+
+		k.lastDataMessage = ksMessage
 	default:
 		return fmt.Errorf("error validating unhandled Keysplitting type")
 	}
@@ -125,7 +129,29 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 }
 
 func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
-	if responseMessage, err := ksMessage.BuildUnsignedAck(actionPayload, k.publickey); err != nil {
+	var responseMessage ksmsg.KeysplittingMessage
+	var err error
+	switch ksMessage.Type {
+	case ksmsg.Syn:
+		// If this is the beginning of the hash chain, then we create a nonce with a random value,
+		// otherwise we use the hash of the previous value to maintain the hash chain and immutability
+		nonce := util.Nonce()
+		if k.lastDataMessage != nil {
+			if hpointer, err := k.lastDataMessage.GetHpointer(); err != nil {
+				return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to get hpointer of last ack: %s", err)
+			} else {
+				nonce = hpointer
+			}
+		}
+		responseMessage, err = ksMessage.BuildUnsignedSynAck(actionPayload, k.publickey, nonce)
+
+	case ksmsg.Data:
+		responseMessage, err = ksMessage.BuildUnsignedDataAck(actionPayload, k.publickey)
+	default:
+
+	}
+
+	if err != nil {
 		return responseMessage, err
 	} else if err := responseMessage.Sign(k.privatekey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %s", err)

@@ -150,7 +150,7 @@ func (d *DataChannel) handshakeOrTimeout() error {
 	case agentMessage := <-d.inputChan:
 		switch am.MessageType(agentMessage.MessageType) {
 		case am.Error:
-			return fmt.Errorf("daemon cannot recover from an error on the initial syn")
+			return fmt.Errorf("daemon cannot recover from an error on the initial syn: %s", string(agentMessage.MessagePayload))
 		case am.Keysplitting:
 			if err := d.handleKeysplitting(agentMessage); err != nil {
 				return err

@@ -296,7 +296,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 
 		// otherwise, we're going to need to predict the ack we're building off of
 		ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
-		if newAck, err := ksMessage.BuildUnsignedAck([]byte{}, k.agentPubKey); err != nil {
+		if newAck, err := ksMessage.BuildUnsignedDataAck([]byte{}, k.agentPubKey); err != nil {
 			return fmt.Errorf("failed to predict ack: %s", err)
 		} else {
 			ack = &newAck
@@ -335,7 +335,7 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 		payload, _ = json.Marshal(string(encoded))
 	}
 
-	if responseMessage, err := ksMessage.BuildUnsignedResponse(action, payload, k.bzcertHash); err != nil {
+	if responseMessage, err := ksMessage.BuildUnsignedData(action, payload, k.bzcertHash); err != nil {
 		return responseMessage, err
 	} else if err := responseMessage.Sign(k.clientSecretKey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
