@@ -390,7 +390,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				for oooRequest, ok := dataBuffer[expectedDataSeqNumber]; ok; oooRequest, ok = dataBuffer[expectedDataSeqNumber] {
 					// Keep pulling older messages
 					processDataMessage(oooRequest.streamMessageContent.Content, oooRequest.streamMessage.More)
-					oooRequest, ok = dataBuffer[expectedDataSeqNumber]
+					expectedDataSeqNumber++
 				}
 
 			} else if requestMapStruct.streamMessage.Type == smsg.Error {
@@ -406,6 +406,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				for ok {
 					// Keep pulling older messages
 					processErrorMessage([]byte(outOfOrderErrorRequest.streamMessageContent.Content))
+					expectedErrorSeqNumber++
 					outOfOrderErrorRequest, ok = errorBuffer[expectedErrorSeqNumber]
 				}
 
