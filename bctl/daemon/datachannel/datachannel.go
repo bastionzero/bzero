@@ -102,9 +102,9 @@ func New(
 			return nil, nil, err
 		}
 	} else if _, err := keysplitter.BuildSyn(action, synPayload, true); err != nil {
-		logger.Infof("Sending SYN on existing datachannel %s with actions %s.", dc.id, action)
-	} else {
 		return nil, nil, fmt.Errorf("failed to build and send syn for attachment flow")
+	} else {
+		logger.Infof("Sending SYN on existing datachannel %s with actions %s.", dc.id, action)
 	}
 
 	dc.tmb.Go(func() error {
