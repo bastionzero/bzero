@@ -98,7 +98,7 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 		outputChan := make(chan smsg.StreamMessage, 5)
 		doneChan := make(chan struct{})
 		mockStream := tests.MockStream{MyStreamData: testData}
-		mockStream.On("Read").Return(len(testData), nil).Times(7)
+		mockStream.On("Read").Return(len(testData), nil)
 		mockStream.On("Write", []byte(testData)).Return(len(testData), nil)
 		mockStream.On("Close").Return(nil)
 

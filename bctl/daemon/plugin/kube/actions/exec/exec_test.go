@@ -56,8 +56,7 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 	mockResizeStream := tests.MockStream{}
 	mockStreamConnection := new(tests.MockStreamConnection)
 
-	var closeChan <-chan bool
-
+	closeChan := make(chan bool)
 	mockStreamConnection.On("CloseChan").Return(closeChan)
 	mockStreamConnection.On("Close").Return(nil)
 
