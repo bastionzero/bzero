@@ -153,9 +153,7 @@ func (k *KubeServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (k *KubeServer) newDataChannel(action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin, writer http.ResponseWriter) error {
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
-	dcId := uuid.New().String()
+func (k *KubeServer) newDataChannel(dcId string, action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin, writer http.ResponseWriter) error {
 	attach := false
 	subLogger := k.logger.GetDatachannelLogger(dcId)
 
@@ -239,10 +237,14 @@ func (k *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 	action := getAction(r)
 
 	// start up our plugin
+	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+	dcId := uuid.New().String()
+
 	pluginLogger := logger.GetPluginLogger(bzplugin.Kube)
+	pluginLogger = pluginLogger.GetDatachannelLogger(dcId)
 	plugin := kube.New(pluginLogger, k.targetUser, k.targetGroups)
 
-	if err := k.newDataChannel(string(action), k.websocket, plugin, w); err != nil {
+	if err := k.newDataChannel(dcId, string(action), k.websocket, plugin, w); err != nil {
 		k.logger.Error(err)
 	}
 

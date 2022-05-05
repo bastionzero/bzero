@@ -186,9 +186,9 @@ func (p *PortForwardRequest) forwardStream(streamType smsg.StreamType, stream ht
 }
 
 func (p *PortForwardRequest) wrapStreamMessageContent(content []byte) (string, error) {
-	streamMessageToSend := portforward.PortForwardStreamMessageContent{
-		RequestId: p.portForwardRequestId,
-		Content:   content,
+	streamMessageToSend := portforward.KubePortForwardStreamMessageContent{
+		PortForwardRequestId: p.portForwardRequestId,
+		Content:              content,
 	}
 	streamMessageToSendBytes, err := json.Marshal(streamMessageToSend)
 	if err != nil {

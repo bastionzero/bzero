@@ -35,7 +35,7 @@ var getUpgradedConnection = func(w http.ResponseWriter, req *http.Request, strea
 }
 
 type RequestMapStruct struct {
-	streamMessageContent portforward.PortForwardStreamMessageContent
+	streamMessageContent portforward.KubePortForwardStreamMessageContent
 	streamMessage        smsg.StreamMessage
 }
 type PortForwardAction struct {
@@ -95,6 +95,7 @@ func New(
 
 func (p *PortForwardAction) Kill() {
 	close(p.cancelChan)
+	<-p.doneChan
 }
 
 func (p *PortForwardAction) ReceiveKeysplitting(actionPayload []byte) {}
@@ -109,22 +110,22 @@ func (p *PortForwardAction) ReceiveStream(stream smsg.StreamMessage) {
 	}
 
 	// Unmarshal our content
-	var streamContent portforward.PortForwardStreamMessageContent
+	var kubePortforwardStreamMessageContent portforward.KubePortForwardStreamMessageContent
 	contentBytes, _ := base64.StdEncoding.DecodeString(stream.Content)
-	err := json.Unmarshal(contentBytes, &streamContent)
+	err := json.Unmarshal(contentBytes, &kubePortforwardStreamMessageContent)
 	if err != nil {
-		p.logger.Errorf("error unmarshalling stream output for portforward action: %s", err)
+		p.logger.Error(fmt.Errorf("error unmarshalling stream output for portforward action: %s", err))
 		return
 	}
 
 	// First get the stream
-	streamChan, ok := p.requestMap[streamContent.RequestId]
+	streamChan, ok := p.requestMap[kubePortforwardStreamMessageContent.PortForwardRequestId]
 	if !ok {
-		p.logger.Errorf("unable to find stream chan for request: %s", streamContent.RequestId)
+		p.logger.Error(fmt.Errorf("unable to find stream chan for request: %s", kubePortforwardStreamMessageContent.PortForwardRequestId))
 		return
 	}
 	streamChan <- RequestMapStruct{
-		streamMessageContent: streamContent,
+		streamMessageContent: kubePortforwardStreamMessageContent,
 		streamMessage:        stream,
 	}
 }
@@ -144,7 +145,7 @@ func (p *PortForwardAction) Start(writer http.ResponseWriter, request *http.Requ
 	dataHeaders[kubeutils.StreamType] = kubeutils.StreamTypeData
 
 	// Let Bastion know we want this stream
-	payload := portforward.PortForwardStartActionPayload{
+	payload := portforward.KubePortForwardStartActionPayload{
 		RequestId:            p.requestId,
 		StreamMessageVersion: smsg.CurrentSchema,
 		LogId:                p.logId,
@@ -246,7 +247,7 @@ func (p *PortForwardAction) portForward(portforwardSession *httpStreamPair) {
 
 func (p *PortForwardAction) sendCloseRequestMessage(portforwardingRequestId string) {
 	// Now send this data to Bastion
-	payload := portforward.PortForwardStopRequestActionPayload{
+	payload := portforward.KubePortForwardStopRequestActionPayload{
 		RequestId:            p.requestId,
 		LogId:                p.logId,
 		PortForwardRequestId: portforwardingRequestId,
@@ -256,7 +257,7 @@ func (p *PortForwardAction) sendCloseRequestMessage(portforwardingRequestId stri
 
 func (p *PortForwardAction) sendCloseMessage() {
 	// Now send this data to Bastion
-	payload := portforward.PortForwardStopActionPayload{
+	payload := portforward.KubePortForwardStopActionPayload{
 		RequestId: p.requestId,
 		LogId:     p.logId,
 	}
@@ -287,22 +288,18 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				default:
 					if n, err := portforwardSession.errorStream.Read(buf); !p.tmb.Alive() {
 						return nil
-					} else if err != nil && err != io.EOF {
-						p.logger.Errorf("error reading from our port forward session's error stream: %s", err)
+					} else if err == io.EOF {
+						// Do not close the stream if we close the errorstream
 						return nil
 					} else {
 						// Now send this data to Bastion
-						payload := portforward.PortForwardActionPayload{
+						payload := portforward.KubePortForwardActionPayload{
 							RequestId:            p.requestId,
 							LogId:                p.logId,
 							Data:                 buf[:n],
 							PortForwardRequestId: portforwardSession.requestID,
 						}
 						p.outbox(portforward.ErrorPortForward, payload)
-
-						if err == io.EOF {
-							return nil
-						}
 					}
 				}
 			}
@@ -319,12 +316,14 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 			default:
 				if n, err := portforwardSession.dataStream.Read(buf); !tmb.Alive() {
 					return nil
-				} else if err != nil && err != io.EOF {
-					p.logger.Errorf("error reading from our port forward session's data stream: %s", err)
+				} else if err != nil {
+					if err != io.EOF {
+						p.logger.Error(fmt.Errorf("received error on datastream: %s", err))
+					}
 					return nil
 				} else {
 					// Now send this data to Bastion
-					payload := portforward.PortForwardActionPayload{
+					payload := portforward.KubePortForwardActionPayload{
 						RequestId:            p.requestId,
 						LogId:                p.logId,
 						Data:                 buf[:n],
@@ -332,10 +331,6 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 						PodPort:              remotePort,
 					}
 					p.outbox(portforward.DataInPortForward, payload)
-
-					if err == io.EOF {
-						return nil
-					}
 				}
 			}
 		}
@@ -396,6 +391,7 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				for oooRequest, ok := dataBuffer[expectedDataSeqNumber]; ok; oooRequest, ok = dataBuffer[expectedDataSeqNumber] {
 					// Keep pulling older messages
 					processDataMessage(oooRequest.streamMessageContent.Content, oooRequest.streamMessage.More)
+					oooRequest, ok = dataBuffer[expectedDataSeqNumber]
 				}
 
 			} else if requestMapStruct.streamMessage.Type == smsg.Error {
