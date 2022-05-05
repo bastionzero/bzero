@@ -220,7 +220,8 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.HealthCheck:
-		return fmt.Errorf("as of version 4.2.0 this agent no longer accepts healthcheck messages; ignoring")
+		c.logger.Debugf("as of version 4.2.0 this agent no longer accepts healthcheck messages; ignoring")
+		return nil
 	case am.OpenWebsocket:
 		var owRequest OpenWebsocketMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &owRequest); err != nil {
