@@ -19,12 +19,12 @@ type DataPayload struct {
 	ActionPayload []byte `json:"actionPayload"`
 }
 
-func (d DataPayload) BuildResponsePayload(actionPayload []byte, pubKey string) (DataAckPayload, error) {
+func (d DataPayload) BuildResponsePayload(actionPayload []byte, pubKey string, schemaVersion string) (DataAckPayload, error) {
 	hashBytes, _ := util.HashPayload(d)
 	hash := base64.StdEncoding.EncodeToString(hashBytes)
 
 	return DataAckPayload{
-		SchemaVersion:         SchemaVersion,
+		SchemaVersion:         schemaVersion,
 		Type:                  string(DataAck),
 		Action:                d.Action,
 		TargetPublicKey:       pubKey,

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -32,6 +33,8 @@ type Keysplitting struct {
 
 	// define constraints based on schema version
 	shouldCheckTargetId *semver.Constraints
+
+	daemonSchemaVersion *semver.Version
 }
 
 type IKeysplittingConfig interface {
@@ -79,6 +82,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		v, err := semver.NewVersion(synPayload.SchemaVersion)
 		if err != nil {
 			return fmt.Errorf("failed to parse schema version (%v) as semver: %w", synPayload.SchemaVersion, err)
+		} else {
+			k.daemonSchemaVersion = v
 		}
 
 		// Daemons with schema version <= 1.0 do not set targetId, so we cannot
@@ -131,6 +136,12 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action string, actionPayload []byte) (ksmsg.KeysplittingMessage, error) {
 	var responseMessage ksmsg.KeysplittingMessage
 	var err error
+
+	schemaVersion, err := k.getSchemaVersionToUse()
+	if err != nil {
+		return responseMessage, err
+	}
+
 	switch ksMessage.Type {
 	case ksmsg.Syn:
 		// If this is the beginning of the hash chain, then we create a nonce with a random value,
@@ -143,10 +154,11 @@ func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action str
 				nonce = hpointer
 			}
 		}
-		responseMessage, err = ksMessage.BuildUnsignedSynAck(actionPayload, k.publickey, nonce)
+
+		responseMessage, err = ksMessage.BuildUnsignedSynAck(actionPayload, k.publickey, nonce, schemaVersion.String())
 
 	case ksmsg.Data:
-		responseMessage, err = ksMessage.BuildUnsignedDataAck(actionPayload, k.publickey)
+		responseMessage, err = ksMessage.BuildUnsignedDataAck(actionPayload, k.publickey, schemaVersion.String())
 	default:
 
 	}
@@ -160,5 +172,18 @@ func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action str
 	} else {
 		k.expectedHPointer = hash
 		return responseMessage, nil
+	}
+}
+
+func (k *Keysplitting) getSchemaVersionToUse() (*semver.Version, error) {
+	agentVersion, err := semver.NewVersion(message.SchemaVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	if k.daemonSchemaVersion.LessThan(agentVersion) {
+		return k.daemonSchemaVersion, nil
+	} else {
+		return agentVersion, nil
 	}
 }
