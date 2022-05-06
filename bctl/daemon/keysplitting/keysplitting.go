@@ -105,6 +105,10 @@ func New(
 	return keysplitter, nil
 }
 
+func (k *Keysplitting) Recovering() bool {
+	return k.recovering
+}
+
 func (k *Keysplitting) Release() {
 	k.pipelineOpen.Broadcast()
 }
@@ -200,8 +204,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				// it is an hpointer which refers to the agent's last recieved and validated message
 				// aka it is the current state of the mrzap hash chain according to the agent and this
 				// recovery mechanism allows us to sync our mrzap state to that
-				k.resend(msg.Nonce)
 				k.recovering = false
+				k.resend(msg.Nonce)
 
 				if v, err := semver.NewVersion(msg.SchemaVersion); err != nil {
 					return fmt.Errorf("unable to parse version")

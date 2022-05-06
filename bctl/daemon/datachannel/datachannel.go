@@ -37,6 +37,7 @@ type IKeysplitting interface {
 	Inbox(action string, actionPayload []byte) error
 	Outbox() <-chan *ksmsg.KeysplittingMessage
 	Release()
+	Recovering() bool
 }
 
 type IPlugin interface {
@@ -58,9 +59,6 @@ type DataChannel struct {
 
 	// channels for incoming messages
 	inputChan chan *am.AgentMessage
-
-	// if we receive an error than we ignore all messages in the mrzap queue until we hit a syn
-	ignoreMrZAP bool
 }
 
 func New(
@@ -82,7 +80,6 @@ func New(
 		keysplitter: keysplitter,
 		plugin:      plugin,
 		inputChan:   make(chan *am.AgentMessage, 50),
-		ignoreMrZAP: false,
 	}
 
 	// register with websocket so datachannel can send and receive messages
@@ -188,10 +185,7 @@ func (d *DataChannel) sendKeysplitting() error {
 			d.keysplitter.Release()
 			return nil
 		case ksMessage := <-d.keysplitter.Outbox():
-			if ksMessage.Type == ksmsg.Syn {
-				d.ignoreMrZAP = false
-			}
-			if !d.ignoreMrZAP {
+			if ksMessage.Type == ksmsg.Syn || !d.keysplitter.Recovering() {
 				d.send(am.Keysplitting, ksMessage)
 			}
 		}
@@ -303,8 +297,6 @@ func (d *DataChannel) handleError(agentMessage *am.AgentMessage) error {
 	}
 
 	if rrr.ErrorType(errMessage.Type) == rrr.KeysplittingValidationError {
-		// stop processing keysplitting messages until we start recovery with a syn
-		d.ignoreMrZAP = true
 		return d.keysplitter.Recover(errMessage)
 	} else {
 		return fmt.Errorf("received fatal %s error from agent: %s", errMessage.Type, errMessage.Message)
