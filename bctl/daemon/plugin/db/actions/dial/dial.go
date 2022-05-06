@@ -127,12 +127,14 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
-							// Set a deadline for the write so we don't block forever
-							lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
-							if _, err := lconn.Write(contentBytes); err != nil {
-								d.logger.Errorf("error writing to local TCP connection: %s", err)
-								return nil
-							}
+							go func() {
+								// Set a deadline for the write so we don't block forever
+								lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
+								if _, err := lconn.Write(contentBytes); err != nil {
+									d.logger.Errorf("error writing to local TCP connection: %s", err)
+									d.tmb.Kill(fmt.Errorf("io timeout"))
+								}
+							}()
 						}
 					} else {
 						d.logger.Debugf("unhandled stream type: %s", streamMessage.Type)
