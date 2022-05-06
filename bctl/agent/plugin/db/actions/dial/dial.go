@@ -140,12 +140,6 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) ([
 			if n, err := d.remoteConnection.Read(buff); !d.tmb.Alive() {
 				return nil
 			} else if err != nil {
-				// if err != io.EOF {
-				// 	d.logger.Errorf("failed to read from tcp connection: %s", err)
-				// } else {
-				// 	d.logger.Errorf("connection closed")
-				// }
-
 				if err == io.EOF {
 					d.logger.Errorf("connection closed")
 
