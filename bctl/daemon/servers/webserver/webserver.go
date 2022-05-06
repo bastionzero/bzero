@@ -131,8 +131,12 @@ func (w *WebServer) capRequestSize(h http.HandlerFunc) http.HandlerFunc {
 }
 
 func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request) {
+	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+	dcId := uuid.New().String()
+
 	// create our new plugin and datachannel
-	subLogger := w.logger.GetPluginLogger(bzplugin.Web)
+	subLogger := w.logger.GetDatachannelLogger(dcId)
+	subLogger = subLogger.GetPluginLogger(bzplugin.Web)
 	plugin := web.New(subLogger, w.targetHost, w.targetPort)
 
 	action := bzweb.Dial
@@ -144,7 +148,7 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 		action = bzweb.Websocket
 	}
 
-	if err := w.newDataChannel(action, w.websocket, plugin); err != nil {
+	if err := w.newDataChannel(dcId, action, w.websocket, plugin); err != nil {
 		w.logger.Errorf("error starting datachannel: %s", err)
 	}
 	if err := plugin.StartAction(action, writer, request); err != nil {
@@ -164,9 +168,7 @@ func (h *WebServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (w *WebServer) newDataChannel(action bzweb.WebAction, websocket *bzwebsocket.Websocket, plugin *web.WebDaemonPlugin) error {
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
-	dcId := uuid.New().String()
+func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocket *bzwebsocket.Websocket, plugin *web.WebDaemonPlugin) error {
 	attach := false
 	subLogger := w.logger.GetDatachannelLogger(dcId)
 

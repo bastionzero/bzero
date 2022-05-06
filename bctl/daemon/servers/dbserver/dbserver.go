@@ -111,11 +111,14 @@ func StartDbServer(logger *logger.Logger,
 
 		// create our new datachannel in its own go routine so that we can accept other tcp connections
 		go func() {
-			pluginLogger := logger.GetPluginLogger(bzplugin.Db)
+			// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+			dcId := uuid.New().String()
+			subLogger := logger.GetDatachannelLogger(dcId)
+			pluginLogger := subLogger.GetPluginLogger(bzplugin.Db)
 			plugin := db.New(pluginLogger)
 			if err := plugin.StartAction(bzdb.Dial, conn); err != nil {
 				logger.Errorf("error starting action: %s", err)
-			} else if err := listener.newDataChannel(string(bzdb.Dial), listener.websocket, plugin); err != nil {
+			} else if err := listener.newDataChannel(dcId, string(bzdb.Dial), listener.websocket, plugin); err != nil {
 				logger.Errorf("error starting datachannel: %s", err)
 			}
 		}()
@@ -134,9 +137,7 @@ func (d *DbServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (d *DbServer) newDataChannel(action string, websocket *websocket.Websocket, plugin *db.DbDaemonPlugin) error {
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
-	dcId := uuid.New().String()
+func (d *DbServer) newDataChannel(dcId string, action string, websocket *websocket.Websocket, plugin *db.DbDaemonPlugin) error {
 	attach := false
 	subLogger := d.logger.GetDatachannelLogger(dcId)
 

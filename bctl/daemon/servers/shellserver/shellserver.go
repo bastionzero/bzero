@@ -108,15 +108,15 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 		ss.logger.Infof("Attaching to an existing datachannel id: %s", ss.dataChannelId)
 	}
 
+	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+	subLogger := ss.logger.GetDatachannelLogger(ss.dataChannelId)
+
 	// create our plugin and start the action
-	pluginLogger := ss.logger.GetPluginLogger(bzplugin.Db)
+	pluginLogger := subLogger.GetPluginLogger(bzplugin.Db)
 	plugin := shell.New(pluginLogger)
 	if err := plugin.StartAction(attach); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)
 	}
-
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
-	subLogger := ss.logger.GetDatachannelLogger(ss.dataChannelId)
 
 	// Build the action payload to send in the syn message when opening the datachannel
 	actionParams := bzshell.ShellActionParams{
