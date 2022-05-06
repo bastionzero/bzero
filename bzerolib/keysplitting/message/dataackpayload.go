@@ -18,12 +18,12 @@ type DataAckPayload struct {
 	ActionResponsePayload []byte `json:"actionResponsePayload"`
 }
 
-func (d DataAckPayload) BuildResponsePayload(action string, actionPayload []byte, bzCertHash string) (DataPayload, error) {
+func (d DataAckPayload) BuildResponsePayload(action string, actionPayload []byte, bzCertHash string, schemaVersion string) (DataPayload, error) {
 	hashBytes, _ := util.HashPayload(d)
 	hash := base64.StdEncoding.EncodeToString(hashBytes)
 
 	return DataPayload{
-		SchemaVersion: SchemaVersion,
+		SchemaVersion: schemaVersion,
 		Type:          string(Data),
 		Action:        action,
 		TargetId:      d.TargetPublicKey, //TODO: Make this come from storage

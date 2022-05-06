@@ -80,7 +80,7 @@ func (k *KeysplittingMessage) BuildUnsignedData(action string, actionPayload []b
 			}, nil
 		}
 	case DataAckPayload:
-		if dataPayload, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash); err != nil {
+		if dataPayload, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash, schemaVersion); err != nil {
 			return KeysplittingMessage{}, err
 		} else {
 			return KeysplittingMessage{
