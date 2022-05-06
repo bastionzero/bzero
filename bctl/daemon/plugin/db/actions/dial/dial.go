@@ -140,6 +140,12 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 								}
 							}()
 						}
+					} else if streamMessage.Type == smsg.Error {
+						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
+							d.logger.Errorf("could not decode db stream content: %s", err)
+						} else {
+							d.logger.Infof("agent hit an error trying to read from remote connection: %s", string(contentBytes))
+						}
 					} else {
 						d.logger.Debugf("unhandled stream type: %s", streamMessage.Type)
 					}

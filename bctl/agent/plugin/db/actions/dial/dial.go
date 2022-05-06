@@ -140,19 +140,26 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) ([
 			if n, err := d.remoteConnection.Read(buff); !d.tmb.Alive() {
 				return nil
 			} else if err != nil {
-				if err != io.EOF {
-					d.logger.Errorf("failed to read from tcp connection: %s", err)
-				} else {
-					d.logger.Errorf("connection closed")
-				}
+				// if err != io.EOF {
+				// 	d.logger.Errorf("failed to read from tcp connection: %s", err)
+				// } else {
+				// 	d.logger.Errorf("connection closed")
+				// }
 
-				// Let our daemon know that we have got the error and we need to close the connection
-				switch d.streamMessageVersion {
-				// prior to 202204
-				case "":
-					d.sendStreamMessage(sequenceNumber, smsg.DbStreamEnd, false, buff[:n])
-				default:
-					d.sendStreamMessage(sequenceNumber, smsg.Stream, false, buff[:n])
+				if err == io.EOF {
+					d.logger.Errorf("connection closed")
+
+					// Let our daemon know that we have got the error and we need to close the connection
+					switch d.streamMessageVersion {
+					// prior to 202204
+					case "":
+						d.sendStreamMessage(sequenceNumber, smsg.DbStreamEnd, false, buff[:n])
+					default:
+						d.sendStreamMessage(sequenceNumber, smsg.Stream, false, buff[:n])
+					}
+				} else {
+					d.logger.Errorf("failed to read from tcp connection: %s", err)
+					d.sendStreamMessage(sequenceNumber, smsg.Error, false, []byte(err.Error()))
 				}
 
 				return err
