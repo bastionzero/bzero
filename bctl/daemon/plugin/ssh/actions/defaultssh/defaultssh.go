@@ -93,6 +93,7 @@ func (d *DefaultSsh) handleStreamMessages() {
 				if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 					d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 				} else {
+					d.logger.Infof("Bad cat just wrote %s", contentBytes)
 					if _, err = os.Stdout.Write(contentBytes); err != nil {
 						d.logger.Errorf("Error writing to Stdout: %s", err)
 					}
