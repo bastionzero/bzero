@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"gopkg.in/tomb.v2"
 
@@ -16,7 +17,8 @@ import (
 )
 
 const (
-	chunkSize = 64 * 1024
+	chunkSize     = 64 * 1024
+	writeDeadline = 5 * time.Second
 )
 
 type Dial struct {
@@ -96,11 +98,21 @@ func (d *Dial) Receive(action string, actionPayload []byte) ([]byte, error) {
 
 			// Send this data to our remote connection
 			d.logger.Info("Received data from daemon, forwarding to remote tcp connection")
-			_, err = d.remoteConnection.Write(dataToWrite)
+
+			go func() {
+				// Set a deadline for the write so we don't block forever
+				d.remoteConnection.SetWriteDeadline(time.Now().Add(writeDeadline))
+				if _, err := d.remoteConnection.Write(dataToWrite); !d.tmb.Alive() {
+					return
+				} else if err != nil {
+					d.logger.Errorf("error writing to local TCP connection: %s", err)
+					d.Kill()
+				}
+			}()
 		}
 
 	case dial.DialStop:
-		d.remoteConnection.Close()
+		d.Kill()
 		return actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %v", action)
