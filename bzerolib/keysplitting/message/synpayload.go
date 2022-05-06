@@ -24,12 +24,12 @@ type SynPayload struct {
 	BZCert   bzcrt.BZCert `json:"bZCert"`
 }
 
-func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string, nonce string) (SynAckPayload, error) {
+func (s SynPayload) BuildResponsePayload(actionPayload []byte, pubKey string, nonce string, schemaVersion string) (SynAckPayload, error) {
 	hashBytes, _ := util.HashPayload(s)
 	hash := base64.StdEncoding.EncodeToString(hashBytes)
 
 	return SynAckPayload{
-		SchemaVersion:         SchemaVersion,
+		SchemaVersion:         schemaVersion,
 		Type:                  string(SynAck),
 		Action:                s.Action,
 		ActionResponsePayload: actionPayload,

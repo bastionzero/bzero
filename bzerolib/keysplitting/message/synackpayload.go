@@ -21,12 +21,12 @@ type SynAckPayload struct {
 	HPointer        string `json:"hPointer"`
 }
 
-func (s SynAckPayload) BuildResponsePayload(action string, actionPayload []byte, bzCertHash string) (DataPayload, error) {
+func (s SynAckPayload) BuildResponsePayload(action string, actionPayload []byte, bzCertHash string, schemaVersion string) (DataPayload, error) {
 	hashBytes, _ := util.HashPayload(s)
 	hash := base64.StdEncoding.EncodeToString(hashBytes)
 
 	return DataPayload{
-		SchemaVersion: SchemaVersion,
+		SchemaVersion: schemaVersion,
 		Type:          string(Data),
 		Action:        action,
 		TargetId:      s.TargetPublicKey, // TODO: Make this come from storage

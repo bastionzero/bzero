@@ -70,8 +70,8 @@ type Keysplitting struct {
 	// bool variable for letting the datachannel know when to start processing incoming messages again
 	recovering bool
 
-	// we need to know the version the agent is using so we can do icky things
-	// TODO: CWC-1820: remove once all agents have updated
+	// We set the schemaVersion to use based on the schemaVersion sent by the agent in the synack
+	schemaVersion      *semver.Version
 	prePipeliningAgent bool
 	synAction          string
 
@@ -203,6 +203,12 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				k.resend(msg.Nonce)
 				k.recovering = false
 
+				if v, err := semver.NewVersion(msg.SchemaVersion); err != nil {
+					return fmt.Errorf("unable to parse version")
+				} else {
+					k.schemaVersion = v
+				}
+
 				// check to see if we're talking with an agent that's using pre-2.0 keysplitting because
 				// we'll need to dirty the payload by adding extra quotes around it
 				// TODO: CWC-1820: remove once all daemon's are updated
@@ -296,7 +302,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 
 		// otherwise, we're going to need to predict the ack we're building off of
 		ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
-		if newAck, err := ksMessage.BuildUnsignedDataAck([]byte{}, k.agentPubKey); err != nil {
+		if newAck, err := ksMessage.BuildUnsignedDataAck([]byte{}, k.agentPubKey, k.schemaVersion.String()); err != nil {
 			return fmt.Errorf("failed to predict ack: %s", err)
 		} else {
 			ack = &newAck
@@ -335,7 +341,8 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 		payload, _ = json.Marshal(string(encoded))
 	}
 
-	if responseMessage, err := ksMessage.BuildUnsignedData(action, payload, k.bzcertHash); err != nil {
+	// Use the agreed upon schema version from the synack when building data messages
+	if responseMessage, err := ksMessage.BuildUnsignedData(action, payload, k.bzcertHash, k.schemaVersion.String()); err != nil {
 		return responseMessage, err
 	} else if err := responseMessage.Sign(k.clientSecretKey); err != nil {
 		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
