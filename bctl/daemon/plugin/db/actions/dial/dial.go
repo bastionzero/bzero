@@ -117,7 +117,7 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 				// process the incoming stream messages *in order*
 				for streamMessage, ok := streamMessages[expectedSequenceNumber]; ok; streamMessage, ok = streamMessages[expectedSequenceNumber] {
 					// if we got an old-fashioned end message or a newfangled one
-					if streamMessage.Type == smsg.DbStreamEnd || (streamMessage.Type == smsg.Stream && !streamMessage.More) {
+					if streamMessage.Type == smsg.DbStreamEnd {
 						// since there's no more stream coming, close the local connection
 						d.logger.Errorf("remote tcp connection has been closed, closing local tcp connection")
 						return nil
@@ -139,6 +139,11 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 									d.tmb.Kill(fmt.Errorf("io timeout"))
 								}
 							}()
+						}
+
+						if !streamMessage.More {
+							d.logger.Errorf("remote tcp connection has been closed, closing local tcp connection")
+							return nil
 						}
 					} else if streamMessage.Type == smsg.Error {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
