@@ -129,9 +129,12 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 						} else {
 							go func() {
 								time.Sleep(time.Millisecond)
+
 								// Set a deadline for the write so we don't block forever
 								lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
-								if _, err := lconn.Write(contentBytes); err != nil {
+								if _, err := lconn.Write(contentBytes); !d.tmb.Alive() {
+									return
+								} else if err != nil {
 									d.logger.Errorf("error writing to local TCP connection: %s", err)
 									d.tmb.Kill(fmt.Errorf("io timeout"))
 								}
