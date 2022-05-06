@@ -101,7 +101,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 		mockDataStream.On("Headers").Return(dataHeaders)
 		mockDataStream.On("Close").Return(nil)
 		mockDataStream.On("Read").Return(len(streamData), nil)
-		mockDataStream.On("Write", []byte(testData)).Return(len(testData), nil).Times(3)
+		mockDataStream.On("Write", []byte(testData)).Return(len(testData), nil)
 
 		mockErrorStream := tests.MockStream{MyStreamData: streamError}
 		mockErrorStream.On("Headers").Return(errorHeaders)
