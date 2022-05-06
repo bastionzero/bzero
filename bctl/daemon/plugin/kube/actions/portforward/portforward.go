@@ -402,12 +402,10 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 				}
 
 				// Always attempt to process out of order messages
-				outOfOrderErrorRequest, ok := errorBuffer[expectedErrorSeqNumber]
-				for ok {
+				for oooRequest, ok := dataBuffer[expectedErrorSeqNumber]; ok; oooRequest, ok = dataBuffer[expectedErrorSeqNumber] {
 					// Keep pulling older messages
-					processErrorMessage([]byte(outOfOrderErrorRequest.streamMessageContent.Content))
+					processErrorMessage([]byte(oooRequest.streamMessageContent.Content))
 					expectedErrorSeqNumber++
-					outOfOrderErrorRequest, ok = errorBuffer[expectedErrorSeqNumber]
 				}
 
 			} else {

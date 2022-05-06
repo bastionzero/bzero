@@ -135,7 +135,7 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 		return fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
 	} else {
 		k.errorRecoveryAttempt++
-		k.logger.Infof("Attempting to recover from error, attempt #%d", k.errorRecoveryAttempt)
+		k.logger.Infof("Attempt #%d to recover from error: %s", k.errorRecoveryAttempt, errMessage.Message)
 	}
 
 	k.recovering = true
