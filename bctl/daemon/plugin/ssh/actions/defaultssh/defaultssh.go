@@ -93,7 +93,7 @@ func (d *DefaultSsh) handleStreamMessages() {
 				if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 					d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 				} else {
-					d.logger.Infof("Bad cat just wrote %s", contentBytes)
+					d.logger.Infof("Wrote to my SSH: %s", contentBytes)
 					if _, err = os.Stdout.Write(contentBytes); err != nil {
 						d.logger.Errorf("Error writing to Stdout: %s", err)
 					}
@@ -116,9 +116,7 @@ func (d *DefaultSsh) handleStreamMessages() {
 func (d *DefaultSsh) readStdIn() {
 
 	b := make([]byte, InputBufferSize)
-	b = b[:0]
 
-	d.logger.Infof("Oh I'm running all right $$$$$$")
 	for {
 		select {
 		case <-d.tmb.Dying():
@@ -130,10 +128,8 @@ func (d *DefaultSsh) readStdIn() {
 				return
 			}
 			if n > 0 {
-				d.logger.Infof("$$$ I'm a good dog and I did the reading: %s $$$", b)
-
+				d.logger.Infof("Read %d bytes from local SSH: %s", n, b[:n])
 				d.stdInChan <- b[:n]
-				b = b[:0]
 			}
 		}
 	}
@@ -156,6 +152,7 @@ func (d *DefaultSsh) sendStdIn() {
 				sshInputDataMessage := bzssh.SshInputMessage{
 					Data: inputBuf,
 				}
+				d.logger.Infof("Look what I'm sending... %s", inputBuf)
 				d.sendOutputMessage(bzssh.SshInput, sshInputDataMessage)
 
 				// clear the input buffer by slicing it to size 0 which will still

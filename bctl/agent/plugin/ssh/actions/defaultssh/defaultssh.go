@@ -149,7 +149,7 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) (strin
 		for {
 			// this line blocks until it reads output or error
 			n, err := d.remoteConnection.Read(buff)
-			d.logger.Debugf("Look what I read... %s -- with error %s", buff, err)
+			d.logger.Debugf("Read from my SSH with error %s", err)
 
 			if d.closed {
 				return
@@ -237,6 +237,41 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 
 	return nil
 }
+
+/*
+func (d *DefaultSsh) clearAuthorizedKeyEntry() error {
+	// load file contents
+	// TODO: keep path to this file as a class variable
+	authorizedKeyFile := "/home/ec2-user/.ssh/authorized_keys"
+	file, err := os.OpenFile(authorizedKeyFile, os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var keys []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		keyToKeep := scanner.Text()
+		if keyToKeep != d.authorizedKeyEntry {
+			keys = append(keys, keyToKeep)
+		} else {
+			d.logger.Infof("Found the entry, %s", keyToKeep)
+		}
+		if scanner.Err() != nil {
+			return scanner.Err()
+		}
+	}
+
+	os.Truncate(authorizedKeyFile, 0)
+
+	w := bufio.NewWriter(file)
+	for _, key := range keys {
+		fmt.Fprintln(w, key)
+	}
+	return w.Flush()
+}
+*/
 
 // Appends an authorized key entry to the authorized_keys file within username's .ssh directory
 func addToAuthorizedKeyFile(username string, authorizedKey string) (bool, error) {

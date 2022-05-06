@@ -113,6 +113,9 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 		IdentityFile: s.identityFile,
 		PublicKey:    s.publicKey,
 	}
+
+	s.logger.Infof("trent hi: %s", s.publicKey)
+
 	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
 	action = "ssh/" + action
