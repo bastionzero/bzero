@@ -67,6 +67,7 @@ func (m MockStream) Close() error {
 	return args.Error(0)
 }
 func (m MockStream) Read(p []byte) (n int, err error) {
+	time.Sleep(time.Second)
 	// we actually don't want to track this exactly because it leads to pathological behavior on multiple reads
 	args := m.Called()
 

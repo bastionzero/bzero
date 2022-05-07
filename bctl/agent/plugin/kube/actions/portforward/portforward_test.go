@@ -95,7 +95,7 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 	testData := "test data"
 
 	Context("Happy path", func() {
-		outputChan := make(chan smsg.StreamMessage, 5)
+		outputChan := make(chan smsg.StreamMessage, 30)
 		doneChan := make(chan struct{})
 		mockStream := tests.MockStream{MyStreamData: testData}
 		mockStream.On("Read").Return(len(testData), nil)
@@ -150,6 +150,7 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 			By("closing when the daemon sends a stop message")
 			stopPayload := buildStopActionPayload(requestId)
 			responsePayload, err = p.Receive(string(portforward.StopPortForward), stopPayload)
+			close(closeChan)
 			Expect(err).To(BeNil())
 			Expect(responsePayload).To(Equal([]byte{}))
 

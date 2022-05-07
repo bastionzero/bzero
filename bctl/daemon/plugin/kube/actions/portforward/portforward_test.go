@@ -79,7 +79,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 	Context("Happy path", func() {
 
 		doneChan := make(chan struct{})
-		outputChan := make(chan plugin.ActionWrapper, 1)
+		outputChan := make(chan plugin.ActionWrapper, 10)
 
 		headers := http.Header{}
 		headers.Set(kubeutils.PortForwardRequestIDHeader, requestId)
@@ -115,7 +115,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 		p := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
-		It("handles the portforwarding session correclty", func() {
+		It("handles the portforwarding session correctly", func() {
 			go func() {
 				startMessage := <-outputChan
 
