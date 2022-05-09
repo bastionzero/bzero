@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	chunkSize     = 64 * 1024
-	writeDeadline = 5 * time.Second
+	chunkSize      = 64 * 1024
+	writeDeadline  = 5 * time.Second
+	dialTCPTimeout = 30 * time.Second
 )
 
 type Dial struct {
@@ -34,7 +35,7 @@ type Dial struct {
 
 	requestId        string
 	remoteAddress    *net.TCPAddr
-	remoteConnection *net.TCPConn
+	remoteConnection net.Conn
 }
 
 func New(logger *logger.Logger,
@@ -130,7 +131,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) ([
 	d.logger.Infof("Setting stream message version: %s", d.streamMessageVersion)
 
 	// For each start, call the dial the TCP address
-	if remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress); err != nil {
+	if remoteConnection, err := net.DialTimeout("tcp", d.remoteAddress.String(), dialTCPTimeout); err != nil {
 		d.logger.Errorf("Failed to dial remote address: %s", err)
 		return []byte{}, err
 	} else {
