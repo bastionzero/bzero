@@ -99,16 +99,14 @@ func (d *Dial) Receive(action string, actionPayload []byte) ([]byte, error) {
 			// Send this data to our remote connection
 			d.logger.Info("Received data from daemon, forwarding to remote tcp connection")
 
-			go func() {
-				// Set a deadline for the write so we don't block forever
-				d.remoteConnection.SetWriteDeadline(time.Now().Add(writeDeadline))
-				if _, err := d.remoteConnection.Write(dataToWrite); !d.tmb.Alive() {
-					return
-				} else if err != nil {
-					d.logger.Errorf("error writing to local TCP connection: %s", err)
-					d.Kill()
-				}
-			}()
+			// Set a deadline for the write so we don't block forever
+			d.remoteConnection.SetWriteDeadline(time.Now().Add(writeDeadline))
+			if _, err := d.remoteConnection.Write(dataToWrite); !d.tmb.Alive() {
+				return []byte{}, nil
+			} else if err != nil {
+				d.logger.Errorf("error writing to local TCP connection: %s", err)
+				d.Kill()
+			}
 		}
 
 	case dial.DialStop:
