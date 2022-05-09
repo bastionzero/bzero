@@ -35,7 +35,7 @@ type Dial struct {
 
 	requestId        string
 	remoteAddress    *net.TCPAddr
-	remoteConnection net.Conn
+	remoteConnection *net.Conn
 }
 
 func New(logger *logger.Logger,
@@ -64,7 +64,7 @@ func New(logger *logger.Logger,
 func (d *Dial) Kill() {
 	d.tmb.Kill(nil)
 	if d.remoteConnection != nil {
-		d.remoteConnection.Close()
+		(*d.remoteConnection).Close()
 	}
 	d.tmb.Wait()
 }
@@ -101,8 +101,8 @@ func (d *Dial) Receive(action string, actionPayload []byte) ([]byte, error) {
 			d.logger.Info("Received data from daemon, forwarding to remote tcp connection")
 
 			// Set a deadline for the write so we don't block forever
-			d.remoteConnection.SetWriteDeadline(time.Now().Add(writeDeadline))
-			if _, err := d.remoteConnection.Write(dataToWrite); !d.tmb.Alive() {
+			(*d.remoteConnection).SetWriteDeadline(time.Now().Add(writeDeadline))
+			if _, err := (*d.remoteConnection).Write(dataToWrite); !d.tmb.Alive() {
 				return []byte{}, nil
 			} else if err != nil {
 				d.logger.Errorf("error writing to local TCP connection: %s", err)
@@ -135,12 +135,12 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) ([
 		d.logger.Errorf("Failed to dial remote address: %s", err)
 		return []byte{}, err
 	} else {
-		d.remoteConnection = remoteConnection
+		d.remoteConnection = &remoteConnection
 	}
 
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
 	d.tmb.Go(func() error {
-		defer d.remoteConnection.Close()
+		defer (*d.remoteConnection).Close()
 		defer close(d.doneChan)
 
 		sequenceNumber := 0
@@ -148,7 +148,7 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) ([
 
 		for {
 			// this line blocks until it reads output or error
-			if n, err := d.remoteConnection.Read(buff); !d.tmb.Alive() {
+			if n, err := (*d.remoteConnection).Read(buff); !d.tmb.Alive() {
 				return nil
 			} else if err != nil {
 				if err == io.EOF {
