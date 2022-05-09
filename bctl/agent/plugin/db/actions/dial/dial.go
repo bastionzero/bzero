@@ -140,7 +140,6 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) ([
 
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
 	d.tmb.Go(func() error {
-		defer (*d.remoteConnection).Close()
 		defer close(d.doneChan)
 
 		sequenceNumber := 0
