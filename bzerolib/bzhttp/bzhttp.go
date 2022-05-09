@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -149,41 +148,24 @@ func (b *bzhttp) patch() (*http.Response, error) {
 		// Make our Client
 		var httpClient = getHttpClient()
 
-		// declare our variables
-		var response *http.Response
-		var err error
-
 		// Make our Request
 		req, _ := http.NewRequest("PATCH", b.endpoint, bytes.NewBuffer(b.body))
-
-		// Add the expected headers
 		req = addHeaders(req, b.headers, b.contentType)
-
-		// Set any query params
 		req = addQueryParams(req, b.params)
 
-		response, err = httpClient.Do(req)
-
-		if err != nil {
-			b.logger.Errorf("error making patch request: %v", err)
+		if response, err := httpClient.Do(req); err != nil {
+			b.logger.Errorf("error making PATCH request: %s", err)
 			return nil, err
-		}
-
-		if err := checkBadStatusCode(response); err != nil {
+		} else if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
 			return response, err
-		}
-
-		if err != nil || response.StatusCode != http.StatusOK {
-			b.logger.Infof("error making patch request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
-
-			bodyString := extractBody(response)
-			b.logger.Infof("error: %s", bodyString)
+		} else if response.StatusCode >= 200 && response.StatusCode < 300 {
+			ticker.Stop()
+			return response, nil
+		} else {
+			b.logger.Errorf("Received status code %d making PATCH request, will retry in %s", response.StatusCode, b.backoffParams.NextBackOff().Round(time.Second))
 			continue
 		}
-
-		ticker.Stop()
-		return response, err
 	}
 
 	return nil, errors.New("unable to make post request")
@@ -212,45 +194,28 @@ func (b *bzhttp) post() (*http.Response, error) {
 
 		if len(b.headers) == 0 && len(b.params) == 0 {
 			response, err = httpClient.Post(b.endpoint, b.contentType, bytes.NewBuffer(b.body))
-
-			if err != nil {
-				b.logger.Errorf("error making post request: %v", err)
-				return nil, err
-			}
 		} else {
 			// Make our Request
 			req, _ := http.NewRequest("POST", b.endpoint, bytes.NewBuffer(b.body))
-
-			// Add the expected headers
 			req = addHeaders(req, b.headers, b.contentType)
-
-			// Set any query params
 			req = addQueryParams(req, b.params)
 
 			response, err = httpClient.Do(req)
-
-			if err != nil {
-				b.logger.Errorf("error making post request: %v", err)
-				return nil, err
-			}
 		}
 
-		// If the status code is unauthorized, do not attempt to retry
-		if err := checkBadStatusCode(response); err != nil {
+		if err != nil {
+			b.logger.Errorf("error making POST request: %s", err)
+			return nil, err
+		} else if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
 			return response, err
-		}
-
-		if err != nil || response.StatusCode != http.StatusOK {
-			b.logger.Infof("error making post request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
-
-			bodyString := extractBody(response)
-			b.logger.Infof("error: %s", bodyString)
+		} else if response.StatusCode >= 200 && response.StatusCode < 300 {
+			ticker.Stop()
+			return response, nil
+		} else {
+			b.logger.Errorf("Received status code %d making POST request, will retry in %s", response.StatusCode, b.backoffParams.NextBackOff().Round(time.Second))
 			continue
 		}
-
-		ticker.Stop()
-		return response, err
 	}
 
 	return nil, errors.New("unable to make post request")
@@ -282,31 +247,25 @@ func (b *bzhttp) get() (*http.Response, error) {
 		} else {
 			// Make our Request
 			req, _ := http.NewRequest("GET", b.endpoint, bytes.NewBuffer(b.body))
-
-			// Add the expected headers
 			req = addHeaders(req, b.headers, b.contentType)
-
-			// Set any query params
 			req = addQueryParams(req, b.params)
 
 			response, err = httpClient.Do(req)
 		}
 
-		if err := checkBadStatusCode(response); err != nil {
+		if err != nil {
+			b.logger.Errorf("error making GET request: %s", err)
+			return nil, err
+		} else if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
 			return response, err
-		}
-
-		if err != nil || response.StatusCode != http.StatusOK {
-			b.logger.Infof("error making get request %v/%v, will retry in: %s.", err, response, b.backoffParams.NextBackOff())
-
-			bodyString := extractBody(response)
-			b.logger.Infof("error: %s", bodyString)
+		} else if response.StatusCode >= 200 && response.StatusCode < 300 {
+			ticker.Stop()
+			return response, nil
+		} else {
+			b.logger.Errorf("Received status code %d making GET request, will retry in %s", response.StatusCode, b.backoffParams.NextBackOff().Round(time.Second))
 			continue
 		}
-
-		ticker.Stop()
-		return response, err
 	}
 
 	return nil, errors.New("unable to make get request")
@@ -356,15 +315,6 @@ func getHttpClient() *http.Client {
 	return &http.Client{
 		Timeout: time.Second * 30,
 	}
-}
-
-// Helper function to extract the response body
-func extractBody(response *http.Response) string {
-	bodyBytes, err := io.ReadAll(response.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return string(bodyBytes)
 }
 
 func defaultBackoffParams() *backoff.ExponentialBackOff {

@@ -16,9 +16,9 @@ import (
 )
 
 type WebWebsocket struct {
-	logger *logger.Logger
-	tmb    *tomb.Tomb
-	closed bool
+	tmb      tomb.Tomb
+	logger   *logger.Logger
+	doneChan chan struct{}
 
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan     chan smsg.StreamMessage
@@ -28,31 +28,34 @@ type WebWebsocket struct {
 
 	remoteHost string
 	remotePort int
-
-	requestId string
+	requestId  string
 }
 
 func New(logger *logger.Logger,
+	streamChan chan smsg.StreamMessage,
+	doneChan chan struct{},
 	remoteHost string,
-	remotePort int,
-	pluginTmb *tomb.Tomb,
-	ch chan smsg.StreamMessage) (*WebWebsocket, error) {
+	remotePort int) (*WebWebsocket, error) {
 
 	return &WebWebsocket{
 		logger:           logger,
-		tmb:              pluginTmb,
-		closed:           false,
-		streamOutputChan: ch,
+		doneChan:         doneChan,
+		streamOutputChan: streamChan,
 		remoteHost:       remoteHost,
 		remotePort:       remotePort,
 	}, nil
 }
 
-func (w *WebWebsocket) Closed() bool {
-	return w.closed
+func (w *WebWebsocket) Done() <-chan struct{} {
+	return w.doneChan
 }
 
-func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (w *WebWebsocket) Kill() {
+	w.tmb.Killf("we've been told to stop")
+	w.tmb.Wait()
+}
+
+func (w *WebWebsocket) Receive(action string, actionPayload []byte) ([]byte, error) {
 	switch webwebsocket.WebWebsocketSubAction(action) {
 	case webwebsocket.Start:
 		// Deserialize the action payload, the only action passed is DataIn
@@ -60,7 +63,7 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &webWebsocketStartRequest); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
 			w.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		return w.startWebsocket(webWebsocketStartRequest, action)
@@ -70,7 +73,7 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &webWebsocketDataIn); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal dataIn message: %s", err)
 			w.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		return w.dataInWebsocket(webWebsocketDataIn, action)
@@ -81,7 +84,7 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 		if err := json.Unmarshal(actionPayload, &webWebsocketDaemonStop); err != nil {
 			rerr := fmt.Errorf("unable to unmarshal daemonStop message: %s", err)
 			w.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		if w.ws != nil {
@@ -90,31 +93,31 @@ func (w *WebWebsocket) Receive(action string, actionPayload []byte) (string, []b
 			w.logger.Info("Attempted to close websocket connection that does not exist")
 		}
 
-		return action, []byte{}, nil
+		return []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled stream action: %v", action)
 		w.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 }
 
-func (w *WebWebsocket) dataInWebsocket(webWebsocketDataIn webwebsocket.WebWebsocketDataInActionPayload, action string) (string, []byte, error) {
+func (w *WebWebsocket) dataInWebsocket(webWebsocketDataIn webwebsocket.WebWebsocketDataInActionPayload, action string) ([]byte, error) {
 	// Decode the message
 	messageDecoded, err := base64.StdEncoding.DecodeString(webWebsocketDataIn.Message)
 	if err != nil {
-		return "", []byte{}, err
+		return []byte{}, err
 	}
 
 	// Write the message to the websocket
 	wsWriteError := w.ws.WriteMessage(webWebsocketDataIn.MessageType, messageDecoded)
 	if wsWriteError != nil {
-		return "", []byte{}, wsWriteError
+		return []byte{}, wsWriteError
 	}
 
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
-func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebWebsocketStartActionPayload, action string) (string, []byte, error) {
+func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebWebsocketStartActionPayload, action string) ([]byte, error) {
 	// keep track of who we're talking to
 	w.requestId = webWebsocketStartRequest.RequestId
 	w.logger.Infof("Setting request id: %s", w.requestId)
@@ -127,7 +130,7 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 	remoteHostUrl, parseErr := url.Parse(baseAddress)
 	if parseErr != nil {
 		w.logger.Errorf("error parsing remote host url: %s", parseErr)
-		return "", []byte{}, parseErr
+		return []byte{}, parseErr
 	}
 	if remoteHostUrl.Scheme == "https" {
 		scheme = "wss"
@@ -150,15 +153,21 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 		default:
 			w.sendStreamMessage(0, smsg.Stop, false, []byte{})
 		}
-		return action, []byte{}, nil
+		return []byte{}, nil
 	}
+
+	// set our class variable so we can close it later
+	w.ws = ws
 
 	// Keep reading messages in a go function in the background
 	sequenceNumber := 0
-	go func() {
+	w.tmb.Go(func() error {
+		defer close(w.doneChan)
+
 		for {
-			mt, message, err := ws.ReadMessage()
-			if err != nil {
+			if mt, message, err := ws.ReadMessage(); !w.tmb.Alive() {
+				return nil
+			} else if err != nil {
 				w.logger.Infof("Read websocket error: %s", err)
 				// We have to let the daemon know the websocket has ended
 				switch w.streamMessageVersion {
@@ -168,36 +177,34 @@ func (w *WebWebsocket) startWebsocket(webWebsocketStartRequest webwebsocket.WebW
 				default:
 					w.sendStreamMessage(sequenceNumber, smsg.Stop, false, []byte{})
 				}
+				return nil
+			} else {
+				// Forward this message along to the daemon
+				toSend := webwebsocket.WebWebsocketStreamDataOut{
+					Message:     base64.StdEncoding.EncodeToString(message),
+					MessageType: mt,
+				}
+				contentBytes, err := json.Marshal(toSend)
+				if err != nil {
+					rerr := fmt.Errorf("json marshall error: %s", err)
+					w.logger.Error(rerr)
+					return rerr
+				}
+				switch w.streamMessageVersion {
+				// prior to 202204
+				case "":
+					w.sendStreamMessage(sequenceNumber, smsg.DataOut, true, contentBytes)
+				default:
+					w.sendStreamMessage(sequenceNumber, smsg.Data, true, contentBytes)
+				}
 				sequenceNumber += 1
-				return
-			}
 
-			// Forward this message along to the daemon
-			toSend := webwebsocket.WebWebsocketStreamDataOut{
-				Message:     base64.StdEncoding.EncodeToString(message),
-				MessageType: mt,
+				w.logger.Tracef("Received websocket message: %s", message)
 			}
-			contentBytes, err := json.Marshal(toSend)
-			if err != nil {
-				w.logger.Infof("Json marshell error: %s", err)
-				return
-			}
-			switch w.streamMessageVersion {
-			// prior to 202204
-			case "":
-				w.sendStreamMessage(sequenceNumber, smsg.DataOut, true, contentBytes)
-			default:
-				w.sendStreamMessage(sequenceNumber, smsg.Data, true, contentBytes)
-			}
-			sequenceNumber += 1
-
-			w.logger.Infof("Received websocket message: %s", message)
 		}
-	}()
+	})
 
-	w.ws = ws
-
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
 func (w *WebWebsocket) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {

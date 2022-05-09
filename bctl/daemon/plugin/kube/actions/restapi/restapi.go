@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"gopkg.in/tomb.v2"
-
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -20,40 +18,42 @@ type RestApiAction struct {
 	requestId       string
 	logId           string
 	commandBeingRun string
+	doneChan        chan struct{}
 
 	// channels for sending and recieving messages
 	outputChan chan plugin.ActionWrapper
-	inputChan  chan plugin.ActionWrapper
+	inputChan  chan []byte
 }
 
 func New(logger *logger.Logger,
+	outputChan chan plugin.ActionWrapper,
+	doneChan chan struct{},
 	requestId string,
 	logId string,
-	commandBeingRun string) (*RestApiAction, chan plugin.ActionWrapper) {
+	commandBeingRun string) *RestApiAction {
 
-	restapi := &RestApiAction{
+	return &RestApiAction{
 		logger:          logger,
 		requestId:       requestId,
 		logId:           logId,
 		commandBeingRun: commandBeingRun,
-		outputChan:      make(chan plugin.ActionWrapper, 10),
-		inputChan:       make(chan plugin.ActionWrapper),
+		doneChan:        doneChan,
+		outputChan:      outputChan,
+		inputChan:       make(chan []byte),
 	}
-
-	return restapi, restapi.outputChan
 }
 
-func (r *RestApiAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	r.inputChan <- wrappedAction
+func (r *RestApiAction) Kill() {
+	close(r.doneChan)
+}
+
+func (r *RestApiAction) ReceiveKeysplitting(actionPayload []byte) {
+	r.inputChan <- actionPayload
 }
 
 func (r *RestApiAction) ReceiveStream(stream smsg.StreamMessage) {}
 
-func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
-	// this action ends at the end of this function, in order to signal that to the parent plugin,
-	// we close the output channel which will close the go routine listening on it
-	defer close(r.outputChan)
-
+func (r *RestApiAction) Start(writer http.ResponseWriter, request *http.Request) error {
 	// First extract the headers out of the request
 	headers := bzhttp.GetHeaders(request.Header)
 
@@ -83,13 +83,17 @@ func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 
 	// wait for response to our sent message
 	select {
-	case <-tmb.Dying():
+	case <-r.doneChan:
 		return nil
-	case rsp := <-r.inputChan:
-		// unmarshall response in rest api payload object
+	case <-request.Context().Done():
+		close(r.doneChan)
+		return fmt.Errorf("request context cancelled")
+	case rspBytes := <-r.inputChan:
+		defer close(r.doneChan)
+
 		var apiResponse kuberest.KubeRestApiActionResponsePayload
-		if err := json.Unmarshal(rsp.ActionPayload, &apiResponse); err != nil {
-			rerr := fmt.Errorf("could not unmarshal Action Response Payload: %s", err)
+		if err := json.Unmarshal(rspBytes, &apiResponse); err != nil {
+			rerr := fmt.Errorf("could not unmarshal Action Response Payload: %s", string(rspBytes))
 			r.logger.Error(rerr)
 			return rerr
 		}
@@ -110,7 +114,7 @@ func (r *RestApiAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, reques
 		if apiResponse.StatusCode != http.StatusOK {
 			writer.WriteHeader(http.StatusInternalServerError)
 
-			rerr := fmt.Errorf("request failed with status code %v: %v", apiResponse.StatusCode, string(apiResponse.Content))
+			rerr := fmt.Errorf("request failed with status code %d: %s", apiResponse.StatusCode, string(apiResponse.Content))
 			r.logger.Error(rerr)
 			return rerr
 		}

@@ -3,9 +3,9 @@ package stream
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
-
-	"gopkg.in/tomb.v2"
+	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -21,58 +21,52 @@ type StreamAction struct {
 	requestId       string
 	logId           string
 	commandBeingRun string
+	doneChan        chan struct{}
 
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
-	ksInputChan     chan plugin.ActionWrapper
 
 	expectedSequenceNumber int
 	outOfOrderMessages     map[int]smsg.StreamMessage
-	writer                 http.ResponseWriter
 }
 
-func New(logger *logger.Logger,
+func New(
+	logger *logger.Logger,
+	outputChan chan plugin.ActionWrapper,
+	doneChan chan struct{},
 	requestId string,
 	logId string,
-	commandBeingRun string) (*StreamAction, chan plugin.ActionWrapper) {
+	commandBeingRun string,
+) *StreamAction {
 
-	stream := &StreamAction{
-		logger: logger,
-
+	return &StreamAction{
+		logger:          logger,
 		requestId:       requestId,
 		logId:           logId,
 		commandBeingRun: commandBeingRun,
-
-		outputChan:      make(chan plugin.ActionWrapper, 10),
+		doneChan:        doneChan,
+		outputChan:      outputChan,
 		streamInputChan: make(chan smsg.StreamMessage, 10),
-		ksInputChan:     make(chan plugin.ActionWrapper, 10),
 
 		// Start at 1 since we wait for our headers message
 		expectedSequenceNumber: 1,
 		outOfOrderMessages:     make(map[int]smsg.StreamMessage),
 	}
-
-	return stream, stream.outputChan
 }
 
-func (s *StreamAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
-	s.ksInputChan <- wrappedAction
+func (s *StreamAction) Kill() {
+	close(s.doneChan)
 }
+
+func (s *StreamAction) ReceiveKeysplitting(actionPayload []byte) {}
 
 func (s *StreamAction) ReceiveStream(smessage smsg.StreamMessage) {
 	s.logger.Debugf("Stream action received %v stream", smessage.Type)
 	s.streamInputChan <- smessage
 }
 
-func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
-	// this action ends at the end of this function, in order to signal that to the parent plugin,
-	// we close the output channel which will close the go routine listening on it
-	defer close(s.outputChan)
-
-	// Set our writer
-	s.writer = writer
-
+func (s *StreamAction) Start(writer http.ResponseWriter, request *http.Request) error {
 	// First extract the headers out of the request
 	headers := bzhttp.GetHeaders(request.Header)
 
@@ -105,13 +99,12 @@ func (s *StreamAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request
 	// Wait for our initial message to determine what headers to use
 	// The first message that comes from the stream is our headers message, wait for it
 	// And keep any other messages that might come before
-outOfOrderMessageHandler:
+waitForHeaders:
 	for {
 		select {
-		case <-tmb.Dying():
+		case <-s.doneChan:
 			return nil
 		case watchData := <-s.streamInputChan:
-
 			contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
 
 			// Attempt to decode contentBytes
@@ -126,19 +119,21 @@ outOfOrderMessageHandler:
 						writer.Header().Set(name, value)
 					}
 				}
-				break outOfOrderMessageHandler
+				break waitForHeaders
 			}
+		case <-time.After(30 * time.Second):
+			return fmt.Errorf("timed out waiting for initial header message")
 		}
 	}
 
 	// If there are any early messages, stream them first if the sequence number matches
-	s.handleOutOfOrderMessage()
+	s.handleOutOfOrderMessage(writer)
 
 	// Now subscribe to the response
 	// Keep this as a non-go routine so we hold onto the http request
 	for {
 		select {
-		case <-tmb.Dying():
+		case <-s.doneChan:
 			return nil
 		case <-request.Context().Done():
 			s.logger.Infof("Watch request %v was cancelled", s.requestId)
@@ -152,21 +147,20 @@ outOfOrderMessageHandler:
 				RequestId: s.requestId,
 				LogId:     s.logId,
 			}
-
 			payloadBytes, _ := json.Marshal(payload)
 			s.outputChan <- plugin.ActionWrapper{
 				Action:        string(stream.StreamStop),
 				ActionPayload: payloadBytes,
 			}
 
-			return nil
-
+			close(s.doneChan)
 		case watchData := <-s.streamInputChan:
 			// may have received an old-fashioned or newfangled message, depending on what we asked for
 			if watchData.Type == smsg.StreamData || watchData.Type == smsg.StreamEnd || watchData.Type == smsg.Data {
 				if watchData.Type == smsg.StreamEnd || (watchData.Type == smsg.Data && !watchData.More) {
 					// End the stream
 					s.logger.Infof("Stream has been ended from the agent, closing request")
+					close(s.doneChan)
 					return nil
 				}
 				// Then stream the response to kubectl
@@ -175,14 +169,12 @@ outOfOrderMessageHandler:
 					contentBytes, _ := base64.StdEncoding.DecodeString(watchData.Content)
 					if err := kubeutils.WriteToHttpRequest(contentBytes, writer); err != nil {
 						s.logger.Error(err)
-						return nil
+						close(s.doneChan)
+						return fmt.Errorf("could not write response: %s", err)
 					}
 
-					// Increment the seqNumber
 					s.expectedSequenceNumber += 1
-
-					// See if we have any early messages for this seqNumber
-					s.handleOutOfOrderMessage()
+					s.handleOutOfOrderMessage(writer)
 				} else {
 					s.outOfOrderMessages[watchData.SequenceNumber] = watchData
 				}
@@ -194,18 +186,15 @@ outOfOrderMessageHandler:
 	}
 }
 
-func (s *StreamAction) handleOutOfOrderMessage() {
-	outOfOrderMessageData, ok := s.outOfOrderMessages[s.expectedSequenceNumber]
-	for ok {
+func (s *StreamAction) handleOutOfOrderMessage(writer http.ResponseWriter) {
+	for outOfOrderMessageData, ok := s.outOfOrderMessages[s.expectedSequenceNumber]; ok; outOfOrderMessageData, ok = s.outOfOrderMessages[s.expectedSequenceNumber] {
 		// If we have an early message, show it to the user
 		contentBytes, _ := base64.StdEncoding.DecodeString(outOfOrderMessageData.Content)
-		err := kubeutils.WriteToHttpRequest(contentBytes, s.writer)
-		if err != nil {
+		if err := kubeutils.WriteToHttpRequest(contentBytes, writer); err != nil {
 			return
 		}
 
 		// Increment the seqNumber and keep looking for more
 		s.expectedSequenceNumber += 1
-		outOfOrderMessageData, ok = s.outOfOrderMessages[s.expectedSequenceNumber]
 	}
 }

@@ -1,19 +1,22 @@
 package webserver
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+	"gopkg.in/tomb.v2"
+
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
-	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -128,8 +131,15 @@ func (w *WebServer) capRequestSize(h http.HandlerFunc) http.HandlerFunc {
 }
 
 func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request) {
-	action := bzweb.Dial
+	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+	dcId := uuid.New().String()
 
+	// create our new plugin and datachannel
+	subLogger := w.logger.GetDatachannelLogger(dcId)
+	subLogger = subLogger.GetPluginLogger(bzplugin.Web)
+	plugin := web.New(subLogger, w.targetHost, w.targetPort)
+
+	action := bzweb.Dial
 	// This will work for http 1.1 and that is what we need to support
 	// Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Upgrade
 	// Ref: https://datatracker.ietf.org/doc/html/rfc6455#section-1.7
@@ -138,17 +148,11 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 		action = bzweb.Websocket
 	}
 
-	food := bzweb.WebFood{
-		Action:  action,
-		Request: request,
-		Writer:  writer,
-	}
-
-	// create our new datachannel
-	if dc, err := w.newDataChannel(string(action), w.websocket); err == nil {
-		dc.Feed(food)
-	} else {
+	if err := w.newDataChannel(dcId, action, w.websocket, plugin); err != nil {
 		w.logger.Errorf("error starting datachannel: %s", err)
+	}
+	if err := plugin.StartAction(action, writer, request); err != nil {
+		w.logger.Errorf("error starting action: %s", err)
 	}
 }
 
@@ -164,13 +168,11 @@ func (h *WebServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websocket) (*datachannel.DataChannel, error) {
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
-	dcId := uuid.New().String()
+func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocket *bzwebsocket.Websocket, plugin *web.WebDaemonPlugin) error {
 	attach := false
 	subLogger := w.logger.GetDatachannelLogger(dcId)
 
-	w.logger.Infof("Creating new datachannel for web with id: %v", dcId)
+	w.logger.Infof("Creating new datachannel for web with id: %s", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
 	actionParams := bzweb.WebActionParams{
@@ -178,16 +180,12 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 		RemoteHost: w.targetHost,
 	}
 
-	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
-	if marshalErr != nil {
-		w.logger.Error(fmt.Errorf("error marshalling action params for web"))
-		return nil, marshalErr
-	}
-
-	action = "web/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, w.refreshTokenCommand, w.configPath, action, actionParamsMarshalled, w.agentPubKey, attach); err != nil {
-		w.logger.Error(err)
-		return datachannel, err
+	actString := "web/" + string(action)
+	mrzapLogger := w.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(mrzapLogger, w.agentPubKey, w.configPath, w.refreshTokenCommand); err != nil {
+		return err
+	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, actionParams, attach); err != nil {
+		return err
 	} else {
 
 		// create a function to listen to the datachannel dying and then laugh
@@ -197,10 +195,7 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 				case <-w.tmb.Dying():
 					datachannel.Close(errors.New("web server closing"))
 					return
-				case <-dcTmb.Dying():
-					// Wait until everything is dead and any close processes are sent before killing the datachannel
-					dcTmb.Wait()
-
+				case <-dcTmb.Dead():
 					// notify agent to close the datachannel
 					w.logger.Info("Sending DataChannel Close")
 					cdMessage := am.AgentMessage{
@@ -208,11 +203,10 @@ func (w *WebServer) newDataChannel(action string, websocket *bzwebsocket.Websock
 						MessageType: string(am.CloseDataChannel),
 					}
 					w.websocket.Send(cdMessage)
-
 					return
 				}
 			}
 		}()
-		return datachannel, nil
+		return nil
 	}
 }

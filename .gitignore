@@ -15,3 +15,5 @@ bctl/bctlcov.out
 bctl/bctlcoverage.xml
 bzerolib/bzerolibcov.out
 bzerolib/bzerolibcoverage.xml
+
+.vscode/
