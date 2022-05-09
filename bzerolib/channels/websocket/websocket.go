@@ -304,7 +304,7 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 
 			if completionMessage.InvocationId != nil {
 				invocationId := *completionMessage.InvocationId
-				message := w.messagesWaitingResponse[invocationId]
+				message := w.getAgentMessageFromInvocationId(invocationId)
 
 				if completionMessage.Error != nil {
 					w.logger.Errorf("Error invoking Agent message type %s on channel %s. Unhandled Server Error: %s", message.MessageType, message.ChannelId, *completionMessage.Error)
@@ -716,6 +716,13 @@ func (w *Websocket) deleteInvocationId(invocationId string) {
 	defer w.invocationIdLock.Unlock()
 
 	delete(w.messagesWaitingResponse, invocationId)
+}
+
+func (w *Websocket) getAgentMessageFromInvocationId(invocationId string) am.AgentMessage {
+	w.invocationIdLock.Lock()
+	defer w.invocationIdLock.Unlock()
+
+	return w.messagesWaitingResponse[invocationId]
 }
 
 // can be used by other processes to check if our connection is open
