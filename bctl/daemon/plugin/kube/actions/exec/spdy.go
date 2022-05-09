@@ -44,7 +44,8 @@ type StatusError struct {
 	ErrStatus metav1.Status
 }
 
-func NewSPDYService(logger *logger.Logger, writer http.ResponseWriter, request *http.Request) (*SPDYService, error) {
+// made this a variable so that we can mock it
+var NewSPDYService = func(logger *logger.Logger, writer http.ResponseWriter, request *http.Request) (*SPDYService, error) {
 	// Extract the options of the exec
 	options := extractExecOptions(request)
 

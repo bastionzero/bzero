@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	mockLogger "bastionzero.com/bctl/v1/bzerolib/logger/mock"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"github.com/stretchr/testify/assert"
@@ -102,7 +101,7 @@ func TestShellOpen(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	dshell, err := New(&tomb.Tomb{}, logger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -112,7 +111,7 @@ func TestShellClose(t *testing.T) {
 	mockPT := createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	dshell, err := New(&tomb.Tomb{}, logger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -131,7 +130,7 @@ func TestShellInput(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	dshell, err := New(&tomb.Tomb{}, logger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -150,7 +149,7 @@ func TestShellResize(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	dshell, err := New(&tomb.Tomb{}, logger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -176,7 +175,7 @@ func TestShellReplay(t *testing.T) {
 
 	// init shell
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	dshell, err := New(&tomb.Tomb{}, logger.MockLogger(), streamMessageChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)

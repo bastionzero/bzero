@@ -25,6 +25,15 @@ import (
 	spdystream "k8s.io/apimachinery/pkg/util/httpstream/spdy"
 )
 
+var performHandshake = func(req *http.Request, w http.ResponseWriter, serverProtocols []string) (string, error) {
+	return httpstream.Handshake(req, w, serverProtocols)
+}
+
+var getUpgradedConnection = func(w http.ResponseWriter, req *http.Request, streamChan chan httpstream.Stream, pingPeriod time.Duration) httpstream.Connection {
+	upgrader := spdystream.NewResponseUpgraderWithPings(kubeutils.DefaultStreamCreationTimeout)
+	return upgrader.UpgradeResponse(w, req, httpStreamReceived(context.TODO(), streamChan))
+}
+
 type RequestMapStruct struct {
 	streamMessageContent portforward.KubePortForwardStreamMessageContent
 	streamMessage        smsg.StreamMessage
@@ -159,7 +168,7 @@ readyMessageLoop:
 	}
 
 	// Perform our http handshake
-	_, err := httpstream.Handshake(request, writer, []string{kubeutils.PortForwardProtocolV1Name})
+	_, err := performHandshake(request, writer, []string{kubeutils.PortForwardProtocolV1Name})
 	if err != nil {
 		return fmt.Errorf("could not perform http handshake: %v", err.Error())
 	}
@@ -168,8 +177,7 @@ readyMessageLoop:
 	streamChan := make(chan httpstream.Stream, 1)
 
 	// Upgrade the response
-	upgrader := spdystream.NewResponseUpgraderWithPings(kubeutils.DefaultStreamCreationTimeout)
-	conn := upgrader.UpgradeResponse(writer, request, p.httpStreamReceived(context.TODO(), streamChan))
+	conn := getUpgradedConnection(writer, request, streamChan, kubeutils.DefaultStreamCreationTimeout)
 	if conn == nil {
 		return fmt.Errorf("unable to upgrade websocket connection")
 	}
@@ -354,15 +362,17 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 	// We have to keep track of error and data seq numbers and keep a buffer
 	expectedDataSeqNumber := 0
 	expectedErrorSeqNumber := 0
-	dataBuffer := make(map[int][]byte)
-	errorBuffer := make(map[int][]byte)
+	dataBuffer := make(map[int]RequestMapStruct)
+	errorBuffer := make(map[int]RequestMapStruct)
 
 	// Set up our message processors
-	processDataMessage := func(content []byte) {
+	processDataMessage := func(content []byte, more bool) {
 		if _, err := io.Copy(portforwardSession.dataStream, bytes.NewReader(content)); err != nil {
 			rerr := fmt.Errorf("error writing to stream data: %s", err)
 			p.logger.Error(rerr)
-
+			doneChan <- true
+		}
+		if !more {
 			doneChan <- true
 		}
 		expectedDataSeqNumber += 1
@@ -401,23 +411,18 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 			if requestMapStruct.streamMessage.Type == smsg.Data {
 				// Check our seqNumber
 				if requestMapStruct.streamMessage.SequenceNumber == expectedDataSeqNumber {
-					processDataMessage(requestMapStruct.streamMessageContent.Content)
+					processDataMessage(requestMapStruct.streamMessageContent.Content, requestMapStruct.streamMessage.More)
 				} else {
 					// Update our buffer
-					dataBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+					dataBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct
 				}
 
 				// Always attempt to processes out of order messages
-				outOfOrderDataContent, ok := dataBuffer[expectedDataSeqNumber]
+				outOfOrderDataRequest, ok := dataBuffer[expectedDataSeqNumber]
 				for ok {
 					// Keep pulling older messages
-					processDataMessage(outOfOrderDataContent)
-					outOfOrderDataContent, ok = dataBuffer[expectedDataSeqNumber]
-				}
-
-				if !requestMapStruct.streamMessage.More {
-					// Alert on our done chan
-					doneChan <- true
+					processDataMessage(outOfOrderDataRequest.streamMessageContent.Content, outOfOrderDataRequest.streamMessage.More)
+					outOfOrderDataRequest, ok = dataBuffer[expectedDataSeqNumber]
 				}
 
 			} else if requestMapStruct.streamMessage.Type == smsg.Error {
@@ -425,15 +430,15 @@ func (p *PortForwardAction) forwardStreamPair(portforwardSession *httpStreamPair
 					processErrorMessage(requestMapStruct.streamMessageContent.Content)
 				} else {
 					// Update our buffer
-					errorBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct.streamMessageContent.Content
+					errorBuffer[requestMapStruct.streamMessage.SequenceNumber] = requestMapStruct
 				}
 
 				// Always attempt to process out of order messages
-				outOfOrderErrorContent, ok := errorBuffer[expectedErrorSeqNumber]
+				outOfOrderErrorRequest, ok := errorBuffer[expectedErrorSeqNumber]
 				for ok {
 					// Keep pulling older messages
-					processErrorMessage(outOfOrderErrorContent)
-					outOfOrderErrorContent, ok = errorBuffer[expectedErrorSeqNumber]
+					processErrorMessage([]byte(outOfOrderErrorRequest.streamMessageContent.Content))
+					outOfOrderErrorRequest, ok = errorBuffer[expectedErrorSeqNumber]
 				}
 
 			} else {
@@ -470,5 +475,128 @@ func bubbleUpError(writer http.ResponseWriter, content string) {
 		writer.WriteHeader(http.StatusForbidden)
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Write(toReturnMarshal)
+	}
+}
+
+// getStreamPair returns a httpStreamPair for requestID. This creates a
+// new pair if one does not yet exist for the requestID. The returned bool is
+// true if the pair was created.
+func (p *PortForwardAction) getStreamPair(requestID string) (*httpStreamPair, bool) {
+	p.streamPairsLock.Lock()
+	defer p.streamPairsLock.Unlock()
+
+	if portforwardStreamPair, ok := p.streamPairs[requestID]; ok {
+		p.logger.Infof("Request %s, found existing stream pair", requestID)
+		return portforwardStreamPair, false
+	}
+
+	p.logger.Infof("Request %s, creating new stream pair.", requestID)
+
+	portforwardStreamPair := newPortForwardPair(requestID)
+	p.streamPairs[requestID] = portforwardStreamPair
+
+	return portforwardStreamPair, true
+}
+
+// newPortForwardPair creates a new httpStreamPair.
+func newPortForwardPair(requestID string) *httpStreamPair {
+	return &httpStreamPair{
+		requestID: requestID,
+		complete:  make(chan struct{}),
+	}
+}
+
+// add adds the stream to the httpStreamPair. If the pair already
+// contains a stream for the new stream's type, an error is returned. add
+// returns true if both the data and error streams for this pair have been
+// received.
+func (p *httpStreamPair) add(stream httpstream.Stream) (bool, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	switch stream.Headers().Get(kubeutils.StreamType) {
+	case kubeutils.StreamTypeError:
+		if p.errorStream != nil {
+			return false, errors.New("error stream already assigned")
+		}
+		p.errorStream = stream
+	case kubeutils.StreamTypeData:
+		if p.dataStream != nil {
+			return false, errors.New("data stream already assigned")
+		}
+		p.dataStream = stream
+	}
+
+	complete := p.errorStream != nil && p.dataStream != nil
+	if complete {
+		close(p.complete)
+	}
+	return complete, nil
+}
+
+// printError writes s to p.errorStream if p.errorStream has been set.
+func (p *httpStreamPair) printError(s string) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if p.errorStream != nil {
+		fmt.Fprint(p.errorStream, s)
+	}
+}
+
+// monitorStreamPair waits for the pair to receive both its error and data
+// streams, or for the timeout to expire (whichever happens first), and then
+// removes the pair.
+func (p *PortForwardAction) monitorStreamPair(portforwardStreamPair *httpStreamPair, timeout <-chan time.Time) {
+	select {
+	case <-timeout:
+		p.logger.Error(fmt.Errorf("request %s, timed out waiting for streams", portforwardStreamPair.requestID))
+	case <-portforwardStreamPair.complete:
+		p.logger.Infof("Request %s, successfully received error and data streams.", portforwardStreamPair.requestID)
+	}
+	p.removeStreamPair(portforwardStreamPair.requestID)
+}
+
+// removeStreamPair removes the stream pair identified by requestID from streamPairs.
+func (p *PortForwardAction) removeStreamPair(requestID string) {
+	p.streamPairsLock.Lock()
+	defer p.streamPairsLock.Unlock()
+
+	delete(p.streamPairs, requestID)
+}
+
+// httpStreamReceived is the httpstream.NewStreamHandler for port
+// forward streams. It checks each stream's port and stream type headers,
+// rejecting any streams that with missing or invalid values. Each valid
+// stream is sent to the streams channel.
+func httpStreamReceived(ctx context.Context, streams chan httpstream.Stream) func(httpstream.Stream, <-chan struct{}) error {
+	return func(stream httpstream.Stream, replySent <-chan struct{}) error {
+		// make sure it has a valid port header
+		portString := stream.Headers().Get(kubeutils.PortHeader)
+		if len(portString) == 0 {
+			return fmt.Errorf("%q header is required", kubeutils.PortHeader)
+		}
+		port, err := strconv.ParseUint(portString, 10, 16)
+		if err != nil {
+			return fmt.Errorf("unable to parse %q as a port: %v", portString, err)
+		}
+		if port < 1 {
+			return fmt.Errorf("port %q must be > 0", portString)
+		}
+
+		// make sure it has a valid stream type header
+		streamType := stream.Headers().Get(kubeutils.StreamType)
+		if len(streamType) == 0 {
+			return fmt.Errorf("%q header is required", kubeutils.StreamType)
+		}
+		if streamType != kubeutils.StreamTypeError && streamType != kubeutils.StreamTypeData {
+			return fmt.Errorf("invalid stream type %q", streamType)
+		}
+
+		select {
+		case streams <- stream:
+			return nil
+		case <-ctx.Done():
+			return errors.New("request has been cancelled")
+		}
 	}
 }
