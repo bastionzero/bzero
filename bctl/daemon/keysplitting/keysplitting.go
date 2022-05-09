@@ -128,7 +128,7 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 			k.logger.Infof("agent error is not on a message sent by this datachannel")
 			return nil // not a fatal error
 		} else if msg, ok := pair.Value.(ksmsg.KeysplittingMessage); ok && msg.Type == ksmsg.Syn {
-			return fmt.Errorf("unable to recover because we hit an error on our recovery attempt: %s", errMessage.Message)
+			return fmt.Errorf("unable to recover because we hit an error on our syn message: %s", errMessage.Message)
 		} else if k.recovering {
 			k.logger.Infof("ignoring error message because we're already in recovery")
 			return nil // not a fatal error

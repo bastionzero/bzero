@@ -84,6 +84,8 @@ func New(
 
 	// process our syn to startup the plugin
 	if err := datachannel.handleKeysplittingMessage(&synPayload); err != nil {
+		// Flush output channel messages to send any keysplitting errors that might have occurred
+		datachannel.flushAllOutputChannelMessages()
 		return nil, err
 	}
 
@@ -111,15 +113,9 @@ func New(
 				datachannel.plugin.Kill()
 				return nil
 			case <-datachannel.plugin.Done():
-				for {
-					select {
-					case agentMessage := <-datachannel.outputChan:
-						// Push message to websocket channel output
-						datachannel.websocket.Send(agentMessage)
-					case <-time.After(1 * time.Second):
-						return fmt.Errorf("datachannel's sole plugin is closed")
-					}
-				}
+				logger.Infof("datachannel's sole plugin is closed")
+				datachannel.flushAllOutputChannelMessages()
+				return nil
 			case agentMessage := <-datachannel.outputChan:
 				// Push message to websocket channel output
 				datachannel.websocket.Send(agentMessage)
@@ -128,6 +124,18 @@ func New(
 	})
 
 	return datachannel, nil
+}
+
+func (d *DataChannel) flushAllOutputChannelMessages() {
+	for {
+		select {
+		case agentMessage := <-d.outputChan:
+			// Push message to websocket channel output
+			d.websocket.Send(agentMessage)
+		case <-time.After(1 * time.Second):
+			return
+		}
+	}
 }
 
 func (d *DataChannel) Close(reason error) {
