@@ -33,10 +33,9 @@ type DefaultSsh struct {
 
 	targetUser   string
 	identityFile string
-	publicKey    string
 }
 
-func New(logger *logger.Logger, targetUser string, identityFile string, publicKey string) (*DefaultSsh, chan plugin.ActionWrapper) {
+func New(logger *logger.Logger, targetUser string, identityFile string) (*DefaultSsh, chan plugin.ActionWrapper) {
 
 	shellAction := &DefaultSsh{
 		logger: logger,
@@ -47,7 +46,6 @@ func New(logger *logger.Logger, targetUser string, identityFile string, publicKe
 
 		targetUser:   targetUser,
 		identityFile: identityFile,
-		publicKey:    publicKey,
 	}
 
 	return shellAction, shellAction.outputChan
@@ -56,13 +54,11 @@ func New(logger *logger.Logger, targetUser string, identityFile string, publicKe
 func (d *DefaultSsh) Start(tmb *tomb.Tomb) error {
 	d.tmb = tmb
 
-	// FIXME: sub in identity file
-	//publicKey, _ := GenerateKeys(d.identityFile)
-	d.logger.Errorf("oh hi mark it's a %s", d.publicKey)
+	publicKey, _ := GenerateKeys(d.identityFile)
 
 	sshOpenMessage := bzssh.SshOpenMessage{
 		TargetUser: d.targetUser,
-		PublicKey:  []byte(d.publicKey),
+		PublicKey:  []byte(publicKey),
 	}
 	d.sendOutputMessage(bzssh.SshOpen, sshOpenMessage)
 

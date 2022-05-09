@@ -31,7 +31,6 @@ type SshServer struct {
 	// TODO: revisit
 	targetUser   string
 	identityFile string
-	publicKey    string
 
 	// fields for new datachannels
 	params              map[string]string
@@ -53,8 +52,7 @@ func StartSshServer(
 	headers map[string]string,
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
-	identityFile string,
-	publicKey string) error {
+	identityFile string) error {
 
 	server := &SshServer{
 		logger:              logger,
@@ -67,7 +65,6 @@ func StartSshServer(
 		refreshTokenCommand: refreshTokenCommand,
 		agentPubKey:         agentPubKey,
 		identityFile:        identityFile,
-		publicKey:           publicKey,
 	}
 
 	// Create a new websocket
@@ -105,16 +102,11 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	s.logger.Infof("Creating new datachannel id: %s", dcId)
 
-	// TODO: revisit what might go in here
-	// FIXME: add key?
-	// FIXME: why is there an open message here even??
+	// FIXME: why is there a message here even??
 	actionParams := bzssh.SshActionParams{
 		TargetUser:   s.targetUser,
 		IdentityFile: s.identityFile,
-		PublicKey:    s.publicKey,
 	}
-
-	s.logger.Infof("trent hi: %s", s.publicKey)
 
 	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
