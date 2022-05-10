@@ -73,11 +73,12 @@ type signalRInvocationMessage struct {
 
 // This will be the client that we use to store our websocket connection
 type Websocket struct {
+	tmb    tomb.Tomb
+	logger *logger.Logger
+
 	client     *websocket.Conn
-	logger     *logger.Logger
 	ready      bool
 	subscribed bool
-	tmb        tomb.Tomb
 	channels   map[string]IChannel
 
 	// Ref: https://github.com/gorilla/websocket/issues/119#issuecomment-198710015
@@ -308,16 +309,16 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 
 			if completionMessage.InvocationId != nil {
 				invocationId := *completionMessage.InvocationId
-				message := w.messagesWaitingResponse[invocationId]
+				message := w.getAgentMessageFromInvocationId(invocationId)
 
 				if completionMessage.Error != nil {
-					w.logger.Errorf("Error invoking Agent message type %s on datachannel %s. Unhandled Server Error: %s", message.MessageType, message.ChannelId, *completionMessage.Error)
+					w.logger.Errorf("Error invoking Agent message type %s on channel %s. Unhandled Server Error: %s", message.MessageType, message.ChannelId, *completionMessage.Error)
 				}
 				if completionMessage.Result != nil {
 					if completionMessage.Result.Error {
-						w.logger.Errorf("Error invoking Agent message type %s on datachannel %s. Error: %s", message.MessageType, message.ChannelId, *completionMessage.Result.ErrorMessage)
+						w.logger.Errorf("Error invoking Agent message type %s for channel %s: %s", message.MessageType, message.ChannelId, *completionMessage.Result.ErrorMessage)
 					} else {
-						w.logger.Infof("Successfully completed invocation for Agent message type %s on datachannel %s", message.MessageType, message.ChannelId)
+						w.logger.Tracef("Successfully completed invocation for Agent message type %s", message.MessageType)
 					}
 				}
 
@@ -735,6 +736,13 @@ func (w *Websocket) deleteInvocationId(invocationId string) {
 	defer w.invocationIdLock.Unlock()
 
 	delete(w.messagesWaitingResponse, invocationId)
+}
+
+func (w *Websocket) getAgentMessageFromInvocationId(invocationId string) am.AgentMessage {
+	w.invocationIdLock.Lock()
+	defer w.invocationIdLock.Unlock()
+
+	return w.messagesWaitingResponse[invocationId]
 }
 
 // can be used by other processes to check if our connection is open

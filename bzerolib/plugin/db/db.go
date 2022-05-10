@@ -1,7 +1,5 @@
 package db
 
-import "net"
-
 type DbAction string
 
 const (
@@ -9,11 +7,7 @@ const (
 )
 
 type DbActionParams struct {
-	RemotePort int    `json:"remotePort"`
-	RemoteHost string `json:"remoteHost"`
-}
-
-type DbFood struct {
-	Action DbAction
-	Conn   *net.TCPConn
+	SchemaVersion string `json:"schemaVersion"`
+	RemotePort    int    `json:"remotePort"`
+	RemoteHost    string `json:"remoteHost"`
 }

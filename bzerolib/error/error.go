@@ -1,5 +1,7 @@
 package error
 
+const CurrentVersion = "202205"
+
 type ErrorType string
 
 const (
@@ -17,7 +19,9 @@ const (
 )
 
 type ErrorMessage struct {
-	Type     string `json:"type"`
-	Message  string `json:"message"`
-	HPointer string `json:"hPointer"`
+	SchemaVersion string `json:"schemaVersion" default:"202205"`
+	Timestamp     int64  `json:"timestamp"`
+	Type          string `json:"type"`
+	Message       string `json:"message"`
+	HPointer      string `json:"hPointer"`
 }

@@ -33,6 +33,8 @@ var (
 	logLevel                         string
 	forceReRegistration              bool
 	wait                             bool
+	printVersion                     bool
+	listLogFile                      bool
 )
 
 const (
@@ -40,6 +42,9 @@ const (
 	Bzero   = "bzero"
 
 	prodServiceUrl = "https://cloud.bastionzero.com/"
+
+	// we replace "bzero-agent" at build with process name
+	bzeroLogFilePath = "/var/log/bzero/bzero-agent.log"
 )
 
 func main() {
@@ -49,35 +54,42 @@ func main() {
 
 	if logger, err := setupLogger(); err != nil {
 		reportError(logger, err)
+	} else if parseErr != nil {
+		// catch our parser errors now that we have a logger to print them
+		reportError(logger, err)
+	} else if printVersion {
+		fmt.Printf("%s\n", getAgentVersion())
+		return
+	} else if listLogFile {
+		switch agentType {
+		case Bzero:
+			fmt.Printf("%s\n", bzeroLogFilePath)
+		case Cluster:
+			fmt.Printf("BZero Agent logs can be accessed via the Kube API server by tailing the pods logs\n")
+		}
+		return
 	} else {
-		logger.AddAgentVersion(getAgentVersion())
 
-		if parseErr != nil {
-			// catch our parser errors now that we have a logger to print them
-			reportError(logger, err)
-		} else {
+		logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
 
-			logger.Infof("BastionZero Agent version %s starting up...", getAgentVersion())
+		// Check if the agent is registered or not.  If not, generate signing keys,
+		// check kube permissions and setup, and register with the Bastion.
+		if err := handleRegistration(logger); err != nil {
 
-			// Check if the agent is registered or not.  If not, generate signing keys,
-			// check kube permissions and setup, and register with the Bastion.
-			if err := handleRegistration(logger); err != nil {
+			// our systemd agent waits for a successful new registration
+			if wait {
+				vault.WaitForNewRegistration(logger)
+				logger.Infof("New registration detected. Loading registration information!")
 
-				// our systemd agent waits for a successful new registration
-				if wait {
-					vault.WaitForNewRegistration(logger)
-					logger.Infof("New registration detected. Loading registration information!")
-
-					// double check and set our local variables
-					if registered, err := isRegistered(); err != nil {
-						logger.Error(err)
-					} else if registered {
-						run(logger)
-					}
+				// double check and set our local variables
+				if registered, err := isRegistered(); err != nil {
+					logger.Error(err)
+				} else if registered {
+					run(logger)
 				}
-			} else {
-				run(logger)
 			}
+		} else {
+			run(logger)
 		}
 	}
 
@@ -94,7 +106,6 @@ func main() {
 
 func run(logger *logger.Logger) {
 	defer func() {
-
 		// recover in case the agent panics
 		if msg := recover(); msg != nil {
 			reportError(logger, fmt.Errorf("bzero agent crashed with panic: %+v", msg))
@@ -118,13 +129,13 @@ func setupLogger() (*logger.Logger, error) {
 	// if this is systemd, output files
 	logFile := ""
 	if agentType == Bzero {
-		logFile = "/var/log/bzero/bzero-agent.log" // bzero-agent is protect here because we replace at build with process name
+		logFile = bzeroLogFilePath
 	}
 
 	// setup our loggers
 	writeToConsole := true
 	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile, writeToConsole); err != nil {
-		return logger, err
+		return nil, err
 	} else {
 		logger.AddAgentVersion(getAgentVersion())
 		return logger, nil
@@ -135,6 +146,8 @@ func setupLogger() (*logger.Logger, error) {
 func reportError(logger *logger.Logger, errorReport error) {
 	if logger != nil {
 		logger.Error(errorReport)
+	} else {
+		fmt.Println(errorReport.Error())
 	}
 
 	hostname, err := os.Hostname()
@@ -148,7 +161,7 @@ func reportError(logger *logger.Logger, errorReport error) {
 		Message:   errorReport.Error(),
 		State: map[string]string{
 			"activationToken":       activationToken,
-			"registrationKeyLength": fmt.Sprintf("%v", (len(registrationKey))),
+			"registrationKeyLength": fmt.Sprintf("%v", len(registrationKey)),
 			"targetName":            targetName,
 			"targetHostName":        hostname,
 			"goos":                  runtime.GOOS,
@@ -237,6 +250,10 @@ func dcTargetSelectHandler(agentMessage am.AgentMessage) (string, error) {
 }
 
 func parseFlags() error {
+	// Helpful flags
+	flag.BoolVar(&printVersion, "version", false, "Print current version of the agent")
+	flag.BoolVar(&listLogFile, "logs", false, "Print the agent log file path")
+
 	// Our required registration flags
 	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
 	flag.StringVar(&registrationKey, "registrationKey", "", "API Key used to register the agent")

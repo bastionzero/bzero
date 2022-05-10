@@ -1,17 +1,22 @@
 package shellserver
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
+
+	"github.com/google/uuid"
+	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
-	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -73,8 +78,7 @@ func StartShellServer(
 	}
 
 	// create our new datachannel
-	if _, err := shellServer.newDataChannel(string(bzshell.DefaultShell), shellServer.websocket); err == nil {
-	} else {
+	if err := shellServer.newDataChannel(string(bzshell.DefaultShell), shellServer.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 
@@ -93,7 +97,7 @@ func (ss *ShellServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
+func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websocket) error {
 	var attach bool
 	if ss.dataChannelId == "" {
 		ss.dataChannelId = uuid.New().String()
@@ -107,17 +111,24 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
 	subLogger := ss.logger.GetDatachannelLogger(ss.dataChannelId)
 
+	// create our plugin and start the action
+	pluginLogger := subLogger.GetPluginLogger(bzplugin.Db)
+	plugin := shell.New(pluginLogger)
+	if err := plugin.StartAction(attach); err != nil {
+		return fmt.Errorf("failed to start action: %s", err)
+	}
+
 	// Build the action payload to send in the syn message when opening the datachannel
-	// FIXME: why is this an openMessage and not ActionParams?
-	actionParams := bzshell.ShellOpenMessage{
+	actionParams := bzshell.ShellActionParams{
 		TargetUser: ss.targetUser,
 	}
-	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
 	action = "shell/" + action
-	if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, ss.refreshTokenCommand, ss.configPath, action, actionParamsMarshalled, ss.agentPubKey, attach); err != nil {
-		ss.logger.Error(err)
-		return nil, err
+	ksLogger := ss.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(ksLogger, ss.agentPubKey, ss.configPath, ss.refreshTokenCommand); err != nil {
+		return err
+	} else if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, actionParams, attach); err != nil {
+		return err
 	} else {
 
 		// create a function to listen to the datachannel dying and then exit the shell daemon process
@@ -127,15 +138,19 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 				case <-ss.tmb.Dying():
 					dc.Close(errors.New("shell server exiting...closing datachannel"))
 					return
-				case <-dcTmb.Dying():
-					// Wait until everything is dead and any close processes are sent before killing the datachannel
-					dcTmb.Wait()
-
+				case <-dcTmb.Dead():
+					// bubble up our error to the user
+					if dcTmb.Err() != nil {
+						// let's just take our innermost error to give the user
+						errs := strings.Split(dcTmb.Err().Error(), ": ")
+						errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
+						os.Stdout.Write([]byte(errorString))
+					}
 					errorCode := 1
 					os.Exit(errorCode)
 				}
 			}
 		}()
-		return dc, nil
+		return nil
 	}
 }

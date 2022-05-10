@@ -10,6 +10,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/pkgerrors"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 )
 
 // This is here for translation, so that the rest of the program doesn't need to care or know
@@ -69,7 +71,7 @@ func New(config *LoggerConfig, logFilePath string, writeToConsole bool) (*Logger
 		// TODO: do this in our install process
 		logDir := filepath.Dir(logFilePath)
 		if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
-			return nil, fmt.Errorf("Failed to create log directory %s", logDir)
+			return nil, fmt.Errorf("failed to create log directory %s", logDir)
 		}
 
 		logFileWithRotation := &lumberjack.Logger{
@@ -144,7 +146,7 @@ func (l *Logger) GetWebsocketLogger(id string) *Logger {
 	}
 }
 
-func (l *Logger) GetPluginLogger(pluginName string) *Logger {
+func (l *Logger) GetPluginLogger(pluginName bzplugin.PluginName) *Logger {
 	if !l.ready {
 		return l
 	}

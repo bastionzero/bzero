@@ -11,10 +11,12 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 )
@@ -57,7 +59,8 @@ type KubeServer struct {
 	agentPubKey         string
 }
 
-func StartKubeServer(logger *logger.Logger,
+func StartKubeServer(
+	logger *logger.Logger,
 	localPort string,
 	localHost string,
 	certPath string,
@@ -71,7 +74,8 @@ func StartKubeServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	targetSelectHandler func(msg am.AgentMessage) (string, error),
+) error {
 
 	listener := &KubeServer{
 		logger:              logger,
@@ -128,107 +132,85 @@ func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 		ExitMessage: k.exitMessage,
 	}
 
-	registerJson, err := json.Marshal(statusMessage)
-	if err != nil {
-		k.logger.Error(fmt.Errorf("error marshalling status message: %+v", err))
+	if registerJson, err := json.Marshal(statusMessage); err != nil {
+		k.logger.Errorf("error marshalling status message: %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		return
+	} else {
+		w.WriteHeader(http.StatusOK)
+		w.Write(registerJson)
 	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write(registerJson)
 }
 
 // for creating new websockets
-func (h *KubeServer) newWebsocket(wsId string) error {
-	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, websocket.Cluster); err != nil {
+func (k *KubeServer) newWebsocket(wsId string) error {
+	subLogger := k.logger.GetWebsocketLogger(wsId)
+	if wsClient, err := websocket.New(subLogger, k.serviceUrl, k.params, k.headers, k.targetSelectHandler, autoReconnect, getChallenge, k.refreshTokenCommand, websocket.Cluster); err != nil {
 		return err
 	} else {
-		h.websocket = wsClient
+		k.websocket = wsClient
 		return nil
 	}
 }
 
 // for creating new datachannels
-func (h *KubeServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
-	dcId := uuid.New().String()
+func (k *KubeServer) newDataChannel(dcId string, action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin, writer http.ResponseWriter) error {
 	attach := false
-	subLogger := h.logger.GetDatachannelLogger(dcId)
+	subLogger := k.logger.GetDatachannelLogger(dcId)
 
-	h.logger.Infof("Creating new datachannel id: %v", dcId)
+	k.logger.Infof("Creating new datachannel id: %v", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
 	actionParams := bzkube.KubeActionParams{
-		TargetUser:   h.targetUser,
-		TargetGroups: h.targetGroups,
-	}
-
-	actionParamsMarshalled, marshalErr := json.Marshal(actionParams)
-	if marshalErr != nil {
-		h.logger.Error(fmt.Errorf("error marshalling action params for kube"))
-		return nil, marshalErr
+		TargetUser:   k.targetUser,
+		TargetGroups: k.targetGroups,
 	}
 
 	action = "kube/" + action
-	if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &h.tmb, websocket, h.refreshTokenCommand, h.configPath, action, actionParamsMarshalled, h.agentPubKey, attach); err != nil {
-		h.logger.Error(err)
-		return datachannel, err
+	ksLogger := k.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(ksLogger, k.agentPubKey, k.configPath, k.refreshTokenCommand); err != nil {
+		return err
+	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &k.tmb, websocket, keysplitter, plugin, action, actionParams, attach); err != nil {
+		return err
 	} else {
 
 		// create a function to listen to the datachannel dying and then laugh
 		go func() {
 			for {
 				select {
-				case <-h.tmb.Dying():
+				case <-k.tmb.Dying():
 					datachannel.Close(errors.New("kube server closing"))
 					return
-				case <-dcTmb.Dying():
-					// Wait until everything is dead and any close processes are sent before killing the datachannel
-					dcTmb.Wait()
-
+				case <-dcTmb.Dead():
 					// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
 					if err := dcTmb.Err(); err != nil {
-						h.exitMessage = dcTmb.Err().Error()
+						errs := strings.Split(dcTmb.Err().Error(), ": ")
+						msg := fmt.Sprintf("error: %s", errs[len(errs)-1])
+						k.bubbleUpError(writer, msg, 500)
 					}
 
 					// notify agent to close the datachannel
-					h.logger.Info("Sending DataChannel Close")
+					k.logger.Info("Sending DataChannel Close")
 					cdMessage := am.AgentMessage{
 						ChannelId:   dcId,
 						MessageType: string(am.CloseDataChannel),
 					}
-					h.websocket.Send(cdMessage)
-
-					// close our websocket if the datachannel we closed was the last and it's not rest api
-					if bzkube.KubeAction(action) != bzkube.RestApi && h.websocket.SubscriberCount() == 0 {
-						h.websocket.Close(errors.New("all datachannels closed, closing websocket"))
-					}
+					k.websocket.Send(cdMessage)
 					return
 				}
 			}
 		}()
-		return datachannel, nil
+		return nil
 	}
 }
 
-func (h *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
+func (k *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
 	w.WriteHeader(statusCode)
-	h.logger.Error(errors.New(msg))
+	k.logger.Error(errors.New(msg))
 	w.Write([]byte(msg))
 }
 
-func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
-	h.logger.Infof("Handling %s - %s\n", r.URL.Path, r.Method)
-
-	// Before processing, check if we're ready to process or if there's been an error
-	switch {
-	case h.exitMessage != "":
-		msg := fmt.Sprintf("error on daemon: " + h.exitMessage)
-		h.bubbleUpError(w, msg, http.StatusInternalServerError)
-		return
-	}
+func (k *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, r *http.Request) {
+	k.logger.Infof("Handling %s - %s\n", r.URL.Path, r.Method)
 
 	// First verify our token and extract any commands if we can
 	tokenToValidate := r.Header.Get("Authorization")
@@ -238,8 +220,8 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 
 	// Validate the token
 	tokensSplit := strings.Split(tokenToValidate, securityTokenDelimiter)
-	if tokensSplit[0] != h.localhostToken {
-		h.bubbleUpError(w, "localhost token did not validate. Ensure you are using the right Kube config file", http.StatusInternalServerError)
+	if tokensSplit[0] != k.localhostToken {
+		k.bubbleUpError(w, "localhost token did not validate. Ensure you are using the right Kube config file", http.StatusInternalServerError)
 		return
 	}
 
@@ -254,20 +236,20 @@ func (h *KubeServer) rootCallback(logger *logger.Logger, w http.ResponseWriter, 
 	// Determine the action
 	action := getAction(r)
 
-	// Make food
-	food := kube.KubeFood{
-		Action:  action,
-		LogId:   logId,
-		Command: command,
-		Writer:  w,
-		Reader:  r,
+	// start up our plugin
+	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+	dcId := uuid.New().String()
+
+	pluginLogger := logger.GetPluginLogger(bzplugin.Kube)
+	pluginLogger = pluginLogger.GetDatachannelLogger(dcId)
+	plugin := kube.New(pluginLogger, k.targetUser, k.targetGroups)
+
+	if err := k.newDataChannel(dcId, string(action), k.websocket, plugin, w); err != nil {
+		k.logger.Error(err)
 	}
 
-	// create new datachannel and feed it kubectl handlers
-	if datachannel, err := h.newDataChannel(string(action), h.websocket); err == nil {
-		datachannel.Feed(food)
-	} else {
-		h.logger.Errorf("failed to provision new datachannel: %s", err)
+	if err := plugin.StartAction(action, logId, command, w, r); err != nil {
+		logger.Errorf("error starting action: %s", err)
 	}
 }
 

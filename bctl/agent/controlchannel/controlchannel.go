@@ -119,7 +119,7 @@ func Start(logger *logger.Logger,
 					wsMetadata.Client.Send(am.AgentMessage{
 						MessageType:    string(am.CloseDaemonWebsocket),
 						MessagePayload: []byte{},
-						SchemaVersion:  am.SchemaVersion,
+						SchemaVersion:  am.CurrentVersion,
 						ChannelId:      "-1", // Channel Id does not since this applies to all datachannels
 					})
 
@@ -157,7 +157,7 @@ func (c *ControlChannel) send(messageType am.MessageType, messagePayload interfa
 	agentMessage := am.AgentMessage{
 		ChannelId:      c.id,
 		MessageType:    string(messageType),
-		SchemaVersion:  am.SchemaVersion,
+		SchemaVersion:  am.CurrentVersion,
 		MessagePayload: messageBytes,
 	}
 
@@ -198,13 +198,14 @@ func (c *ControlChannel) openDataChannel(message OpenDataChannelMessage) error {
 	connectionId := message.ConnectionId
 	dcId := message.DataChannelId
 	subLogger := c.logger.GetDatachannelLogger(dcId)
+	ksSubLogger := c.logger.GetComponentLogger("mrzap")
 
 	// grab the websocket
 	if websocketMeta, ok := c.getConnectionMap(connectionId); !ok {
 		return fmt.Errorf("agent does not have a websocket associated with id %s", connectionId)
-	} else if keysplitter, err := keysplitting.New(c.ksConfig); err != nil {
+	} else if keysplitter, err := keysplitting.New(ksSubLogger, c.ksConfig); err != nil {
 		return err
-	} else if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, dcId, message.Syn, keysplitter); err != nil {
+	} else if datachannel, err := datachannel.New(&c.tmb, subLogger, websocketMeta.Client, keysplitter, dcId, message.Syn); err != nil {
 		return err
 	} else {
 		// add our new datachannel to our connections dictionary
@@ -219,7 +220,8 @@ func (c *ControlChannel) processInput(agentMessage am.AgentMessage) error {
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.HealthCheck:
-		return fmt.Errorf("as of version 4.2.0 this agent no longer accepts healthcheck messages; ignoring")
+		c.logger.Debugf("as of version 4.2.0 this agent no longer accepts healthcheck messages; ignoring")
+		return nil
 	case am.OpenWebsocket:
 		var owRequest OpenWebsocketMessage
 		if err := json.Unmarshal(agentMessage.MessagePayload, &owRequest); err != nil {

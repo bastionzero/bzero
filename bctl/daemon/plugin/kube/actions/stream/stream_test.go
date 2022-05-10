@@ -10,10 +10,10 @@ import (
 	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"gopkg.in/tomb.v2"
 )
 
 func TestSteam(t *testing.T) {
@@ -22,7 +22,6 @@ func TestSteam(t *testing.T) {
 }
 
 var _ = Describe("Daemon Stream action", func() {
-	var tmb tomb.Tomb
 	logger := logger.MockLogger()
 	requestId := "rid"
 	logId := "lid"
@@ -34,13 +33,15 @@ var _ = Describe("Daemon Stream action", func() {
 	urlPath := "test-path"
 
 	Context("Happy path", func() {
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
 		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 		writer := tests.MockResponseWriter{}
 		writer.On("Write", []byte(receiveData1)).Return(12, nil)
 		writer.On("Write", []byte(receiveData2)).Return(14, nil)
 		writer.On("Header").Return(make(map[string][]string))
 
-		s, outputChan := New(logger, requestId, logId, command)
+		s := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
 		It("passes the request and response correctly", func() {
@@ -118,7 +119,7 @@ var _ = Describe("Daemon Stream action", func() {
 			}()
 
 			By("starting without error")
-			err := s.Start(&tmb, &writer, &request)
+			err := s.Start(&writer, &request)
 			Expect(err).To(BeNil())
 		})
 	})
