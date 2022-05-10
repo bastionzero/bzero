@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
@@ -108,6 +109,7 @@ func StartDbServer(logger *logger.Logger,
 		}
 
 		logger.Infof("Accepting new tcp connection")
+		time.Sleep(time.Second)
 
 		// create our new datachannel in its own go routine so that we can accept other tcp connections
 		go func() {
