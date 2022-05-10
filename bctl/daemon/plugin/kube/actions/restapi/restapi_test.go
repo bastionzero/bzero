@@ -14,7 +14,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	kuberest "bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/restapi"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"gopkg.in/tomb.v2"
 )
 
 func TestRestApi(t *testing.T) {
@@ -23,8 +22,8 @@ func TestRestApi(t *testing.T) {
 }
 
 var _ = Describe("Daemon RestApi action", func() {
-	var tmb tomb.Tomb
 	logger := logger.MockLogger()
+
 	requestId := "rid"
 	logId := "lid"
 	command := "get pods"
@@ -33,10 +32,13 @@ var _ = Describe("Daemon RestApi action", func() {
 	urlPath := "test-path"
 
 	Context("Receiving a successful API response", func() {
+
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
 		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 		writer := tests.MockResponseWriter{}
 		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
-		r, outputChan := New(logger, requestId, logId, command)
+		r := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
 		It("passes the API request and response correctly", func() {
@@ -56,9 +58,7 @@ var _ = Describe("Daemon RestApi action", func() {
 					StatusCode: http.StatusOK,
 				})
 
-				r.ReceiveKeysplitting(plugin.ActionWrapper{
-					ActionPayload: payloadBytes,
-				})
+				r.ReceiveKeysplitting(payloadBytes)
 
 				By("writing the API response out to the user")
 				time.Sleep(1 * time.Second)
@@ -66,18 +66,20 @@ var _ = Describe("Daemon RestApi action", func() {
 			}()
 
 			By("starting without error")
-			err := r.Start(&tmb, &writer, &request)
+			err := r.Start(&writer, &request)
 			Expect(err).To(BeNil())
 		})
 	})
 
 	Context("Receiving an API error", func() {
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
 		request := tests.MockHttpRequest("GET", urlPath, make(map[string][]string), sendData)
 		writer := tests.MockResponseWriter{}
 		writer.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
 		writer.On("Header").Return(make(map[string][]string))
 		writer.On("WriteHeader", http.StatusInternalServerError).Return()
-		r, outputChan := New(logger, requestId, logId, command)
+		r := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
 		It("handles the API request and response correctly, given the error", func() {
@@ -94,9 +96,7 @@ var _ = Describe("Daemon RestApi action", func() {
 					StatusCode: http.StatusNotFound,
 				})
 
-				r.ReceiveKeysplitting(plugin.ActionWrapper{
-					ActionPayload: payloadBytes,
-				})
+				r.ReceiveKeysplitting(payloadBytes)
 
 				// this checks that the Write function was called as expected
 				By("returning the error to the user")
@@ -105,7 +105,7 @@ var _ = Describe("Daemon RestApi action", func() {
 			}()
 
 			By("returning the error to the datachannel")
-			err := r.Start(&tmb, &writer, &request)
+			err := r.Start(&writer, &request)
 			Expect(err).To(Equal(fmt.Errorf("request failed with status code %v: %v", http.StatusNotFound, receiveData)))
 		})
 	})

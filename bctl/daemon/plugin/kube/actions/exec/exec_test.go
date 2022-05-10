@@ -11,11 +11,10 @@ import (
 	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/exec"
-	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"gopkg.in/tomb.v2"
 )
 
 // inject our mock object
@@ -37,8 +36,8 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 		NewSPDYService = oldNewSPDYService
 	})
 
-	var tmb tomb.Tomb
 	logger := logger.MockLogger()
+
 	requestId := "rid"
 	logId := "lid"
 	command := "exec"
@@ -48,7 +47,7 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 	urlPath := "test-path"
 
 	mockStdinStream := tests.MockStream{MyStreamData: streamData}
-	mockStdinStream.On("Read", make([]byte, kubeutils.ExecChunkSize)).Return(len(streamData), nil)
+	mockStdinStream.On("Read").Return(len(streamData), nil)
 
 	mockStdoutStream := tests.MockStream{}
 	mockStdoutStream.On("Write", []byte(receiveData)).Return(len(receiveData), nil)
@@ -57,8 +56,7 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 	mockResizeStream := tests.MockStream{}
 	mockStreamConnection := new(tests.MockStreamConnection)
 
-	var closeChan <-chan bool
-
+	closeChan := make(chan bool)
 	mockStreamConnection.On("CloseChan").Return(closeChan)
 	mockStreamConnection.On("Close").Return(nil)
 
@@ -78,12 +76,14 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 	writer := tests.MockResponseWriter{}
 
 	Context("Happy path", func() {
-		e, outputChan := New(logger, requestId, logId, command)
+		doneChan := make(chan struct{})
+		outputChan := make(chan plugin.ActionWrapper, 1)
+		e := New(logger, outputChan, doneChan, requestId, logId, command)
 
 		// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
 		It("handles the exec session correctly", func() {
 			By("starting without error")
-			err := e.Start(&tmb, &writer, &request)
+			err := e.Start(&writer, &request)
 			Expect(err).To(BeNil())
 
 			startMessage := <-outputChan

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"gopkg.in/tomb.v2"
 
@@ -16,27 +17,30 @@ import (
 )
 
 const (
-	chunkSize = 64 * 1024
+	chunkSize      = 64 * 1024
+	writeDeadline  = 5 * time.Second
+	dialTCPTimeout = 30 * time.Second
 )
 
 type Dial struct {
+	tmb    tomb.Tomb
 	logger *logger.Logger
-	tmb    *tomb.Tomb
-	closed bool
+
+	// channel for letting the plugin know we're done
+	doneChan chan struct{}
 
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan     chan smsg.StreamMessage
 	streamMessageVersion smsg.SchemaVersion
 
-	requestId     string
-	remoteAddress *net.TCPAddr
-
-	remoteConnection *net.TCPConn
+	requestId        string
+	remoteAddress    *net.TCPAddr
+	remoteConnection *net.Conn
 }
 
 func New(logger *logger.Logger,
-	pluginTmb *tomb.Tomb,
 	ch chan smsg.StreamMessage,
+	doneChan chan struct{},
 	remoteHost string,
 	remotePort int) (*Dial, error) {
 
@@ -50,19 +54,22 @@ func New(logger *logger.Logger,
 	} else {
 		return &Dial{
 			logger:           logger,
-			tmb:              pluginTmb,
-			closed:           false,
+			doneChan:         doneChan,
 			streamOutputChan: ch,
 			remoteAddress:    raddr,
 		}, nil
 	}
 }
 
-func (d *Dial) Closed() bool {
-	return d.closed
+func (d *Dial) Kill() {
+	d.tmb.Kill(nil)
+	if d.remoteConnection != nil {
+		(*d.remoteConnection).Close()
+	}
+	d.tmb.Wait()
 }
 
-func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (d *Dial) Receive(action string, actionPayload []byte) ([]byte, error) {
 	var err error
 
 	// Update the logger action
@@ -74,7 +81,6 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 			err = fmt.Errorf("malformed dial action payload %v", actionPayload)
 			break
 		}
-
 		return d.start(dialActionRequest, action)
 	case dial.DialInput:
 
@@ -93,23 +99,20 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 
 			// Send this data to our remote connection
 			d.logger.Info("Received data from daemon, forwarding to remote tcp connection")
-			_, err = d.remoteConnection.Write(dataToWrite)
+
+			// Set a deadline for the write so we don't block forever
+			(*d.remoteConnection).SetWriteDeadline(time.Now().Add(writeDeadline))
+			if _, err := (*d.remoteConnection).Write(dataToWrite); !d.tmb.Alive() {
+				return []byte{}, nil
+			} else if err != nil {
+				d.logger.Errorf("error writing to local TCP connection: %s", err)
+				d.Kill()
+			}
 		}
 
 	case dial.DialStop:
-
-		// Deserialize the action payload
-		var dataEnd dial.DialActionPayload
-		if jerr := json.Unmarshal(actionPayload, &dataEnd); jerr != nil {
-			err = fmt.Errorf("unable to unmarshal dial input message: %s", jerr)
-			break
-		}
-
-		d.closed = true // Ensure that we close the dial action
-		d.remoteConnection.Close()
-
-		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
-		return action, actionPayload, nil
+		d.Kill()
+		return actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %v", action)
 	}
@@ -117,10 +120,10 @@ func (d *Dial) Receive(action string, actionPayload []byte) (string, []byte, err
 	if err != nil {
 		d.logger.Error(err)
 	}
-	return "", []byte{}, err
+	return []byte{}, err
 }
 
-func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (string, []byte, error) {
+func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) ([]byte, error) {
 	// keep track of who we're talking to
 	d.requestId = dialActionRequest.RequestId
 	d.logger.Infof("Setting request id: %s", d.requestId)
@@ -128,73 +131,61 @@ func (d *Dial) start(dialActionRequest dial.DialActionPayload, action string) (s
 	d.logger.Infof("Setting stream message version: %s", d.streamMessageVersion)
 
 	// For each start, call the dial the TCP address
-	if remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress); err != nil {
+	if remoteConnection, err := net.DialTimeout("tcp", d.remoteAddress.String(), dialTCPTimeout); err != nil {
 		d.logger.Errorf("Failed to dial remote address: %s", err)
-		return action, []byte{}, err
+		return []byte{}, err
 	} else {
-		d.remoteConnection = remoteConnection
+		d.remoteConnection = &remoteConnection
 	}
 
-	// set up a go routine to listen to the tomb dying so that we can interrupt our listening routine
-	go func() {
-		<-d.tmb.Dying()
-		d.remoteConnection.Close()
-	}()
-
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
-	go func() {
-		defer d.remoteConnection.Close()
-		defer func() {
-			d.closed = true
-		}()
+	d.tmb.Go(func() error {
+		defer close(d.doneChan)
 
 		sequenceNumber := 0
 		buff := make([]byte, chunkSize)
 
 		for {
 			// this line blocks until it reads output or error
-			n, err := d.remoteConnection.Read(buff)
-
-			if d.closed {
-				return
-			}
-
-			if err != nil {
-				if err != io.EOF {
-					d.logger.Errorf("failed to read from tcp connection: %s", err)
-				} else {
+			if n, err := (*d.remoteConnection).Read(buff); !d.tmb.Alive() {
+				return nil
+			} else if err != nil {
+				if err == io.EOF {
 					d.logger.Errorf("connection closed")
+
+					// Let our daemon know that we have got the error and we need to close the connection
+					switch d.streamMessageVersion {
+					// prior to 202204
+					case "":
+						d.sendStreamMessage(sequenceNumber, smsg.DbStreamEnd, false, buff[:n])
+					default:
+						d.sendStreamMessage(sequenceNumber, smsg.Stream, false, buff[:n])
+					}
+				} else {
+					d.logger.Errorf("failed to read from tcp connection: %s", err)
+					d.sendStreamMessage(sequenceNumber, smsg.Error, false, []byte(err.Error()))
 				}
 
-				// Let our daemon know that we have got the error and we need to close the connection
+				return err
+			} else {
+				d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
+
+				// Now send this to daemon
 				switch d.streamMessageVersion {
 				// prior to 202204
 				case "":
-					d.sendStreamMessage(sequenceNumber, smsg.DbStreamEnd, false, buff[:n])
+					d.sendStreamMessage(sequenceNumber, smsg.DbStream, true, buff[:n])
 				default:
-					d.sendStreamMessage(sequenceNumber, smsg.Stream, false, buff[:n])
+					d.sendStreamMessage(sequenceNumber, smsg.Stream, true, buff[:n])
 				}
 
-				return
+				sequenceNumber += 1
 			}
-
-			d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
-
-			// Now send this to daemon
-			switch d.streamMessageVersion {
-			// prior to 202204
-			case "":
-				d.sendStreamMessage(sequenceNumber, smsg.DbStream, true, buff[:n])
-			default:
-				d.sendStreamMessage(sequenceNumber, smsg.Stream, true, buff[:n])
-			}
-
-			sequenceNumber += 1
 		}
-	}()
+	})
 
 	// Update our remote connection
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
 func (d *Dial) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {

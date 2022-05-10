@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,46 +10,44 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 type IWebAction interface {
-	Receive(action string, actionPayload []byte) (string, []byte, error)
-	Closed() bool
+	Receive(action string, actionPayload []byte) ([]byte, error)
+	Kill()
 }
 
 type WebPlugin struct {
-	tmb    *tomb.Tomb // datachannel's tomb
 	logger *logger.Logger
 
 	action           IWebAction
 	streamOutputChan chan smsg.StreamMessage
+	doneChan         chan struct{}
 
 	// remote host:port
 	remotePort int
 	remoteHost string
 }
 
-func New(parentTmb *tomb.Tomb,
+func New(
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	action string,
-	payload []byte) (*WebPlugin, error) {
+	payload []byte,
+) (*WebPlugin, error) {
 
 	// Unmarshal the Syn payload
 	var actionPayload bzweb.WebActionParams
 	if err := json.Unmarshal(payload, &actionPayload); err != nil {
-		return nil, fmt.Errorf("malformed web plugin SYN payload %s", string(payload))
+		return nil, fmt.Errorf("malformed web plugin SYN payload")
 	}
 
 	plugin := &WebPlugin{
-		tmb:    parentTmb, // if datachannel dies, so should we
-		logger: logger,
-
+		logger:           logger,
 		streamOutputChan: ch,
-
-		remotePort: actionPayload.RemotePort,
-		remoteHost: actionPayload.RemoteHost,
+		doneChan:         make(chan struct{}),
+		remotePort:       actionPayload.RemotePort,
+		remoteHost:       actionPayload.RemoteHost,
 	}
 
 	// start the action for the plugin
@@ -62,16 +59,15 @@ func New(parentTmb *tomb.Tomb,
 	} else {
 		switch parsedAction {
 		case bzweb.Dial:
-			plugin.action, rerr = webdial.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+			plugin.action, rerr = webdial.New(subLogger, plugin.streamOutputChan, plugin.doneChan, plugin.remoteHost, plugin.remotePort)
 		case bzweb.Websocket:
-			plugin.action, rerr = webwebsocket.New(subLogger, plugin.remoteHost, plugin.remotePort, plugin.tmb, plugin.streamOutputChan)
+			plugin.action, rerr = webwebsocket.New(subLogger, plugin.streamOutputChan, plugin.doneChan, plugin.remoteHost, plugin.remotePort)
 		default:
 			rerr = fmt.Errorf("unhandled Web action")
 		}
 	}
 
 	if rerr != nil {
-		plugin.logger.Errorf("failed to start Web plugin with action %s: %s", action, rerr)
 		return nil, rerr
 	} else {
 		plugin.logger.Infof("Web plugin started with %v action", action)
@@ -79,16 +75,23 @@ func New(parentTmb *tomb.Tomb,
 	}
 }
 
-func (w *WebPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (w *WebPlugin) Done() <-chan struct{} {
+	return w.doneChan
+}
+
+func (w *WebPlugin) Kill() {
+	if w.action != nil {
+		w.action.Kill()
+	}
+}
+
+func (w *WebPlugin) Receive(action string, actionPayload []byte) ([]byte, error) {
 	w.logger.Debugf("Web plugin received message with %v action", action)
 
-	if safePayload, err := cleanPayload(actionPayload); err != nil {
-		w.logger.Error(err)
-		return "", []byte{}, err
-	} else if action, payload, err := w.action.Receive(action, safePayload); err != nil {
-		return "", []byte{}, err
+	if payload, err := w.action.Receive(action, actionPayload); err != nil {
+		return []byte{}, err
 	} else {
-		return action, payload, err
+		return payload, err
 	}
 }
 
@@ -98,20 +101,4 @@ func parseAction(action string) (bzweb.WebAction, error) {
 		return "", fmt.Errorf("malformed action: %s", action)
 	}
 	return bzweb.WebAction(parsedAction[1]), nil
-}
-
-func cleanPayload(payload []byte) ([]byte, error) {
-	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
-	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
-	// so that we can murder its family
-	if len(payload) > 0 {
-		payload = payload[1 : len(payload)-1]
-	}
-
-	// Json unmarshalling encodes bytes in base64
-	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
-		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
-	} else {
-		return payloadSafe, nil
-	}
 }

@@ -13,7 +13,6 @@ import (
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	"bastionzero.com/bctl/v1/bzerolib/ringbuffer"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 // DefaultShell - Allows launching an interactive shell on the host which the agent is running on. Implements IShellAction.
@@ -53,16 +52,15 @@ type IPseudoTerminal interface {
 }
 
 type DefaultShell struct {
-	tmb    *tomb.Tomb // datachannel's tomb
 	logger *logger.Logger
 
-	runAsUser string
-
+	runAsUser            string
+	doneChan             chan struct{}
 	streamOutputChan     chan smsg.StreamMessage
 	streamSequenceNumber int
 
 	// stdout circular buffer
-	stdoutbuff *ringbuffer.RingBuffer
+	ringBuffer *ringbuffer.RingBuffer
 
 	// interface for interacting with pty
 	terminal IPseudoTerminal
@@ -70,21 +68,29 @@ type DefaultShell struct {
 
 // New returns a new instance of the DefaultShell
 func New(
-	parentTmb *tomb.Tomb,
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
+	doneChan chan struct{},
 	runAsUser string) (*DefaultShell, error) {
 	return &DefaultShell{
-		runAsUser:            runAsUser,
 		logger:               logger,
-		tmb:                  parentTmb, // if datachannel dies, so should we
+		runAsUser:            runAsUser,
+		doneChan:             doneChan,
 		streamOutputChan:     ch,
 		streamSequenceNumber: 1,
 	}, nil
 }
 
+func (d *DefaultShell) Kill() {
+	if d.terminal != nil {
+		d.terminal.Kill()
+		d.terminal = nil
+		<-d.doneChan
+	}
+}
+
 // Receive takes input from a client using the MRZAP datachannel and returns output via the MRZAP datachannel
-func (d *DefaultShell) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (d *DefaultShell) Receive(action string, actionPayload []byte) ([]byte, error) {
 	d.logger.Infof("Plugin received Data message with %v action", action)
 
 	switch bzshell.ShellSubAction(action) {
@@ -95,46 +101,46 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) (string, []b
 		// based on the SYN message when the datachannel is first opened.
 		if err := d.open(); err != nil {
 			d.logger.Error(err)
-			return "", []byte{}, err
+			return []byte{}, err
 		}
 	case bzshell.ShellClose:
-		d.terminal.Kill()
+		d.Kill()
 	case bzshell.ShellInput:
 		var shellInput bzshell.ShellInputMessage
 		if err := json.Unmarshal(actionPayload, &shellInput); err != nil {
 			rerr := fmt.Errorf("malformed shell input payload: %s %+v", err, actionPayload)
 			d.logger.Error(rerr)
-			return action, []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		if err := d.writeToTerminal(shellInput.Data); err != nil {
 			d.logger.Error(err)
-			return action, []byte{}, err
+			return []byte{}, err
 		}
 	case bzshell.ShellResize:
 		var shellResize bzshell.ShellResizeMessage
 		if err := json.Unmarshal(actionPayload, &shellResize); err != nil {
 			rerr := fmt.Errorf("malformed shell resize payload: %s %+v", err, actionPayload)
 			d.logger.Error(rerr)
-			return action, []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		if err := d.setSize(shellResize.Cols, shellResize.Rows); err != nil {
 			d.logger.Error(err)
-			return action, []byte{}, err
+			return []byte{}, err
 		}
 	case bzshell.ShellReplay:
-		if replayBytes, err := d.stdoutbuff.ReadAll(); err != nil {
-			return action, []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
+		if replayBytes, err := d.ringBuffer.ReadAll(); err != nil {
+			return []byte{}, fmt.Errorf("failed to read from stdout buff for shell replay %s", err)
 		} else {
-			return action, replayBytes, nil
+			return replayBytes, nil
 		}
 
 	default:
-		return action, []byte{}, fmt.Errorf("unrecognized shell action received: %s", action)
+		return []byte{}, fmt.Errorf("unrecognized shell action received: %s", action)
 	}
 
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
 func (d *DefaultShell) open() error {
@@ -149,16 +155,6 @@ func (d *DefaultShell) open() error {
 	} else {
 		d.terminal = terminal
 	}
-
-	go func() {
-		select {
-		case <-d.tmb.Dying():
-			d.terminal.Kill()
-			return
-		case <-d.terminal.Done():
-			return
-		}
-	}()
 
 	go d.writePump()
 
@@ -192,14 +188,17 @@ func (d *DefaultShell) setSize(cols, rows uint32) error {
 
 // writePump reads from pty stdout and writes to datachannel.
 func (d *DefaultShell) writePump() {
+	defer d.Kill()
+	defer close(d.doneChan)
 	defer func() {
 		if err := recover(); err != nil {
 			d.logger.Errorf("WritePump thread crashed with message: %s", err)
 		}
 	}()
 
-	d.stdoutbuff = ringbuffer.New(shellStdOutBuffCapacity)
-	stdoutBytes := make([]byte, streamDataPayloadSize)
+	d.ringBuffer = ringbuffer.New(shellStdOutBuffCapacity)
+	stdoutBuff := make([]byte, streamDataPayloadSize)
+	stdOut := d.terminal.StdOut()
 
 	// Wait for all input commands to run.
 	time.Sleep(time.Second)
@@ -211,13 +210,13 @@ func (d *DefaultShell) writePump() {
 			d.sendStreamMessage(smsg.Stop, []byte{})
 			return
 		default:
-			if stdoutBytesLen, err := d.terminal.StdOut().Read(stdoutBytes); err != nil {
-				d.sendStreamMessage(smsg.Stop, stdoutBytes[:stdoutBytesLen])
+			if stdoutBytesLen, err := stdOut.Read(stdoutBuff); err != nil {
+				d.sendStreamMessage(smsg.Stop, stdoutBuff[:stdoutBytesLen])
 				d.logger.Errorf("error reading from stdout: %s", err)
 				return
 			} else {
-				d.stdoutbuff.Write(stdoutBytes[:stdoutBytesLen])
-				d.sendStreamMessage(smsg.StdOut, stdoutBytes[:stdoutBytesLen])
+				d.ringBuffer.Write(stdoutBuff[:stdoutBytesLen])
+				d.sendStreamMessage(smsg.StdOut, stdoutBuff[:stdoutBytesLen])
 			}
 
 			// Wait for stdout to process more data

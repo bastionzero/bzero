@@ -3,7 +3,6 @@ package portforward
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/portforward"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
-	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/rest"
 )
@@ -91,16 +89,16 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 	})
 
 	logger := logger.MockLogger()
-	var tmb tomb.Tomb
-	outputChan := make(chan smsg.StreamMessage, 1)
 
 	requestId := "rid"
 	portForwardRequestId := "pid"
 	testData := "test data"
 
 	Context("Happy path", func() {
+		outputChan := make(chan smsg.StreamMessage, 30)
+		doneChan := make(chan struct{})
 		mockStream := tests.MockStream{MyStreamData: testData}
-		mockStream.On("Read", make([]byte, portforward.DataStreamBufferSize)).Return(9, nil)
+		mockStream.On("Read").Return(len(testData), nil)
 		mockStream.On("Write", []byte(testData)).Return(len(testData), nil)
 		mockStream.On("Close").Return(nil)
 
@@ -110,32 +108,29 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 			"Requestid": []string{portForwardRequestId},
 		}).Return(mockStream, nil)
 		mockStreamConnection.On("Close").Return(nil)
+		closeChan := make(chan bool)
+		mockStreamConnection.On("CloseChan").Return(closeChan)
 
 		setDoDial(mockStreamConnection)
 		setGetConfig()
 
-		p, err := New(logger, &tmb, "serviceAccountToken", "kubeHost", make([]string, 0), "test user", outputChan)
+		p := New(logger, outputChan, doneChan, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
 
 		It("handles the portforwarding session correctly", func() {
-			By("starting without error")
-			Expect(err).To(BeNil())
-
 			By("receiving a PortForward request without error")
 			payload := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
-			action, responsePayload, err := p.Receive(string(portforward.StartPortForward), payload)
+			responsePayload, err := p.Receive(string(portforward.StartPortForward), payload)
 			Expect(err).To(BeNil())
-			Expect(action).To(Equal(string(portforward.StartPortForward)))
 			Expect(responsePayload).To(Equal([]byte{}))
 
 			readyMessage := <-outputChan
-			By("by alerting that it has started the portforward interaction with the kube server")
+			By("alerting that it has started the portforward interaction with the kube server")
 			Expect(readyMessage.Content).To(Equal(""))
 
 			payload = buildActionPayload(testData, requestId, portForwardRequestId)
 			By("receiving data from the remote port")
-			action, responsePayload, err = p.Receive(string(portforward.DataInPortForward), payload)
+			responsePayload, err = p.Receive(string(portforward.DataInPortForward), payload)
 			Expect(err).To(BeNil())
-			Expect(action).To(Equal(string(portforward.DataInPortForward)))
 			Expect(responsePayload).To(Equal([]byte{}))
 
 			dataMessage := <-outputChan
@@ -148,21 +143,16 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 
 			By("ending a particular portforward request when the daemon sends a stop request message")
 			stopRequestPayload := buildStopRequestActionPayload(requestId, portForwardRequestId)
-			action, responsePayload, err = p.Receive(string(portforward.StopPortForwardRequest), stopRequestPayload)
+			responsePayload, err = p.Receive(string(portforward.StopPortForwardRequest), stopRequestPayload)
 			Expect(err).To(BeNil())
-			Expect(action).To(Equal(string(portforward.StopPortForwardRequest)))
 			Expect(responsePayload).To(Equal([]byte{}))
 
 			By("closing when the daemon sends a stop message")
 			stopPayload := buildStopActionPayload(requestId)
-			action, responsePayload, err = p.Receive(string(portforward.StopPortForward), stopPayload)
+			responsePayload, err = p.Receive(string(portforward.StopPortForward), stopPayload)
+			close(closeChan)
 			Expect(err).To(BeNil())
-			Expect(action).To(Equal(string(portforward.StopPortForward)))
 			Expect(responsePayload).To(Equal([]byte{}))
-			Expect(p.Closed()).To(BeTrue())
-
-			By("dying when its tomb is killed")
-			tmb.Kill(errors.New("test kill"))
 
 			By("interacting with the stream connection as expected")
 			time.Sleep(time.Second)

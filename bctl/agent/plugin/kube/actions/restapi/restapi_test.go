@@ -73,25 +73,19 @@ var _ = Describe("Agent RestApi action", Ordered, func() {
 	}
 
 	Context("Happy path", func() {
+		doneChan := make(chan struct{})
 		setMakeRequest(statusCode, headers, testString)
-		r, err := New(logger, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
+		r := New(logger, doneChan, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
 
 		It("handles the API request and response correctly", func() {
-			By("starting without error")
-			Expect(err).To(BeNil())
-
 			By("receiving an API request without error")
 			payloadBytes := buildActionPayload(make(map[string][]string), requestId)
-			action, responsePayload, err := r.Receive("restapi", payloadBytes)
+			responsePayload, err := r.Receive("restapi", payloadBytes)
 			Expect(err).To(BeNil())
-			Expect(action).To(Equal(string(kuberest.RestResponse)))
 
 			By("returning the expected response")
 			expectedResponse := buildExpectedResponsePayload(statusCode, headers, requestId, testString)
 			Expect(responsePayload).To(Equal(expectedResponse))
-
-			By("closing after the return")
-			Expect(r.Closed()).To(BeTrue())
 		})
 	})
 })

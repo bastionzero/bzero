@@ -1,7 +1,6 @@
 package db
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,45 +9,44 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/db"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 type IDbAction interface {
-	Receive(action string, actionPayload []byte) (string, []byte, error)
-	Closed() bool
+	Receive(action string, actionPayload []byte) ([]byte, error)
+	Kill()
 }
 
 type DbPlugin struct {
 	logger *logger.Logger
-	tmb    *tomb.Tomb // datachannel's tomb
 
 	action           IDbAction
 	streamOutputChan chan smsg.StreamMessage
+	doneChan         chan struct{}
 
 	// Either use the host:port
 	remotePort int
 	remoteHost string
 }
 
-func New(parentTmb *tomb.Tomb,
-	logger *logger.Logger,
+func New(logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	action string,
-	payload []byte) (*DbPlugin, error) {
+	payload []byte,
+) (*DbPlugin, error) {
 
 	// Unmarshal the Syn payload
-	var synPayload db.DbActionParams
-	if err := json.Unmarshal(payload, &synPayload); err != nil {
+	var syn db.DbActionParams
+	if err := json.Unmarshal(payload, &syn); err != nil {
 		return nil, fmt.Errorf("malformed Db plugin SYN payload %v", string(payload))
 	}
 
 	// Create our plugin
 	plugin := &DbPlugin{
-		remotePort:       synPayload.RemotePort,
-		remoteHost:       synPayload.RemoteHost,
 		logger:           logger,
-		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,
+		doneChan:         make(chan struct{}),
+		remotePort:       syn.RemotePort,
+		remoteHost:       syn.RemoteHost,
 	}
 
 	// Start up the action for this plugin
@@ -60,7 +58,7 @@ func New(parentTmb *tomb.Tomb,
 
 		switch parsedAction {
 		case db.Dial:
-			plugin.action, rerr = dial.New(subLogger, plugin.tmb, plugin.streamOutputChan, synPayload.RemoteHost, synPayload.RemotePort)
+			plugin.action, rerr = dial.New(subLogger, plugin.streamOutputChan, plugin.doneChan, syn.RemoteHost, syn.RemotePort)
 		default:
 			rerr = fmt.Errorf("unhandled DB action")
 		}
@@ -74,20 +72,24 @@ func New(parentTmb *tomb.Tomb,
 	}
 }
 
-func (d *DbPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (d *DbPlugin) Done() <-chan struct{} {
+	return d.doneChan
+}
+
+func (d *DbPlugin) Kill() {
+	if d.action != nil {
+		d.action.Kill()
+	}
+}
+
+func (d *DbPlugin) Receive(action string, actionPayload []byte) ([]byte, error) {
 	d.logger.Debugf("DB plugin received message with %s action", action)
 
-	var rerr error
-	if safePayload, err := cleanPayload(actionPayload); err != nil {
-		rerr = err
-	} else if action, payload, err := d.action.Receive(action, safePayload); err != nil {
-		rerr = err
+	if payload, err := d.action.Receive(action, actionPayload); err != nil {
+		return []byte{}, err
 	} else {
-		return action, payload, err
+		return payload, err
 	}
-
-	d.logger.Error(rerr)
-	return "", []byte{}, rerr
 }
 
 func parseAction(action string) (db.DbAction, error) {
@@ -96,20 +98,4 @@ func parseAction(action string) (db.DbAction, error) {
 		return "", fmt.Errorf("malformed action: %s", action)
 	}
 	return db.DbAction(parsedAction[1]), nil
-}
-
-func cleanPayload(payload []byte) ([]byte, error) {
-	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
-	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
-	// so that we can murder its family
-	if len(payload) > 0 {
-		payload = payload[1 : len(payload)-1]
-	}
-
-	// Json unmarshalling encodes bytes in base64
-	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
-		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
-	} else {
-		return payloadSafe, nil
-	}
 }

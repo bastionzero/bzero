@@ -49,7 +49,7 @@ func (m *MockStreamConnection) Close() error {
 }
 func (m *MockStreamConnection) CloseChan() <-chan bool {
 	args := m.Called()
-	return args.Get(0).(<-chan bool)
+	return args.Get(0).(chan bool)
 }
 func (m *MockStreamConnection) SetIdleTimeout(timeout time.Duration) {
 	m.Called(timeout)
@@ -67,7 +67,9 @@ func (m MockStream) Close() error {
 	return args.Error(0)
 }
 func (m MockStream) Read(p []byte) (n int, err error) {
-	args := m.Called(p)
+	time.Sleep(time.Second)
+	// we actually don't want to track this exactly because it leads to pathological behavior on multiple reads
+	args := m.Called()
 
 	// use test string
 	copy(p, []byte(m.MyStreamData))
