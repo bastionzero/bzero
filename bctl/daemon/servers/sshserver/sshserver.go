@@ -111,6 +111,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	actionParamsMarshalled, _ := json.Marshal(actionParams)
 
 	action = "ssh/" + action
+	// FIXME: params not lining up -- check another server...
 	if dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, s.refreshTokenCommand, s.configPath, action, actionParamsMarshalled, s.agentPubKey, attach); err != nil {
 		s.logger.Error(err)
 		return nil, err

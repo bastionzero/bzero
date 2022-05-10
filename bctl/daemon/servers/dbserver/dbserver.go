@@ -123,7 +123,7 @@ func StartDbServer(logger *logger.Logger,
 			plugin := db.New(pluginLogger)
 			if err := plugin.StartAction(bzdb.Dial, conn); err != nil {
 				logger.Errorf("error starting action: %s", err)
-			} else if err := server.newDataChannel(dcId, string(bzdb.Dial), listener.websocket, plugin); err != nil {
+			} else if err := server.newDataChannel(dcId, string(bzdb.Dial), server.websocket, plugin); err != nil {
 				logger.Errorf("error starting datachannel: %s", err)
 			}
 		}()

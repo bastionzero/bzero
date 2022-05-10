@@ -10,27 +10,26 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"gopkg.in/tomb.v2"
 )
 
 type ISshAction interface {
-	Receive(action string, actionPayload []byte) (string, []byte, error)
-	Closed() bool
+	Receive(action string, actionPayload []byte) ([]byte, error)
+	Kill()
 }
 
 type SshPlugin struct {
 	logger *logger.Logger
-	tmb    *tomb.Tomb // datachannel's tomb
 
 	action           ISshAction
 	streamOutputChan chan smsg.StreamMessage
+
+	doneChan chan struct{}
 
 	// specific to ssh
 	targetUser string
 }
 
-func New(parentTmb *tomb.Tomb,
-	logger *logger.Logger,
+func New(logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	action string,
 	payload []byte) (*SshPlugin, error) {
@@ -45,8 +44,8 @@ func New(parentTmb *tomb.Tomb,
 	plugin := &SshPlugin{
 		targetUser:       synPayload.TargetUser,
 		logger:           logger,
-		tmb:              parentTmb, // if datachannel dies, so should we
 		streamOutputChan: ch,
+		doneChan:         make(chan struct{}),
 	}
 
 	// Start up the action for this plugin
@@ -58,7 +57,7 @@ func New(parentTmb *tomb.Tomb,
 
 		switch parsedAction {
 		case bzssh.DefaultSsh:
-			plugin.action, rerr = defaultssh.New(subLogger, plugin.tmb, plugin.streamOutputChan)
+			plugin.action, rerr = defaultssh.New(subLogger, plugin.streamOutputChan)
 		default:
 			rerr = fmt.Errorf("unhandled SSH action")
 		}
@@ -72,20 +71,30 @@ func New(parentTmb *tomb.Tomb,
 	}
 }
 
-func (s *SshPlugin) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (s *SshPlugin) Receive(action string, actionPayload []byte) ([]byte, error) {
 	s.logger.Debugf("SSH plugin received message with %s action", action)
 
 	var rerr error
 	if safePayload, err := cleanPayload(actionPayload); err != nil {
 		rerr = err
-	} else if action, payload, err := s.action.Receive(action, safePayload); err != nil {
+	} else if payload, err := s.action.Receive(action, safePayload); err != nil {
 		rerr = err
 	} else {
-		return action, payload, err
+		return payload, err
 	}
 
 	s.logger.Error(rerr)
-	return "", []byte{}, rerr
+	return []byte{}, rerr
+}
+
+func (s *SshPlugin) Done() <-chan struct{} {
+	return s.doneChan
+}
+
+func (s *SshPlugin) Kill() {
+	if s.action != nil {
+		s.action.Kill()
+	}
 }
 
 func parseAction(action string) (bzssh.SshAction, error) {

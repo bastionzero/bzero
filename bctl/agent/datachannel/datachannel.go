@@ -293,11 +293,11 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 	var err error
 	switch pluginName {
 	case bzplugin.Kube:
-		d.plugin, err = kube.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+		d.plugin, err = kube.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Shell:
-		d.plugin, err = shell.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+		d.plugin, err = shell.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Ssh:
-		d.plugin, err = ssh.New(&d.tmb, subLogger, streamOutputChan, action, payload)
+		d.plugin, err = ssh.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Web:
 		d.plugin, err = web.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Db:

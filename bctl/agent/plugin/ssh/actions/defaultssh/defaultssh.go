@@ -13,8 +13,6 @@ import (
 	"regexp"
 	"strings"
 
-	"gopkg.in/tomb.v2"
-
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -31,7 +29,6 @@ var ShellPluginCommandArgs = []string{"-c"}
 
 type DefaultSsh struct {
 	logger *logger.Logger
-	tmb    *tomb.Tomb
 	closed bool
 
 	// output channel to send all of our stream messages directly to datachannel
@@ -46,7 +43,7 @@ type DefaultSsh struct {
 	authorizedKeyEntry string
 }
 
-func New(logger *logger.Logger, pluginTmb *tomb.Tomb, ch chan smsg.StreamMessage) (*DefaultSsh, error) {
+func New(logger *logger.Logger, ch chan smsg.StreamMessage) (*DefaultSsh, error) {
 
 	// Open up a connection to the TCP addr we are trying to connect to
 	// TODO: const?
@@ -56,7 +53,6 @@ func New(logger *logger.Logger, pluginTmb *tomb.Tomb, ch chan smsg.StreamMessage
 	} else {
 		return &DefaultSsh{
 			logger:           logger,
-			tmb:              pluginTmb,
 			closed:           false,
 			streamOutputChan: ch,
 			remoteAddress:    raddr,
@@ -68,7 +64,11 @@ func (d *DefaultSsh) Closed() bool {
 	return d.closed
 }
 
-func (d *DefaultSsh) Receive(action string, actionPayload []byte) (string, []byte, error) {
+func (d *DefaultSsh) Kill() {
+	// FIXME: unclear whether this needs to do anything
+}
+
+func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
 	var err error
 
 	// Update the logger action
@@ -111,7 +111,7 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) (string, []byt
 		d.remoteConnection.Close()
 
 		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
-		return action, actionPayload, nil
+		return actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %v", action)
 	}
@@ -119,10 +119,10 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) (string, []byt
 	if err != nil {
 		d.logger.Error(err)
 	}
-	return "", []byte{}, err
+	return []byte{}, err
 }
 
-func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) (string, []byte, error) {
+func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
 	// FIXME: add this back in
 	//d.streamMessageVersion = openRequest.StreamMessageVersion
 	//d.logger.Infof("Setting stream message version: %s", d.streamMessageVersion)
@@ -132,14 +132,14 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) (strin
 	// For each start, call the dial the TCP address
 	if remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress); err != nil {
 		d.logger.Errorf("Failed to dial remote address: %s", err)
-		return action, []byte{}, err
+		return []byte{}, err
 	} else {
 		d.remoteConnection = remoteConnection
 	}
 
 	// set up a go routine to listen to the tomb dying so that we can interrupt our listening routine
 	go func() {
-		<-d.tmb.Dying()
+		// FIXME: no more tomb...
 		d.remoteConnection.Close()
 	}()
 
@@ -189,7 +189,7 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) (strin
 	}()
 
 	// Update our remote connection
-	return action, []byte{}, nil
+	return []byte{}, nil
 }
 
 func (d *DefaultSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
