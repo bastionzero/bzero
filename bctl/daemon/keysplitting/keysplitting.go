@@ -200,8 +200,9 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				k.lastAck = ksMessage
 				k.pipelineMap.Delete(hpointer) // delete syn from map
 
-				// when we recover, we're recovering based on the nonce in the syn/ack because
-				// it is an hpointer which refers to the agent's last recieved and validated message
+				// when we recover, we're recovering based on the nonce in the syn/ack because unless
+				// it's not in response to the initial syn, where the nonce is a true random number,
+				// it is an hpointer which refers to the agent's last recieved and validated message.
 				// aka it is the current state of the mrzap hash chain according to the agent and this
 				// recovery mechanism allows us to sync our mrzap state to that
 				k.recovering = false
@@ -231,7 +232,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		case ksmsg.DataAck:
 			// check if incoming message corresponds to our most recently sent data
 			if pair := k.pipelineMap.Oldest(); pair == nil {
-				return fmt.Errorf("where did this ack come from?! we're not waiting for a response to any messages")
+				return fmt.Errorf("we received an ack but we're not waiting for a response to any messages")
 			} else if pair.Key != hpointer {
 				k.logger.Info("Received an out-of-order ack message")
 				if len(k.outOfOrderAcks) > pipelineLimit {
@@ -325,11 +326,9 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 }
 
 func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, action string, payload []byte) (ksmsg.KeysplittingMessage, error) {
-	// payloadBytes, err := json.Marshal(payload)
-
+	// TODO: CWC-1820: remove this if statement once all daemon's are updated
 	if k.prePipeliningAgent {
 		// if we're talking with an old agent, then we have to add extra quotes
-		// TODO: CWC-1820: remove once all daemon's are updated
 
 		// sometimes go will extra marshal big things, but because we need to compensate for an old
 		// extra marshaling bug on our part, we have to make sure that we are marshaling things the

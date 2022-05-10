@@ -109,6 +109,9 @@ func StartDbServer(logger *logger.Logger,
 		}
 
 		logger.Infof("Accepting new tcp connection")
+
+		// important sleep for preventing errors on linux machines when executing commands immediately
+		// after daemon startup
 		time.Sleep(time.Second)
 
 		// create our new datachannel in its own go routine so that we can accept other tcp connections

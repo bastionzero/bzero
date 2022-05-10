@@ -10,7 +10,9 @@ type DataAckPayload struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Type          string `json:"type"`
 	Action        string `json:"action"`
-	Timestamp     string `json:"timestamp"`
+
+	// TODO: Remove, we don't use this now because of pipelining
+	Timestamp string `json:"timestamp"`
 
 	// Unique to DataAck Payload
 	TargetPublicKey       string `json:"targetPublicKey"`
