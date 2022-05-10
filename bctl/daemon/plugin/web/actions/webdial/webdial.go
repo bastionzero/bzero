@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
+	"strings"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -74,7 +76,13 @@ func (w *WebDialAction) Start(writer http.ResponseWriter, request *http.Request)
 	headerSet := false
 
 	// Send our request, in chunks if the body > chunksize
-	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
+	request.ParseForm()
+	if len(request.Form) > 0 {
+		readCloser := ioutil.NopCloser(strings.NewReader(request.Form.Encode()))
+		w.sendRequestChunks(readCloser, request.URL.String(), headers, request.Method)
+	} else {
+		w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
+	}
 
 	for {
 		select {
