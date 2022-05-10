@@ -5,16 +5,9 @@ env:
   variables:
     TZ: "America/New_York date"
     ReleaseDir: "release"
-    AWS_ENV: "dev"
-    BZERO_IN_CI: 1
   parameter-store:
     # The SSH RSA Key used by our machine user
     build_ssh_key: "/cwc/ssh/rolandfrank"
-    BZERO_AGENT_VERSION: /webshell/development/bzero-agent-version
-    BCTL_QUICKSTART_VERSION: /development/infra/bctl-quickstart-version
-  secrets-manager:
-    DO_API_KEY: development/infra/system-test-secret:DO_API_KEY
-    GITHUB_API_KEY: arn:aws:secretsmanager:us-east-1:238681891460:secret:development/infra/roleandfrank-github-api-key-1Cok4j:Token
   git-credential-helper: yes
 phases:
   install:
@@ -60,7 +53,7 @@ phases:
       - apt-get install apt-transport-https -y
       - echo "deb https://baltocdn.com/helm/stable/debian/ all main" | tee /etc/apt/sources.list.d/helm-stable-debian.list
       - apt-get update -y && apt-get install helm
-      # Install docker and iperf
+      # Install docker and iperf3
       - apt-get install -y docker
       # Ref: https://iperf.fr/iperf-download.php#archlinux
       - sudo wget -O /usr/lib/libiperf.so.0 https://iperf.fr/download/ubuntu/libiperf.so.0_3.1.3 -q
@@ -77,4 +70,4 @@ phases:
   build:
     commands:
       - echo Build started `date`
-      - bzero-qa test -sys-tests --allSuites
+      - bzero-qa test -sys-tests
