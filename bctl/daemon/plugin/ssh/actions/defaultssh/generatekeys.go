@@ -7,34 +7,26 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
-	"io/ioutil"
-	"log"
 
 	"golang.org/x/crypto/ssh"
 )
 
 const bitSize int = 4096
 
-// TODO: separate out into generating and writing...
-func GenerateKeys(identityFile string) ([]byte, error) {
+func GenerateKeys() ([]byte, []byte, error) {
 	privateKey, err := generatePrivateKey(bitSize)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	publicKeyBytes, err := generatePublicKey(&privateKey.PublicKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	privateKeyBytes := encodePrivateKeyToPEM(privateKey)
 
-	err = writeKeyToFile(privateKeyBytes, identityFile)
-	if err != nil {
-		return nil, err
-	}
-
-	return publicKeyBytes, nil
+	return privateKeyBytes, publicKeyBytes, nil
 }
 
 // generatePrivateKey creates a RSA Private Key of specified byte size
@@ -51,7 +43,6 @@ func generatePrivateKey(bitSize int) (*rsa.PrivateKey, error) {
 		return nil, err
 	}
 
-	log.Println("Private Key generated")
 	return privateKey, nil
 }
 
@@ -83,17 +74,5 @@ func generatePublicKey(privatekey *rsa.PublicKey) ([]byte, error) {
 
 	pubKeyBytes := ssh.MarshalAuthorizedKey(publicRsaKey)
 
-	log.Println("Public key generated")
 	return pubKeyBytes, nil
-}
-
-// writePemToFile writes keys to a file
-func writeKeyToFile(keyBytes []byte, saveFileTo string) error {
-	err := ioutil.WriteFile(saveFileTo, keyBytes, 0600)
-	if err != nil {
-		return err
-	}
-
-	log.Printf("Key saved to: %s", saveFileTo)
-	return nil
 }

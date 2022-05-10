@@ -361,7 +361,7 @@ func getAgentVersion() string {
 	if os.Getenv("DEV") == "true" {
 		return "1.0"
 	} else {
-		return "6.0.0"
+		return "6.1.0"
 	}
 }
 

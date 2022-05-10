@@ -99,7 +99,6 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) (string, []byt
 		_, err = d.remoteConnection.Write(inputRequest.Data)
 
 	case ssh.SshClose:
-
 		// Deserialize the action payload
 		var closeRequest ssh.SshCloseMessage
 		if jerr := json.Unmarshal(actionPayload, &closeRequest); jerr != nil {
@@ -107,7 +106,8 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) (string, []byt
 			break
 		}
 
-		d.closed = true // Ensure that we close the dial action
+		d.logger.Debugf("received close message from daemon. Ending TCP connection")
+		d.closed = true // Ensure that we close the action
 		d.remoteConnection.Close()
 
 		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here

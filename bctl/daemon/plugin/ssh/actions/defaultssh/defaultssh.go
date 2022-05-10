@@ -11,7 +11,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
-	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -28,7 +28,7 @@ type DefaultSsh struct {
 	outputChan      chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
 
-	// channel where we push each individual keypress byte from StdIn
+	// channel where we push from StdIn
 	stdInChan chan []byte
 
 	targetUser   string
@@ -54,22 +54,28 @@ func New(logger *logger.Logger, targetUser string, identityFile string) (*Defaul
 func (d *DefaultSsh) Start(tmb *tomb.Tomb) error {
 	d.tmb = tmb
 
-	publicKey, _ := GenerateKeys(d.identityFile)
+	if privateKey, publicKey, err := GenerateKeys(); err != nil {
+		d.logger.Errorf("error generating temp keys: %s", err)
+		return err
+	} else if err := os.WriteFile(d.identityFile, privateKey, 0600); err != nil {
+		d.logger.Errorf("error writing temp private key: %s", err)
+		return err
+	} else {
+		sshOpenMessage := ssh.SshOpenMessage{
+			TargetUser: d.targetUser,
+			PublicKey:  []byte(publicKey),
+		}
+		d.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
 
-	sshOpenMessage := bzssh.SshOpenMessage{
-		TargetUser: d.targetUser,
-		PublicKey:  []byte(publicKey),
+		// listen to stream messages on input chan and write to stdout
+		go d.handleStreamMessages()
+
+		// reading Stdin in raw mode and forward keypresses after debouncing
+		go d.readStdIn()
+		go d.sendStdIn()
+
+		return nil
 	}
-	d.sendOutputMessage(bzssh.SshOpen, sshOpenMessage)
-
-	// listen to stream messages on input chan and write to stdout
-	go d.handleStreamMessages()
-
-	// reading Stdin in raw mode and forward keypresses after debouncing
-	go d.readStdIn()
-	go d.sendStdIn()
-
-	return nil
 }
 
 func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
@@ -78,11 +84,15 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 }
 
 func (d *DefaultSsh) handleStreamMessages() {
+
+	defer d.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{})
+
 	for {
 		select {
 		case <-d.tmb.Dying():
 			return
 		case streamMessage := <-d.streamInputChan:
+			d.logger.Infof("Got a stream dog")
 			// process the incoming stream messages
 			switch smsg.StreamType(streamMessage.Type) {
 			case smsg.StdOut:
@@ -120,7 +130,7 @@ func (d *DefaultSsh) readStdIn() {
 		default:
 			n, err := os.Stdin.Read(b)
 			if err != nil {
-				d.tmb.Kill(fmt.Errorf("error reading last keypress from Stdin: %s", err))
+				d.tmb.Kill(fmt.Errorf("error reading from Stdin: %s", err))
 				return
 			}
 			if n > 0 {
@@ -144,12 +154,12 @@ func (d *DefaultSsh) sendStdIn() {
 			inputBuf = append(inputBuf, b...)
 		case <-time.After(InputDebounceTime):
 			if len(inputBuf) >= 1 {
-				// Send all accumulated keypresses in a shellInput data message
-				sshInputDataMessage := bzssh.SshInputMessage{
+				// Send all accumulated input in an sshInput data message
+				sshInputDataMessage := ssh.SshInputMessage{
 					Data: inputBuf,
 				}
-				d.logger.Infof("Look what I'm sending... %s", inputBuf)
-				d.sendOutputMessage(bzssh.SshInput, sshInputDataMessage)
+				d.logger.Infof("Look what I'm sending... %s", string(inputBuf[:]))
+				d.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
 
 				// clear the input buffer by slicing it to size 0 which will still
 				// keep memory allocated for the underlying capacity of the slice
@@ -159,7 +169,7 @@ func (d *DefaultSsh) sendStdIn() {
 	}
 }
 
-func (d *DefaultSsh) sendOutputMessage(action bzssh.SshSubAction, payload interface{}) {
+func (d *DefaultSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	d.outputChan <- plugin.ActionWrapper{
