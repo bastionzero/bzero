@@ -9,9 +9,7 @@ const (
 )
 
 type SshActionParams struct {
-	TargetUser   string `json:"targetUser"`
-	IdentityFile string `json:"identityFile"`
-	PublicKey    string `json:"publicKey"`
+	TargetUser string `json:"targetUser"`
 }
 
 type SshFood struct {

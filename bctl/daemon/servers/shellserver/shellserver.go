@@ -112,7 +112,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	subLogger := ss.logger.GetDatachannelLogger(ss.dataChannelId)
 
 	// create our plugin and start the action
-	pluginLogger := subLogger.GetPluginLogger(bzplugin.Db)
+	pluginLogger := subLogger.GetPluginLogger(bzplugin.Shell)
 	plugin := shell.New(pluginLogger)
 	if err := plugin.StartAction(attach); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)

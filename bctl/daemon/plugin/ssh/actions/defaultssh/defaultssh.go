@@ -21,100 +21,93 @@ const (
 )
 
 type DefaultSsh struct {
+	tmb    tomb.Tomb
 	logger *logger.Logger
-	tmb    *tomb.Tomb
 
-	// input and output channels relative to this plugin
-	outputChan      chan plugin.ActionWrapper
-	streamInputChan chan smsg.StreamMessage
+	outputChan chan plugin.ActionWrapper // plugin's output queue
+	doneChan   chan struct{}
 
 	// channel where we push from StdIn
 	stdInChan chan []byte
 
-	targetUser   string
 	identityFile string
 }
 
-func New(logger *logger.Logger, targetUser string, identityFile string) (*DefaultSsh, chan plugin.ActionWrapper) {
+func New(logger *logger.Logger, outboxQueue chan plugin.ActionWrapper, doneChan chan struct{}, identityFile string) *DefaultSsh {
 
-	shellAction := &DefaultSsh{
-		logger: logger,
-
-		outputChan:      make(chan plugin.ActionWrapper, 10),
-		streamInputChan: make(chan smsg.StreamMessage, 30),
-		stdInChan:       make(chan []byte, InputBufferSize),
-
-		targetUser:   targetUser,
+	return &DefaultSsh{
+		logger:       logger,
+		outputChan:   outboxQueue,
+		doneChan:     doneChan,
+		stdInChan:    make(chan []byte, InputBufferSize),
 		identityFile: identityFile,
 	}
-
-	return shellAction, shellAction.outputChan
 }
 
-func (d *DefaultSsh) Start(tmb *tomb.Tomb) error {
-	d.tmb = tmb
+func (d *DefaultSsh) Done() <-chan struct{} {
+	return d.doneChan
+}
 
-	if privateKey, publicKey, err := GenerateKeys(); err != nil {
-		d.logger.Errorf("error generating temp keys: %s", err)
-		return err
-	} else if err := os.WriteFile(d.identityFile, privateKey, 0600); err != nil {
-		d.logger.Errorf("error writing temp private key: %s", err)
-		return err
-	} else {
-		sshOpenMessage := ssh.SshOpenMessage{
-			TargetUser: d.targetUser,
-			PublicKey:  []byte(publicKey),
+func (d *DefaultSsh) Kill() {
+	d.tmb.Kill(nil)
+}
+
+func (d *DefaultSsh) Start() error {
+
+	var privateKey, publicKey []byte
+
+	// if we already have a private key, use it. Otherwise, create a new one
+	if publicKeyRsa, err := readPublicKeyRsa(d.identityFile); err == nil {
+		if publicKey, err = generatePublicKey(publicKeyRsa); err != nil {
+			return fmt.Errorf("error decoding temporary public key: %s", err)
+		} else {
+			d.logger.Debugf("using existing temporary keys")
 		}
-		d.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
-
-		// listen to stream messages on input chan and write to stdout
-		go d.handleStreamMessages()
-
-		// reading Stdin in raw mode and forward keypresses after debouncing
-		go d.readStdIn()
-		go d.sendStdIn()
-
-		return nil
+	} else {
+		d.logger.Debugf("generating new temporary keys")
+		privateKey, publicKey, err = GenerateKeys()
+		if err != nil {
+			return fmt.Errorf("error generating temporary keys: %s", err)
+		} else if err := os.WriteFile(d.identityFile, privateKey, 0600); err != nil {
+			return fmt.Errorf("error writing temporary private key: %s", err)
+		}
 	}
+
+	sshOpenMessage := ssh.SshOpenMessage{
+		PublicKey: []byte(publicKey),
+	}
+	d.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
+
+	// reading Stdin in raw mode and forward keypresses after debouncing
+	go d.readStdIn()
+	go d.sendStdIn()
+
+	return nil
+
 }
 
 func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
-	d.logger.Debugf("Default ssh received %+v stream, message count: %d", smessage.Type, len(d.streamInputChan)+1)
-	d.streamInputChan <- smessage
-}
-
-func (d *DefaultSsh) handleStreamMessages() {
-
-	defer d.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{})
-
-	for {
-		select {
-		case <-d.tmb.Dying():
-			return
-		case streamMessage := <-d.streamInputChan:
-			d.logger.Infof("Got a stream dog")
-			// process the incoming stream messages
-			switch smsg.StreamType(streamMessage.Type) {
-			case smsg.StdOut:
-				if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
-					d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
-				} else {
-					d.logger.Infof("Wrote to my SSH: %s", contentBytes)
-					if _, err = os.Stdout.Write(contentBytes); err != nil {
-						d.logger.Errorf("Error writing to Stdout: %s", err)
-					}
-				}
-			case smsg.Stop:
+	d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
+	switch smsg.StreamType(smessage.Type) {
+	case smsg.StdOut:
+		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
+			d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
+		} else {
+			d.logger.Infof("Wrote to my SSH: %s", contentBytes)
+			if _, err = os.Stdout.Write(contentBytes); err != nil {
+				d.logger.Errorf("Error writing to Stdout: %s", err)
+			}
+			if !smessage.More {
 				d.tmb.Kill(fmt.Errorf("received ssh quit stream message"))
 				return
-			case smsg.Error:
-				// TODO: revisit
-				d.tmb.Kill(fmt.Errorf("received an error from the agent"))
-				return
-			default:
-				d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
 			}
 		}
+	case smsg.Error:
+		// TODO: revisit
+		d.tmb.Kill(fmt.Errorf("received an error from the agent"))
+		return
+	default:
+		d.logger.Errorf("unhandled stream type: %s", smessage.Type)
 	}
 }
 

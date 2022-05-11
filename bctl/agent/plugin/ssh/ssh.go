@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -24,9 +23,6 @@ type SshPlugin struct {
 	streamOutputChan chan smsg.StreamMessage
 
 	doneChan chan struct{}
-
-	// specific to ssh
-	targetUser string
 }
 
 func New(logger *logger.Logger,
@@ -42,7 +38,6 @@ func New(logger *logger.Logger,
 
 	// Create our plugin
 	plugin := &SshPlugin{
-		targetUser:       synPayload.TargetUser,
 		logger:           logger,
 		streamOutputChan: ch,
 		doneChan:         make(chan struct{}),
@@ -57,7 +52,7 @@ func New(logger *logger.Logger,
 
 		switch parsedAction {
 		case bzssh.DefaultSsh:
-			plugin.action, rerr = defaultssh.New(subLogger, plugin.streamOutputChan)
+			plugin.action, rerr = defaultssh.New(subLogger, plugin.doneChan, plugin.streamOutputChan, synPayload.TargetUser)
 		default:
 			rerr = fmt.Errorf("unhandled SSH action")
 		}
@@ -75,9 +70,7 @@ func (s *SshPlugin) Receive(action string, actionPayload []byte) ([]byte, error)
 	s.logger.Debugf("SSH plugin received message with %s action", action)
 
 	var rerr error
-	if safePayload, err := cleanPayload(actionPayload); err != nil {
-		rerr = err
-	} else if payload, err := s.action.Receive(action, safePayload); err != nil {
+	if payload, err := s.action.Receive(action, actionPayload); err != nil {
 		rerr = err
 	} else {
 		return payload, err
@@ -103,20 +96,4 @@ func parseAction(action string) (bzssh.SshAction, error) {
 		return "", fmt.Errorf("malformed action: %s", action)
 	}
 	return bzssh.SshAction(parsedAction[1]), nil
-}
-
-func cleanPayload(payload []byte) ([]byte, error) {
-	// TODO: The below line removes the extra, surrounding quotation marks that get added at some point in the marshal/unmarshal
-	// so it messes up the umarshalling into a valid action payload.  We need to figure out why this is happening
-	// so that we can murder its family
-	if len(payload) > 0 {
-		payload = payload[1 : len(payload)-1]
-	}
-
-	// Json unmarshalling encodes bytes in base64
-	if payloadSafe, err := base64.StdEncoding.DecodeString(string(payload)); err != nil {
-		return []byte{}, fmt.Errorf("error decoding actionPayload: %s", err)
-	} else {
-		return payloadSafe, nil
-	}
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"os"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -24,7 +25,7 @@ func GenerateKeys() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	privateKeyBytes := encodePrivateKeyToPEM(privateKey)
+	privateKeyBytes := encodePrivateKeyToPem(privateKey)
 
 	return privateKeyBytes, publicKeyBytes, nil
 }
@@ -46,28 +47,34 @@ func generatePrivateKey(bitSize int) (*rsa.PrivateKey, error) {
 	return privateKey, nil
 }
 
-// encodePrivateKeyToPEM encodes Private Key from RSA to PEM format
-func encodePrivateKeyToPEM(privateKey *rsa.PrivateKey) []byte {
+// RSA -> PEM
+func encodePrivateKeyToPem(privateKey *rsa.PrivateKey) []byte {
 	// Get ASN.1 DER format
-	privDER := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateDer := x509.MarshalPKCS1PrivateKey(privateKey)
 
 	// pem.Block
-	privBlock := pem.Block{
+	privateBlock := pem.Block{
 		Type:    "RSA PRIVATE KEY",
 		Headers: nil,
-		Bytes:   privDER,
+		Bytes:   privateDer,
 	}
 
 	// Private key in PEM format
-	privatePEM := pem.EncodeToMemory(&privBlock)
+	privatePem := pem.EncodeToMemory(&privateBlock)
 
-	return privatePEM
+	return privatePem
+}
+
+// PEM -> RSA
+func decodePemToPrivateKey(privatePem []byte) (*rsa.PrivateKey, error) {
+	privateBlock, _ := pem.Decode(privatePem)
+	return x509.ParsePKCS1PrivateKey(privateBlock.Bytes)
 }
 
 // generatePublicKey take a rsa.PublicKey and return bytes suitable for writing to .pub file
 // returns in the format "ssh-rsa ..."
-func generatePublicKey(privatekey *rsa.PublicKey) ([]byte, error) {
-	publicRsaKey, err := ssh.NewPublicKey(privatekey)
+func generatePublicKey(publicKey *rsa.PublicKey) ([]byte, error) {
+	publicRsaKey, err := ssh.NewPublicKey(publicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -75,4 +82,16 @@ func generatePublicKey(privatekey *rsa.PublicKey) ([]byte, error) {
 	pubKeyBytes := ssh.MarshalAuthorizedKey(publicRsaKey)
 
 	return pubKeyBytes, nil
+}
+
+// takes a private key path and returns a public key struct
+// returns an error if the key cannot be read or is invalid
+func readPublicKeyRsa(privateKeyPath string) (*rsa.PublicKey, error) {
+	if privatePem, err := os.ReadFile(privateKeyPath); err != nil {
+		return nil, err
+	} else if privateKey, err := decodePemToPrivateKey(privatePem); err != nil {
+		return nil, err
+	} else {
+		return &privateKey.PublicKey, privateKey.Validate()
+	}
 }

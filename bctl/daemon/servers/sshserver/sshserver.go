@@ -1,13 +1,18 @@
 package sshserver
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
@@ -74,8 +79,7 @@ func StartSshServer(
 	}
 
 	// create our new datachannel
-	if _, err := server.newDataChannel(string(bzssh.DefaultSsh), server.websocket); err == nil {
-	} else {
+	if err := server.newDataChannel(string(bzssh.DefaultSsh), server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 
@@ -94,27 +98,29 @@ func (s *SshServer) newWebsocket(wsId string) error {
 }
 
 // for creating new datachannels
-func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket) (*datachannel.DataChannel, error) {
-	// every datachannel gets a uuid to distinguish it so a single websockets can map to multiple datachannels
+func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket) error {
 	dcId := uuid.New().String()
 	attach := false
 	subLogger := s.logger.GetDatachannelLogger(dcId)
 
 	s.logger.Infof("Creating new datachannel id: %s", dcId)
 
-	// FIXME: why is there a message here even??
-	actionParams := bzssh.SshActionParams{
-		TargetUser:   s.targetUser,
-		IdentityFile: s.identityFile,
+	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
+	plugin := ssh.New(pluginLogger, s.identityFile)
+	if err := plugin.StartAction(); err != nil {
+		return fmt.Errorf("failed to start action: %s", err)
 	}
 
-	actionParamsMarshalled, _ := json.Marshal(actionParams)
+	actionParams := bzssh.SshActionParams{
+		TargetUser: s.targetUser,
+	}
 
 	action = "ssh/" + action
-	// FIXME: params not lining up -- check another server...
-	if dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, s.refreshTokenCommand, s.configPath, action, actionParamsMarshalled, s.agentPubKey, attach); err != nil {
-		s.logger.Error(err)
-		return nil, err
+	ksLogger := s.logger.GetComponentLogger("mrzap")
+	if keysplitter, err := keysplitting.New(ksLogger, s.agentPubKey, s.configPath, s.refreshTokenCommand); err != nil {
+		return err
+	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, actionParams, attach); err != nil {
+		return err
 	} else {
 
 		// create a function to listen to the datachannel dying and then laugh
@@ -124,22 +130,19 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 				case <-s.tmb.Dying():
 					dc.Close(errors.New("ssh server closing"))
 					return
-				case <-dcTmb.Dying():
-					// Wait until everything is dead and any close processes are sent before killing the datachannel
-					dcTmb.Wait()
-
-					// notify agent to close the datachannel
-					s.logger.Info("Sending DataChannel Close")
-					cdMessage := am.AgentMessage{
-						ChannelId:   dcId,
-						MessageType: string(am.CloseDataChannel),
+				case <-dcTmb.Dead():
+					// bubble up our error to the user
+					if dcTmb.Err() != nil {
+						// let's just take our innermost error to give the user
+						errs := strings.Split(dcTmb.Err().Error(), ": ")
+						errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
+						os.Stdout.Write([]byte(errorString))
 					}
-					s.websocket.Send(cdMessage)
-
-					return
+					errorCode := 1
+					os.Exit(errorCode)
 				}
 			}
 		}()
-		return dc, nil
+		return nil
 	}
 }
