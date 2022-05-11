@@ -7,12 +7,10 @@ import (
 	"testing"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	mockLogger "bastionzero.com/bctl/v1/bzerolib/logger/mock"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"gopkg.in/tomb.v2"
 )
 
 var runAsUser = "Bojji"
@@ -77,9 +75,8 @@ func createPseudoTerminal() MockPseudoTerminal {
 func shellOpen(t *testing.T, dshell *DefaultShell) {
 	action := string(bzshell.ShellOpen)
 	actionPayload := []byte{}
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, retActionPayload, actionPayload)
 	assert.NotNil(t, dshell.terminal)
 }
@@ -92,9 +89,8 @@ func shellInput(t *testing.T, dshell *DefaultShell, testContent string) {
 	actionPayload, err := json.Marshal(inputMessage)
 	assert.Nil(t, err)
 
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, retActionPayload, []byte{})
 }
 
@@ -102,7 +98,8 @@ func TestShellOpen(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -112,16 +109,16 @@ func TestShellClose(t *testing.T) {
 	mockPT := createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
 
 	action := string(bzshell.ShellClose)
 	actionPayload := []byte{}
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, retActionPayload, actionPayload)
 
 	<-mockPT.Done()
@@ -131,7 +128,8 @@ func TestShellInput(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -150,7 +148,8 @@ func TestShellResize(t *testing.T) {
 	createPseudoTerminal()
 
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -165,9 +164,8 @@ func TestShellResize(t *testing.T) {
 	assert.Nil(t, err)
 
 	// send our shell resize message
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, retActionPayload, []byte{})
 }
 
@@ -176,7 +174,8 @@ func TestShellReplay(t *testing.T) {
 
 	// init shell
 	streamMessageChan := make(chan smsg.StreamMessage)
-	dshell, err := New(&tomb.Tomb{}, mockLogger.MockLogger(), streamMessageChan, runAsUser)
+	doneChan := make(chan struct{})
+	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -193,8 +192,7 @@ func TestShellReplay(t *testing.T) {
 	// request shell replay
 	action := string(bzshell.ShellReplay)
 	actionPayload := []byte{}
-	retAction, retActionPayload, err := dshell.Receive(action, actionPayload)
+	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retAction, action)
 	assert.Equal(t, string(retActionPayload), testContent)
 }

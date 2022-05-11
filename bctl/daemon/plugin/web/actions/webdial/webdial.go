@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
+	"strings"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzwebdial "bastionzero.com/bctl/v1/bzerolib/plugin/web/actions/webdial"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-
 	"gopkg.in/tomb.v2"
 )
 
@@ -21,108 +22,87 @@ const (
 )
 
 type WebDialAction struct {
-	logger *logger.Logger
-
+	tmb       tomb.Tomb
+	logger    *logger.Logger
 	requestId string
 
 	// input and output channels relative to this plugin
-	outputChan      chan plugin.ActionWrapper
+	outboxQueue     chan plugin.ActionWrapper
 	streamInputChan chan smsg.StreamMessage
+
+	// plugin done channel for signalling to the datachannel we're done
+	doneChan chan struct{}
 
 	// keep track of our expected streams
 	expectedSequenceNumber int
 	streamMessages         map[int]smsg.StreamMessage
 }
 
-func New(logger *logger.Logger,
-	requestId string) (*WebDialAction, chan plugin.ActionWrapper) {
-
-	stream := &WebDialAction{
-		logger: logger,
-
-		requestId: requestId,
-
-		outputChan:      make(chan plugin.ActionWrapper, 50),
-		streamInputChan: make(chan smsg.StreamMessage, 50),
-
+func New(logger *logger.Logger, requestId string, outboxQueue chan plugin.ActionWrapper, doneChan chan struct{}) *WebDialAction {
+	return &WebDialAction{
+		logger:                 logger,
+		requestId:              requestId,
+		outboxQueue:            outboxQueue,
+		streamInputChan:        make(chan smsg.StreamMessage, 25),
+		doneChan:               doneChan,
 		expectedSequenceNumber: 0,
-
-		streamMessages: make(map[int]smsg.StreamMessage),
+		streamMessages:         make(map[int]smsg.StreamMessage),
 	}
-
-	return stream, stream.outputChan
 }
 
-func (w *WebDialAction) Start(tmb *tomb.Tomb, writer http.ResponseWriter, request *http.Request) error {
-	// Build the action payload to start the web action dial
+func (w *WebDialAction) Kill() {
+	w.tmb.Killf("we were told to die")
+	w.tmb.Wait()
+}
+
+func (w *WebDialAction) Start(writer http.ResponseWriter, request *http.Request) error {
+	// Send payload to plugin output queue
 	payload := bzwebdial.WebDialActionPayload{
 		RequestId:            w.requestId,
 		StreamMessageVersion: smsg.CurrentSchema,
 	}
+	w.outbox(bzwebdial.WebDialStart, payload)
 
-	// Send payload to plugin output queue
-	payloadBytes, _ := json.Marshal(payload)
-	w.outputChan <- plugin.ActionWrapper{
-		Action:        string(bzwebdial.WebDialStart),
-		ActionPayload: payloadBytes,
-	}
+	// Listen to stream messages coming from bastion, and forward to our local connection
+	// this signals to the parent plugin that the action is done
+	defer close(w.doneChan)
 
-	return w.handleHttpRequest(writer, request)
-}
-
-func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *http.Request) error {
 	// First modify the host header to reflect what we are trying to connect to
 	// Ref: https://hackernoon.com/writing-a-reverse-proxy-in-just-one-line-with-go-c1edfa78c84b
 	request.Header.Set("X-Forwarded-Host", request.Host)
 
 	// First extract the headers out of the request
 	headers := bzhttp.GetHeaders(request.Header)
-
-	// Send our request, in chunks if the body > chunksize
-	w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
-
-	// this signals to the parent plugin that the action is done
-	defer close(w.outputChan)
-
-	processInput := true
 	headerSet := false
 
-	// Listen to stream messages coming from bastion, and forward to our local connection
+	// Send our request, in chunks if the body > chunksize
+	request.ParseForm()
+	if len(request.Form) > 0 {
+		readCloser := ioutil.NopCloser(strings.NewReader(request.Form.Encode()))
+		w.sendRequestChunks(readCloser, request.URL.String(), headers, request.Method)
+	} else {
+		w.sendRequestChunks(request.Body, request.URL.String(), headers, request.Method)
+	}
+
 	for {
 		select {
+		case <-w.tmb.Dying():
+			return nil
+		case <-w.doneChan:
+			return nil
 		case <-request.Context().Done():
-			// only send one interrupt message to the agent
-			if !processInput {
-				continue
-			}
-
 			w.logger.Info("HTTP request cancelled. Sending interrupt signal to agent.")
 
-			returnPayload := bzwebdial.WebInterruptActionPayload{
+			// send the agent our interrupt message
+			payload := bzwebdial.WebInterruptActionPayload{
 				RequestId: w.requestId,
 			}
-			payloadBytes, _ := json.Marshal(returnPayload)
-
-			// send the agent our interrupt message
-			w.outputChan <- plugin.ActionWrapper{
-				Action:        string(bzwebdial.WebDialInterrupt),
-				ActionPayload: payloadBytes,
-			}
-
-			// now that we've recieved the interrupt, we should process any more stream message from the agent
-			// but the agent has been sending us messages in the meantime and we need to quietly consume and ignore those
-			// that's why we stop processing input (processInput = false) and only return once we recieve the ack
-			// for our interrupt message
-			processInput = false
-
-			return nil
+			w.outbox(bzwebdial.WebDialInterrupt, payload)
+			return fmt.Errorf("http request cancelled")
 		case data := <-w.streamInputChan:
-			if !processInput {
-				continue
-			}
-
 			// may have gotten an old-fashioned or newfangled message type, depending on what we asked for
-			if data.Type == smsg.WebStream || data.Type == smsg.WebStreamEnd || data.Type == smsg.Stream {
+			switch data.Type {
+			case smsg.WebStream, smsg.WebStreamEnd, smsg.Stream:
 				w.streamMessages[data.SequenceNumber] = data
 				// process the incoming stream messages *in order*
 				for nextMessage, ok := w.streamMessages[w.expectedSequenceNumber]; ok; nextMessage, ok = w.streamMessages[w.expectedSequenceNumber] {
@@ -159,7 +139,7 @@ func (w *WebDialAction) handleHttpRequest(writer http.ResponseWriter, request *h
 						w.expectedSequenceNumber += 1
 					}
 				}
-			} else {
+			default:
 				w.logger.Errorf("unhandled stream type: %s", data.Type)
 			}
 		}
@@ -177,16 +157,11 @@ func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, h
 		} else if err != nil {
 			w.logger.Errorf("error chunking http request: %s", err)
 
-			returnPayload := bzwebdial.WebInterruptActionPayload{
+			// send the agent our interrupt message
+			payload := bzwebdial.WebInterruptActionPayload{
 				RequestId: w.requestId,
 			}
-			payloadBytes, _ := json.Marshal(returnPayload)
-
-			// send the agent our interrupt message
-			w.outputChan <- plugin.ActionWrapper{
-				Action:        string(bzwebdial.WebDialInterrupt),
-				ActionPayload: payloadBytes,
-			}
+			w.outbox(bzwebdial.WebDialInterrupt, payload)
 			return
 		}
 
@@ -200,22 +175,21 @@ func (w *WebDialAction) sendRequestChunks(body io.ReadCloser, endpoint string, h
 			Body:           buf[:numBytes],
 			More:           more,
 		}
-
-		// Send payload to plugin output queue
-		dataInPayloadBytes, _ := json.Marshal(dataInPayload)
-		w.outputChan <- plugin.ActionWrapper{
-			Action:        string(bzwebdial.WebDialInput),
-			ActionPayload: dataInPayloadBytes,
-		}
+		w.outbox(bzwebdial.WebDialInput, dataInPayload)
 
 		sequenceNumber++
 	}
 }
 
-func (w *WebDialAction) ReceiveKeysplitting(wrappedAction plugin.ActionWrapper) {
+func (w *WebDialAction) outbox(action bzwebdial.WebDialSubAction, payload interface{}) {
+	// Send payload to plugin output queue
+	payloadBytes, _ := json.Marshal(payload)
+	w.outboxQueue <- plugin.ActionWrapper{
+		Action:        string(action),
+		ActionPayload: payloadBytes,
+	}
 }
 
 func (w *WebDialAction) ReceiveStream(smessage smsg.StreamMessage) {
-	w.logger.Debugf("web dial action received %v stream", smessage.Type)
 	w.streamInputChan <- smessage
 }

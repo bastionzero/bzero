@@ -9,3 +9,11 @@ bctl/agent/agent
 
 # Macos fluff
 *.DS_Store
+
+# Ignore any coverage files
+bctl/bctlcov.out
+bctl/bctlcoverage.xml
+bzerolib/bzerolibcov.out
+bzerolib/bzerolibcoverage.xml
+
+.vscode/

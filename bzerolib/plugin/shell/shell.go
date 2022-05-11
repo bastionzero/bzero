@@ -23,9 +23,7 @@ type ShellActionParams struct {
 	TargetUser string `json:"targetUser"`
 }
 
-type ShellOpenMessage struct {
-	TargetUser string `json:"targetUser"`
-}
+type ShellOpenMessage struct{}
 
 type ShellCloseMessage struct{}
 

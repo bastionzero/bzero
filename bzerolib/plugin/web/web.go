@@ -1,9 +1,5 @@
 package web
 
-import (
-	"net/http"
-)
-
 type WebAction string
 
 const (
@@ -14,10 +10,4 @@ const (
 type WebActionParams struct {
 	RemotePort int
 	RemoteHost string
-}
-
-type WebFood struct {
-	Action  WebAction
-	Writer  http.ResponseWriter
-	Request *http.Request
 }

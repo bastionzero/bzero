@@ -68,7 +68,7 @@ func New(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTer
 	shellCommandArgs := []string{"-c"}
 	if err := doesUserExist(runAsUser, shellCommand, shellCommandArgs); err != nil {
 		// if user does not exist, fail the session
-		return nil, fmt.Errorf("failed to determine whether %s user exists: %s", runAsUser, err)
+		return nil, err
 	}
 
 	logger.Debugf("Using default shell %s", shellCommand)
@@ -145,7 +145,6 @@ func buildCommand(commandstr string, shellCommand string, shellCommandArgs []str
 	} else {
 		cmd.Dir = currentUser.HomeDir
 	}
-	//cmd.Dir = fmt.Sprintf("/home/%s", runAsUser)
 
 	return cmd, nil
 }
@@ -189,9 +188,9 @@ func doesUserExist(username string, shellCommand string, shellCommandArgs []stri
 	shellCmdArgs := append(shellCommandArgs, fmt.Sprintf("id %s", username))
 	cmd := exec.Command(shellCommand, shellCmdArgs...)
 	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if _, ok := err.(*exec.ExitError); ok {
 			// The program has exited with an exit code != 0
-			return fmt.Errorf("encountered an error while checking for %s: %s", username, exitErr)
+			return fmt.Errorf("%s user does not exist", username)
 		} else {
 			return fmt.Errorf("failed to check if user already exists")
 		}

@@ -13,10 +13,13 @@ require (
 	github.com/fsnotify/fsnotify v1.5.1
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/websocket v1.4.2
+	github.com/onsi/ginkgo/v2 v2.1.4
+	github.com/onsi/gomega v1.19.0
 	github.com/stretchr/testify v1.7.0
+	github.com/wk8/go-ordered-map v0.2.0
 	golang.org/x/build v0.0.0-20211108163316-3ce30f35b9aa
-	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
-	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
+	golang.org/x/sys v0.0.0-20220319134239-a9b59b0215f8
+	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
 	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637
 	k8s.io/api v0.21.3
 	k8s.io/apimachinery v0.21.3

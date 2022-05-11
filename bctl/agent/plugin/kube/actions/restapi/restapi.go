@@ -11,55 +11,63 @@ import (
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 )
 
+// wrap the client-creation code so that during testing we can inject a mock client
+var makeRequest = func(req *http.Request) (*http.Response, error) {
+	client := http.Client{}
+	return client.Do(req)
+}
+
 type RestApiAction struct {
+	logger   *logger.Logger
+	doneChan chan struct{}
+
 	serviceAccountToken string
 	kubeHost            string
 	targetGroups        []string
 	targetUser          string
-	closed              bool
-	logger              *logger.Logger
 }
 
-func New(logger *logger.Logger, serviceAccountToken string, kubeHost string, targetGroups []string, targetUser string) (*RestApiAction, error) {
+func New(
+	logger *logger.Logger,
+	doneChan chan struct{},
+	serviceAccountToken string,
+	kubeHost string,
+	targetGroups []string,
+	targetUser string) *RestApiAction {
 	return &RestApiAction{
+		logger:              logger,
+		doneChan:            doneChan,
 		serviceAccountToken: serviceAccountToken,
 		kubeHost:            kubeHost,
 		targetGroups:        targetGroups,
 		targetUser:          targetUser,
-		logger:              logger,
-		closed:              false,
-	}, nil
+	}
 }
 
-func (r *RestApiAction) Closed() bool {
-	return r.closed
-}
+func (r *RestApiAction) Kill() {}
 
-func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	defer func() {
-		r.closed = true
-	}()
+func (r *RestApiAction) Receive(action string, actionPayload []byte) ([]byte, error) {
+	defer close(r.doneChan)
 
 	var apiRequest kuberest.KubeRestApiActionPayload
 	if err := json.Unmarshal(actionPayload, &apiRequest); err != nil {
 		rerr := fmt.Errorf("malformed Keysplitting Action payload %v", actionPayload)
 		r.logger.Error(rerr)
-		return action, []byte{}, rerr
+		return []byte{}, rerr
 	}
 
 	// Build the request
 	r.logger.Infof("Making request for %s", apiRequest.Endpoint)
 	req, err := r.buildHttpRequest(apiRequest.Endpoint, apiRequest.Body, apiRequest.Method, apiRequest.Headers)
 	if err != nil {
-		return action, []byte{}, err
+		return []byte{}, err
 	}
 
-	httpClient := &http.Client{}
-	res, err := httpClient.Do(req)
+	res, err := makeRequest(req)
 	if err != nil {
 		rerr := fmt.Errorf("bad response to API request: %s", err)
 		r.logger.Error(rerr)
-		return action, []byte{}, rerr
+		return []byte{}, rerr
 	}
 	defer res.Body.Close()
 
@@ -72,7 +80,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 	// Parse out the body
 	bodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
-		return action, []byte{}, err
+		return []byte{}, err
 	}
 
 	// Now we need to send that data back to the client
@@ -84,7 +92,7 @@ func (r *RestApiAction) Receive(action string, actionPayload []byte) (string, []
 	}
 	responsePayloadBytes, _ := json.Marshal(responsePayload)
 
-	return kuberest.RestResponse, responsePayloadBytes, nil
+	return responsePayloadBytes, nil
 }
 
 func (r *RestApiAction) buildHttpRequest(endpoint, body, method string, headers map[string][]string) (*http.Request, error) {

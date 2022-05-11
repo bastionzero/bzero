@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"gopkg.in/tomb.v2"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/transport/spdy"
@@ -19,8 +18,16 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
+// wrap this code so at test-time we can mock the dial / config
+var doDial = func(dialer httpstream.Dialer, protocolName string) (httpstream.Connection, string, error) {
+	return dialer.Dial(kubeutils.PortForwardProtocolV1Name)
+}
+
+var getConfig = func() (*rest.Config, error) {
+	return rest.InClusterConfig()
+}
+
 type PortForwardAction struct {
-	tmb    *tomb.Tomb
 	logger *logger.Logger
 
 	serviceAccountToken string
@@ -29,14 +36,13 @@ type PortForwardAction struct {
 	targetUser          string
 	logId               string
 	requestId           string
-	closed              bool
 
 	// output channel to send all of our stream messages directly to datachannel
 	streamOutputChan     chan smsg.StreamMessage
 	streamMessageVersion smsg.SchemaVersion
 
 	// Done channel
-	doneChan chan bool
+	doneChan chan struct{}
 
 	// Map of portforardId <-> PortForwardSubAction
 	requestMap map[string]*PortForwardRequest
@@ -49,43 +55,50 @@ type PortForwardAction struct {
 	streamConn      httpstream.Connection
 }
 
-func New(logger *logger.Logger,
-	pluginTmb *tomb.Tomb,
+func New(
+	logger *logger.Logger,
+	ch chan smsg.StreamMessage,
+	doneChan chan struct{},
 	serviceAccountToken string,
 	kubeHost string,
 	targetGroups []string,
 	targetUser string,
-	ch chan smsg.StreamMessage) (*PortForwardAction, error) {
+) *PortForwardAction {
 
 	return &PortForwardAction{
 		logger:              logger,
-		tmb:                 pluginTmb,
 		serviceAccountToken: serviceAccountToken,
 		kubeHost:            kubeHost,
 		targetGroups:        targetGroups,
 		targetUser:          targetUser,
-		closed:              false,
 		streamOutputChan:    ch,
 		requestMap:          make(map[string]*PortForwardRequest),
-		doneChan:            make(chan bool),
-	}, nil
+		doneChan:            doneChan,
+	}
 }
 
-func (p *PortForwardAction) Closed() bool {
-	return p.closed
+func (p *PortForwardAction) Kill() {
+	for _, val := range p.requestMap {
+		val.Kill()
+	}
+
+	// close the connection
+	if p.streamConn != nil {
+		p.streamConn.Close()
+	}
 }
 
-func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string, []byte, error) {
-	p.logger.Infof("PortForward Plugin received message with action: %s", action)
+func (p *PortForwardAction) Receive(action string, actionPayload []byte) ([]byte, error) {
+	p.logger.Infof("PortForward action received message with action: %s", action)
 	switch portforward.PortForwardSubAction(action) {
 
 	// Start portforward message required before anything else
 	case portforward.StartPortForward:
 		var startPortForwardRequest portforward.KubePortForwardStartActionPayload
 		if err := json.Unmarshal(actionPayload, &startPortForwardRequest); err != nil {
-			rerr := fmt.Errorf("unable to unmarshal start portforward message: %s", err)
+			rerr := fmt.Errorf("unable to unmarshal start portforward message: %s", string(actionPayload))
 			p.logger.Error(rerr)
-			return "", []byte{}, rerr
+			return []byte{}, rerr
 		}
 
 		return p.startPortForward(startPortForwardRequest)
@@ -94,12 +107,7 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 		if err := json.Unmarshal(actionPayload, &dataInputAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling datain: %s", err)
 			p.logger.Error(rerr)
-			return "", []byte{}, rerr
-		}
-
-		if err := kubeutils.MatchRequestId(dataInputAction.RequestId, p.requestId); err != nil {
-			p.logger.Error(err)
-			return "", []byte{}, err
+			return []byte{}, rerr
 		}
 
 		// See if we already have a session for this portforwardRequestId, else create it
@@ -111,7 +119,6 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 			subLogger.AddRequestId(p.requestId)
 			newRequest := createPortForwardRequest(
 				subLogger,
-				p.tmb,
 				p.streamOutputChan,
 				p.streamMessageVersion,
 				p.requestId,
@@ -119,81 +126,51 @@ func (p *PortForwardAction) Receive(action string, actionPayload []byte) (string
 				dataInputAction.PortForwardRequestId,
 			)
 
-			p.logger.Infof("Starting port forward connection for: %s on port: %d. PortforwardRequestId: %ss", p.Endpoint, dataInputAction.PodPort, dataInputAction.PortForwardRequestId)
+			p.logger.Infof("Starting port forwarding for %s on port %d. PortforwardRequestId: %s", p.Endpoint, dataInputAction.PodPort, dataInputAction.PortForwardRequestId)
 			if err := newRequest.openPortForwardStream(p.DataHeaders, p.ErrorHeaders, dataInputAction.PodPort, p.streamConn); err != nil {
 				rerr := fmt.Errorf("error opening stream for new portforward request: %s", err)
 				p.logger.Error(rerr)
-				return "", []byte{}, rerr
+				return []byte{}, rerr
 			}
 			p.requestMap[dataInputAction.PortForwardRequestId] = newRequest
 			newRequest.dataInChannel <- dataInputAction.Data
 		}
 
-		return string(action), []byte{}, nil
+		return []byte{}, nil
 	case portforward.StopPortForwardRequest:
 		var stopRequestAction portforward.KubePortForwardStopRequestActionPayload
 		if err := json.Unmarshal(actionPayload, &stopRequestAction); err != nil {
 			rerr := fmt.Errorf("error unmarshaling stop request: %s", err)
 			p.logger.Error(rerr)
-			return "", []byte{}, rerr
-		}
-
-		// If we haven't recvied a start message, just leave
-		if err := kubeutils.MatchRequestId(stopRequestAction.RequestId, p.requestId); err != nil {
-			p.logger.Error(err)
-			return string(portforward.StopPortForwardRequest), []byte{}, nil
+			return []byte{}, rerr
 		}
 
 		// Alert on the done channel
 		if portForwardRequest, ok := p.requestMap[stopRequestAction.PortForwardRequestId]; ok {
-			portForwardRequest.doneChan <- true
+			portForwardRequest.Kill()
 		}
 
 		// Else update our requestMap
 		delete(p.requestMap, stopRequestAction.PortForwardRequestId)
 
-		return string(portforward.StopPortForwardRequest), []byte{}, nil
+		return []byte{}, nil
 	case portforward.StopPortForward:
-		// We decrypt the message, incase no start message was sent over the port forward session
-		var stopAction portforward.KubePortForwardStopActionPayload
-		if err := json.Unmarshal(actionPayload, &stopAction); err != nil {
-			rerr := fmt.Errorf("error unmarshaling stop request: %s", err)
-			p.logger.Error(rerr)
-			return "", []byte{}, rerr
-		}
-		p.logger.Infof("Stopping port forward action for requestId: %s", p.requestId)
+		p.Kill()
 
-		if err := kubeutils.MatchRequestId(stopAction.RequestId, p.requestId); err != nil {
-			p.logger.Error(err)
-			return string(portforward.StopPortForward), []byte{}, nil
-		}
-
-		// Alert on our done channel
-		p.doneChan <- true
-
-		// close the connection
-		if p.streamConn != nil {
-			p.streamConn.Close()
-		}
-
-		// Set ourselves to closed so this object will get dereferenced
-		p.closed = true
-
-		return string(portforward.StopPortForward), []byte{}, nil
+		return []byte{}, nil
 	default:
 		rerr := fmt.Errorf("unhandled portforward action: %v", action)
 		p.logger.Error(rerr)
-		return "", []byte{}, rerr
+		return []byte{}, rerr
 	}
 }
 
-func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) (string, []byte, error) {
+func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward.KubePortForwardStartActionPayload) ([]byte, error) {
 	// Update our object to keep track of the pod and url information
 	p.DataHeaders = startPortForwardRequest.DataHeaders
 	p.ErrorHeaders = startPortForwardRequest.ErrorHeaders
 	p.Endpoint = startPortForwardRequest.Endpoint
 	p.logId = startPortForwardRequest.LogId
-	p.doneChan = make(chan bool, 1)
 
 	// keep track of who we're talking to
 	p.requestId = startPortForwardRequest.RequestId
@@ -203,18 +180,18 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 
 	// Now make our stream chan
 	// Create the in-cluster config
-	config, err := rest.InClusterConfig()
+	config, err := getConfig()
 	if err != nil {
 		rerr := fmt.Errorf("error creating in-custer config: %s", err)
 		p.logger.Error(rerr)
-		return "", []byte{}, err
+		return []byte{}, rerr
 	}
 
 	// Always ensure that our targetUser is set
 	if p.targetUser == "" {
 		rerr := fmt.Errorf("target user field is not set")
 		p.logger.Error(rerr)
-		return "", []byte{}, err
+		return []byte{}, rerr
 	}
 
 	// Add our impersonation information
@@ -229,14 +206,14 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 	if err != nil {
 		rerr := fmt.Errorf("error creating spdy RoundTripper: %s", err)
 		p.logger.Error(rerr)
-		return "", []byte{}, err
+		return []byte{}, rerr
 	}
 
 	hostIP := strings.TrimLeft(config.Host, "htps:/")
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "https", Path: p.Endpoint, Host: hostIP})
 
 	var readyMessageErr string
-	streamConn, protocolSelected, err := dialer.Dial(kubeutils.PortForwardProtocolV1Name)
+	streamConn, protocolSelected, err := doDial(dialer, kubeutils.PortForwardProtocolV1Name)
 	if err != nil {
 		rerr := fmt.Errorf("error dialing portforward spdy stream: %s", err)
 		p.logger.Error(rerr)
@@ -256,7 +233,13 @@ func (p *PortForwardAction) startPortForward(startPortForwardRequest portforward
 	// Save the connection to use later
 	p.streamConn = streamConn
 
-	return string(portforward.StartPortForward), []byte{}, nil
+	// track when the http stream connection has closed so we know when we're done
+	go func() {
+		<-streamConn.CloseChan()
+		close(p.doneChan)
+	}()
+
+	return []byte{}, nil
 }
 
 func (p *PortForwardAction) sendReadyMessage(streamType smsg.StreamType, errorMessage string) {

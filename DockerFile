@@ -1,4 +1,5 @@
-FROM golang:1.16-alpine
+ARG BASE_IMAGE="golang:1.16-alpine"
+FROM ${BASE_IMAGE}
 
 RUN mkdir -p /bctl-agent-files && \
     mkdir -p /bctl-agent
@@ -10,8 +11,7 @@ ARG PROD_TRUE="false"
 COPY . /bctl-agent-files
 
 # Update our agent version value
-RUN VERSION="$(cat /bctl-agent-files/VERSION)" && \
-    sed -i.bu 's/\$AGENT_VERSION/'"$VERSION"'/g' /bctl-agent-files/bctl/agent/agent.go
+RUN /bctl-agent-files/update-agent-version.sh
 
 # Build our exectuable
 RUN cd /bctl-agent-files/bctl/agent && \

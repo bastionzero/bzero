@@ -25,7 +25,7 @@ const (
 	ExecCommandParam = "command"
 
 	// Name of header that specifies stream type
-	StreamType = "streamType"
+	StreamType = "StreamType"
 	// Value for streamType header for stdin stream
 	StreamTypeStdin = "stdin"
 	// Value for streamType header for stdout stream
@@ -40,10 +40,10 @@ const (
 	StreamTypeResize = "resize"
 
 	// Name of header that specifies the port being forwarded
-	PortHeader = "port"
+	PortHeader = "Port"
 	// Name of header that specifies a request ID used to associate the error
 	// and data streams for a single forwarded connection
-	PortForwardRequestIDHeader = "requestID"
+	PortForwardRequestIDHeader = "RequestId"
 	// PortForwardProtocolV1Name is the subprotocol "portforward.k8s.io" is used for port forwarding
 	PortForwardProtocolV1Name = "portforward.k8s.io"
 

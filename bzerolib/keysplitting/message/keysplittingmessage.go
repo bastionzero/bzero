@@ -20,19 +20,122 @@ const (
 )
 
 const (
-	SchemaVersion = "1.1"
+	SchemaVersion = "2.0"
 )
-
-type IKeysplittingMessage interface {
-	BuildResponse(actionPayload interface{}, publickey string) (KeysplittingMessage, error)
-	VerifySignature(publicKey string) error
-	Sign(privateKey string) error
-}
 
 type KeysplittingMessage struct {
 	Type                KeysplittingPayloadType `json:"type"`
 	KeysplittingPayload interface{}             `json:"keysplittingPayload"`
 	Signature           string                  `json:"signature"`
+}
+
+func (k *KeysplittingMessage) Hash() string {
+	// grab the hash of the keysplitting message
+	if hashBytes, ok := util.HashPayload(k.KeysplittingPayload); !ok {
+		return ""
+	} else {
+		return base64.StdEncoding.EncodeToString(hashBytes)
+	}
+}
+
+func (k *KeysplittingMessage) BuildUnsignedSynAck(payload []byte, pubKey string, nonce string, schemaVersion string) (KeysplittingMessage, error) {
+	if msg, ok := k.KeysplittingPayload.(SynPayload); ok {
+		if synAckPayload, err := msg.BuildResponsePayload(payload, pubKey, nonce, schemaVersion); err != nil {
+			return KeysplittingMessage{}, err
+		} else {
+			return KeysplittingMessage{
+				Type:                SynAck,
+				KeysplittingPayload: synAckPayload,
+			}, nil
+		}
+	} else {
+		return KeysplittingMessage{}, fmt.Errorf("can't build syn/ack off a message that isn't a syn")
+	}
+}
+
+func (k *KeysplittingMessage) BuildUnsignedDataAck(payload []byte, pubKey string, schemaVersion string) (KeysplittingMessage, error) {
+	if msg, ok := k.KeysplittingPayload.(DataPayload); ok {
+		if dataAckPayload, err := msg.BuildResponsePayload(payload, pubKey, schemaVersion); err != nil {
+			return KeysplittingMessage{}, err
+		} else {
+			return KeysplittingMessage{
+				Type:                DataAck,
+				KeysplittingPayload: dataAckPayload,
+			}, nil
+		}
+	} else {
+		return KeysplittingMessage{}, fmt.Errorf("can't build data/ack off a message that isn't a data")
+	}
+}
+
+func (k *KeysplittingMessage) BuildUnsignedData(action string, actionPayload []byte, bzcertHash string, schemaVersion string) (KeysplittingMessage, error) {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynAckPayload:
+		if dataPayload, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash, schemaVersion); err != nil {
+			return KeysplittingMessage{}, err
+		} else {
+			return KeysplittingMessage{
+				Type:                Data,
+				KeysplittingPayload: dataPayload,
+			}, nil
+		}
+	case DataAckPayload:
+		if dataPayload, err := msg.BuildResponsePayload(action, actionPayload, bzcertHash, schemaVersion); err != nil {
+			return KeysplittingMessage{}, err
+		} else {
+			return KeysplittingMessage{
+				Type:                Data,
+				KeysplittingPayload: dataPayload,
+			}, nil
+		}
+	default:
+		return KeysplittingMessage{}, fmt.Errorf("can't build data responses for message type: %T", k.KeysplittingPayload)
+	}
+}
+
+func (k *KeysplittingMessage) GetHpointer() (string, error) {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynPayload:
+		return "", fmt.Errorf("syn payloads don't have hpointers")
+	case SynAckPayload:
+		return msg.HPointer, nil
+	case DataPayload:
+		return msg.HPointer, nil
+	case DataAckPayload:
+		return msg.HPointer, nil
+	default:
+		return "", fmt.Errorf("could not get hpointer for invalid keysplitting message type: %T", k.KeysplittingPayload)
+	}
+}
+
+func (k *KeysplittingMessage) GetAction() string {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynPayload:
+		return msg.Action
+	case SynAckPayload:
+		return msg.Action
+	case DataPayload:
+		return msg.Action
+	case DataAckPayload:
+		return msg.Action
+	default:
+		return ""
+	}
+}
+
+func (k *KeysplittingMessage) GetActionPayload() []byte {
+	switch msg := k.KeysplittingPayload.(type) {
+	case SynPayload:
+		return msg.ActionPayload
+	case SynAckPayload:
+		return msg.ActionResponsePayload
+	case DataPayload:
+		return msg.ActionPayload
+	case DataAckPayload:
+		return msg.ActionResponsePayload
+	default:
+		return []byte{}
+	}
 }
 
 func (k *KeysplittingMessage) VerifySignature(publicKey string) error {
@@ -48,8 +151,6 @@ func (k *KeysplittingMessage) VerifySignature(publicKey string) error {
 	}
 
 	sigBits, _ := base64.StdEncoding.DecodeString(k.Signature)
-
-	//log.Printf("\npubkey: %v\nhash: %v\nsignature: %v", publicKey, string(hashBits), k.Signature)
 
 	if ok := ed.Verify(pubkey, hashBits, sigBits); ok {
 		return nil
