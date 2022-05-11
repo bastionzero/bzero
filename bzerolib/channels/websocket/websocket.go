@@ -168,6 +168,23 @@ func New(logger *logger.Logger,
 
 	// Listener for any incoming messages
 	ws.tmb.Go(func() error {
+		// Listener for any messages that need to be sent
+		ws.tmb.Go(func() error {
+			for ws.tmb.Alive() {
+				for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
+					select {
+					case <-ws.tmb.Dying():
+						return nil
+					case msg := <-ws.sendQueue:
+						ws.processOutput(msg)
+					}
+				}
+			}
+			ws.logger.Info("output dying")
+			return nil
+		})
+
+		// Receive any messages in the websocket
 		for ws.tmb.Alive() {
 			for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
 				select {
@@ -183,20 +200,6 @@ func New(logger *logger.Logger,
 		return nil
 	})
 
-	// Listener for any messages that need to be sent
-	go func() {
-		for ws.tmb.Alive() {
-			for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
-				select {
-				case <-ws.tmb.Dying():
-					return
-				case msg := <-ws.sendQueue:
-					ws.processOutput(msg)
-				}
-			}
-		}
-	}()
-
 	return &ws, nil
 }
 
@@ -208,8 +211,17 @@ func (w *Websocket) Close(reason error) {
 		channel.Close(reason)
 	}
 
-	// tell our tmb to clean up after us
+	// mark the tmb as dying so we ignore any errors that occur when closing the
+	// websocket
 	w.tmb.Kill(reason)
+
+	// close the websocket connection. This will cause errors when reading from
+	// websocket in receive
+	if w.client != nil {
+		w.ready = false
+		w.client.Close()
+	}
+
 	w.tmb.Wait()
 }
 
@@ -229,11 +241,13 @@ func (w *Websocket) SubscriberCount() int {
 
 // Returns error on websocket closed
 func (w *Websocket) receive() error {
-
 	// Read incoming message(s)
 	_, rawMessage, err := w.client.ReadMessage()
 
-	if err != nil {
+	if err != nil && !w.tmb.Alive() {
+		// We are already closing the websocket so just return
+		return nil
+	} else if err != nil {
 		w.ready = false
 
 		// Check if it's a clean exit or we don't need to reconnect
