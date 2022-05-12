@@ -269,7 +269,7 @@ func (w *Websocket) receive() error {
 			for _, message := range messages {
 				switch message.Target {
 				case "CloseConnection":
-					rerr := errors.New("closing message received; websocket closed")
+					rerr := errors.New("the bzero agent terminated the connection")
 					w.Close(rerr)
 					return rerr
 				default:
