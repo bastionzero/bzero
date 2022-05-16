@@ -86,6 +86,8 @@ func (d *DefaultShell) Kill() {
 	if d.terminal != nil {
 		d.terminal.Kill()
 		d.terminal = nil
+
+		// Wait for done channel to be closed by writePump
 		<-d.doneChan
 	}
 }

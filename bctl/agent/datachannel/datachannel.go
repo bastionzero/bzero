@@ -111,6 +111,7 @@ func New(
 				datachannel.plugin.Kill()
 				return errors.New("agent was orphaned too young and can't be batman :'(")
 			case <-datachannel.tmb.Dying():
+				logger.Infof("datachannel is dying...killing plugin")
 				datachannel.plugin.Kill()
 				return nil
 			case <-datachannel.plugin.Done():
