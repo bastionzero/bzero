@@ -244,8 +244,11 @@ func (w *Websocket) receive() error {
 	// Read incoming message(s)
 	_, rawMessage, err := w.client.ReadMessage()
 
+	// We check to make sure the tmb is still alive and not being actively
+	// killed because otherwise an error in receive will call w.Close which will
+	// attempt to close/wait on the tmb again and cause a deadlock
 	if err != nil && !w.tmb.Alive() {
-		// We are already closing the websocket so just return
+		// We are already killing the tmb so just return
 		return nil
 	} else if err != nil {
 		w.ready = false
