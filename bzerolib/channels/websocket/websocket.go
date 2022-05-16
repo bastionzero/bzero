@@ -423,8 +423,17 @@ func (w *Websocket) connect() error {
 	backoffParams.MaxInterval = time.Minute * 30 // At most 30 minutes in between requests
 	ticker := backoff.NewTicker(backoffParams)
 
-	for range ticker.C {
-		if !w.ready {
+	for {
+		select {
+		// If tmb is dying stop trying to connect
+		case <-w.tmb.Dying():
+			return nil
+		case tick, ok := <-ticker.C:
+			w.logger.Infof("Got tick: %s", tick)
+			if !ok {
+				return fmt.Errorf("failed to connect to Bastion after %s", backoffParams.MaxElapsedTime)
+			}
+
 			if w.getChallenge {
 				// safe to fail on this error since GetChallenge has its own retry logic
 				if err := w.solveChallenge(); err != nil {
@@ -487,16 +496,12 @@ func (w *Websocket) connect() error {
 			} else {
 				w.logger.Info("Connection successful!")
 				w.ready = true
+				return nil
 			}
-		}
-		if w.ready {
-			return nil
-		} else {
-			// this output won't line up with the exact timing you see, but it's in the ballpark
-			w.logger.Infof("failed to connect. Will try again in about %s", backoffParams.NextBackOff())
+
+			w.logger.Infof("failed to connect at %s. Will try again in about %s", tick, backoffParams.NextBackOff())
 		}
 	}
-	return fmt.Errorf("failed to connect to Bastion after %s", backoffParams.MaxElapsedTime)
 }
 
 func (w *Websocket) lenChannels() int {
