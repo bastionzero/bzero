@@ -58,7 +58,7 @@ func StartShellServer(
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
-	shellServer := &ShellServer{
+	server := &ShellServer{
 		logger:              logger,
 		serviceUrl:          serviceUrl,
 		params:              params,
@@ -72,13 +72,13 @@ func StartShellServer(
 	}
 
 	// Create a new websocket
-	if err := shellServer.newWebsocket(uuid.New().String()); err != nil {
-		shellServer.logger.Error(err)
+	if err := server.newWebsocket(uuid.New().String()); err != nil {
+		server.logger.Error(err)
 		return err
 	}
 
 	// create our new datachannel
-	if err := shellServer.newDataChannel(string(bzshell.DefaultShell), shellServer.websocket); err != nil {
+	if err := server.newDataChannel(string(bzshell.DefaultShell), server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 

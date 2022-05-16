@@ -307,6 +307,7 @@ func parseFlags() error {
 	case bzplugin.Kube:
 		requiredFlags = append(requiredFlags, "localPort", "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
 	case bzplugin.Db:
+		fallthrough
 	case bzplugin.Web:
 		requiredFlags = append(requiredFlags, "localPort", "remoteHost", "remotePort")
 	case bzplugin.Shell:

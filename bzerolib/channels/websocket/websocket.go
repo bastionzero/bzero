@@ -243,12 +243,7 @@ func (w *Websocket) SubscriberCount() int {
 func (w *Websocket) receive() error {
 	// Read incoming message(s)
 	_, rawMessage, err := w.client.ReadMessage()
-	//w.logger.Errorf("HOT PIE, I'M TALKING TO YOU   ---------------")
 
-<<<<<<< HEAD
-	if err != nil {
-		w.logger.Error(err)
-=======
 	// We check to make sure the tmb is still alive and not being actively
 	// killed because otherwise an error in receive will call w.Close which will
 	// attempt to close/wait on the tmb again and cause a deadlock
@@ -256,7 +251,6 @@ func (w *Websocket) receive() error {
 		// We are already killing the tmb so just return
 		return nil
 	} else if err != nil {
->>>>>>> 0028c996163632f5ce0e6db3ff8bac31f41ef7bc
 		w.ready = false
 
 		// Check if it's a clean exit or we don't need to reconnect
@@ -275,9 +269,7 @@ func (w *Websocket) receive() error {
 		if messages, err := w.unwrapSignalR(rawMessage); err != nil {
 			return err
 		} else {
-			//w.logger.Errorf("hot pie, a these: %+v", messages)
 			for _, message := range messages {
-				//w.logger.Errorf("hot pie, a this: %+v", message)
 				switch message.Target {
 				case "CloseConnection":
 					rerr := errors.New("the bzero agent terminated the connection")

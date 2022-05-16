@@ -19,11 +19,11 @@ type ConnectionNodeController struct {
 }
 
 const (
-	// Kube related
-	createKubeConnectionEndpoint = "/api/v2/connections/kube"
-
 	// Db related
 	createDbConnectionEndpoint = "/api/v2/connections/db"
+
+	// Kube related
+	createKubeConnectionEndpoint = "/api/v2/connections/kube"
 
 	// Ssh related
 	createSshConnectionEndpoint = "/api/v2/connections/ssh"
@@ -64,17 +64,6 @@ func (c *ConnectionNodeController) CloseConnection(connectionId string) error {
 	return nil
 }
 
-func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targetGroups []string, targetId string) (ConnectionDetailsResponse, error) {
-	// Create our request
-	createKubeConnectionRequest := CreateKubeConnectionRequest{
-		TargetUser:   targetUser,
-		TargetGroups: targetGroups,
-		TargetId:     targetId,
-	}
-
-	return c.createConnection(createKubeConnectionRequest, "kube")
-}
-
 func (c *ConnectionNodeController) CreateDbConnection(targetId string) (ConnectionDetailsResponse, error) {
 	// Create our request
 	createDbConnectionRequest := CreateConnectionRequest{
@@ -84,13 +73,15 @@ func (c *ConnectionNodeController) CreateDbConnection(targetId string) (Connecti
 	return c.createConnection(createDbConnectionRequest, "db")
 }
 
-func (c *ConnectionNodeController) CreateWebConnection(targetId string) (ConnectionDetailsResponse, error) {
+func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targetGroups []string, targetId string) (ConnectionDetailsResponse, error) {
 	// Create our request
-	createWebConnectionRequest := CreateConnectionRequest{
-		TargetId: targetId,
+	createKubeConnectionRequest := CreateKubeConnectionRequest{
+		TargetUser:   targetUser,
+		TargetGroups: targetGroups,
+		TargetId:     targetId,
 	}
 
-	return c.createConnection(createWebConnectionRequest, "web")
+	return c.createConnection(createKubeConnectionRequest, "kube")
 }
 
 func (c *ConnectionNodeController) CreateShellConnection(connectionId string) (ConnectionDetailsResponse, error) {
@@ -110,18 +101,27 @@ func (c *ConnectionNodeController) CreateSshConnection(targetId string, targetUs
 	return c.createConnection(createSshConnectionRequest, "ssh")
 }
 
+func (c *ConnectionNodeController) CreateWebConnection(targetId string) (ConnectionDetailsResponse, error) {
+	// Create our request
+	createWebConnectionRequest := CreateConnectionRequest{
+		TargetId: targetId,
+	}
+
+	return c.createConnection(createWebConnectionRequest, "web")
+}
+
 func (c *ConnectionNodeController) createConnection(request interface{}, connectionType string) (ConnectionDetailsResponse, error) {
 	// Build the endpoint we want to hit
 	endpoint := ""
 	switch connectionType {
-	case "kube":
-		endpoint = createKubeConnectionEndpoint
-	case "web":
-		endpoint = createWebConnectionEndpoint
 	case "db":
 		endpoint = createDbConnectionEndpoint
+	case "kube":
+		endpoint = createKubeConnectionEndpoint
 	case "ssh":
 		endpoint = createSshConnectionEndpoint
+	case "web":
+		endpoint = createWebConnectionEndpoint
 	default:
 		return ConnectionDetailsResponse{}, fmt.Errorf("attempting to make an unrecognized connection: %s", connectionType)
 	}
