@@ -168,6 +168,22 @@ func New(logger *logger.Logger,
 
 	// Listener for any incoming messages
 	ws.tmb.Go(func() error {
+		// Listener for any messages that need to be sent
+		ws.tmb.Go(func() error {
+			for ws.tmb.Alive() {
+				for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
+					select {
+					case <-ws.tmb.Dying():
+						return nil
+					case msg := <-ws.sendQueue:
+						ws.processOutput(msg)
+					}
+				}
+			}
+			return nil
+		})
+
+		// Receive any messages in the websocket
 		for ws.tmb.Alive() {
 			for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
 				select {
@@ -183,20 +199,6 @@ func New(logger *logger.Logger,
 		return nil
 	})
 
-	// Listener for any messages that need to be sent
-	go func() {
-		for ws.tmb.Alive() {
-			for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
-				select {
-				case <-ws.tmb.Dying():
-					return
-				case msg := <-ws.sendQueue:
-					ws.processOutput(msg)
-				}
-			}
-		}
-	}()
-
 	return &ws, nil
 }
 
@@ -208,8 +210,17 @@ func (w *Websocket) Close(reason error) {
 		channel.Close(reason)
 	}
 
-	// tell our tmb to clean up after us
+	// mark the tmb as dying so we ignore any errors that occur when closing the
+	// websocket
 	w.tmb.Kill(reason)
+
+	// close the websocket connection. This will cause errors when reading from
+	// websocket in receive
+	if w.client != nil {
+		w.ready = false
+		w.client.Close()
+	}
+
 	w.tmb.Wait()
 }
 
@@ -229,11 +240,16 @@ func (w *Websocket) SubscriberCount() int {
 
 // Returns error on websocket closed
 func (w *Websocket) receive() error {
-
 	// Read incoming message(s)
 	_, rawMessage, err := w.client.ReadMessage()
 
-	if err != nil {
+	// We check to make sure the tmb is still alive and not being actively
+	// killed because otherwise an error in receive will call w.Close which will
+	// attempt to close/wait on the tmb again and cause a deadlock
+	if err != nil && !w.tmb.Alive() {
+		// We are already killing the tmb so just return
+		return nil
+	} else if err != nil {
 		w.ready = false
 
 		// Check if it's a clean exit or we don't need to reconnect
@@ -255,7 +271,7 @@ func (w *Websocket) receive() error {
 			for _, message := range messages {
 				switch message.Target {
 				case "CloseConnection":
-					rerr := errors.New("closing message received; websocket closed")
+					rerr := errors.New("the bzero agent terminated the connection")
 					w.Close(rerr)
 					return rerr
 				default:
@@ -406,8 +422,16 @@ func (w *Websocket) connect() error {
 	backoffParams.MaxInterval = time.Minute * 30 // At most 30 minutes in between requests
 	ticker := backoff.NewTicker(backoffParams)
 
-	for range ticker.C {
-		if !w.ready {
+	for {
+		select {
+		// If tmb is dying stop trying to connect
+		case <-w.tmb.Dying():
+			return nil
+		case tick, ok := <-ticker.C:
+			if !ok {
+				return fmt.Errorf("failed to connect to Bastion after %s", backoffParams.MaxElapsedTime)
+			}
+
 			if w.getChallenge {
 				// safe to fail on this error since GetChallenge has its own retry logic
 				if err := w.solveChallenge(); err != nil {
@@ -470,16 +494,12 @@ func (w *Websocket) connect() error {
 			} else {
 				w.logger.Info("Connection successful!")
 				w.ready = true
+				return nil
 			}
-		}
-		if w.ready {
-			return nil
-		} else {
-			// this output won't line up with the exact timing you see, but it's in the ballpark
-			w.logger.Infof("failed to connect. Will try again in about %s", backoffParams.NextBackOff())
+
+			w.logger.Infof("failed to connect at %s. Will try again in about %s", tick, backoffParams.NextBackOff())
 		}
 	}
-	return fmt.Errorf("failed to connect to Bastion after %s", backoffParams.MaxElapsedTime)
 }
 
 func (w *Websocket) lenChannels() int {

@@ -154,11 +154,22 @@ func (p *PseudoTerminal) Done() <-chan struct{} {
 }
 
 func (p *PseudoTerminal) Kill() {
+	// close the ptyFile so we can no longer read/write from stdio
 	if p.ptyFile != nil {
+		p.logger.Infof("closing pty file")
 		if err := p.ptyFile.Close(); err != nil {
 			p.logger.Errorf("failed to close pty: %s", err)
 		}
 		p.ptyFile = nil
+	}
+
+	// Also kill the pty command process so the cmd.Wait() will return and the
+	// done channel will get closed
+	if p.command.Process != nil {
+		p.logger.Infof("killing pty command process")
+		if err := p.command.Process.Kill(); err != nil {
+			p.logger.Errorf("failed to kill pty command process: %s", err)
+		}
 	}
 }
 
