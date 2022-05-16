@@ -180,7 +180,6 @@ func New(logger *logger.Logger,
 					}
 				}
 			}
-			ws.logger.Info("output dying")
 			return nil
 		})
 
@@ -429,7 +428,6 @@ func (w *Websocket) connect() error {
 		case <-w.tmb.Dying():
 			return nil
 		case tick, ok := <-ticker.C:
-			w.logger.Infof("Got tick: %s", tick)
 			if !ok {
 				return fmt.Errorf("failed to connect to Bastion after %s", backoffParams.MaxElapsedTime)
 			}
