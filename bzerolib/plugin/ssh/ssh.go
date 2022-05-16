@@ -26,7 +26,9 @@ type SshInputMessage struct {
 	Data []byte `json:"data"`
 }
 
-type SshCloseMessage struct{}
+type SshCloseMessage struct {
+	Reason string `json:"reason"`
+}
 
 type SshSubAction string
 

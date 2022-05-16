@@ -25,6 +25,7 @@ const (
 	writeDeadline        = 5 * time.Second
 	maxKeyLifetime       = 30 * time.Second
 	authorizedKeyComment = "bzero-temp-key"
+	timeLayout           = "20060102150405"
 )
 
 type DefaultSsh struct {
@@ -113,8 +114,10 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 			break
 		}
 
-		// Send this data to our remote connection
-		d.logger.Info("Received data from daemon, forwarding to remote tcp connection")
+		// Send this data to our remote connection FIXME:
+		//d.logger.Infof("Received data %+q from daemon, forwarding to remote tcp connection", string(inputRequest.Data))
+		//d.logger.Infof("q:  %q", string(inputRequest.Data))
+		//d.logger.Infof("q+: %+q", string(inputRequest.Data))
 
 		// Set a deadline for the write so we don't block forever
 		(*d.remoteConnection).SetWriteDeadline(time.Now().Add(writeDeadline))
@@ -129,13 +132,14 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 		// Deserialize the action payload
 		var closeRequest ssh.SshCloseMessage
 		if jerr := json.Unmarshal(actionPayload, &closeRequest); jerr != nil {
-			err = fmt.Errorf("unable to unmarshal default SSH input message: %s", jerr)
-			break
+			// not a fatal error, we can still just close without a reason
+			d.logger.Errorf("unable to unmarshal default SSH close message: %s", jerr)
 		}
 
-		d.logger.Debugf("received close message from daemon. Ending TCP connection")
-		d.closed = true // Ensure that we close the action
+		d.closed = true
+		d.logger.Debugf("Ending TCP connection because we received this close message from daemon: %s", closeRequest.Reason)
 		d.remoteConnection.Close()
+		d.Kill()
 
 		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
 		return actionPayload, nil
@@ -163,7 +167,6 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byt
 
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
 	d.tmb.Go(func() error {
-
 		defer func() {
 			close(d.doneChan)
 			if err := d.clearAuthorizedKeyEntries(d.currentAuthorizedKey); err != nil {
@@ -175,27 +178,33 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byt
 		buff := make([]byte, chunkSize)
 
 		for {
-			// this line blocks until it reads output or error
-			if n, err := (*d.remoteConnection).Read(buff); !d.tmb.Alive() {
+			select {
+			case <-d.tmb.Dying():
+				d.logger.Errorf("got killed")
 				return nil
-			} else if err != nil {
-				if err == io.EOF {
-					d.logger.Errorf("connection closed (EOF)")
-					// Let our daemon know that we have got the error and we need to close the connection
-					d.sendStreamMessage(sequenceNumber, smsg.StdOut, false, buff[:n])
+			default:
+				// this line blocks until it reads output or error
+				if n, err := (*d.remoteConnection).Read(buff); !d.tmb.Alive() {
+					return nil
+				} else if err != nil {
+					if err == io.EOF {
+						d.logger.Errorf("connection closed (EOF)")
+						// Let our daemon know that we have got the error and we need to close the connection
+						d.sendStreamMessage(sequenceNumber, smsg.StdOut, false, buff[:n])
+					} else if !d.closed {
+						d.logger.Errorf("failed to read from tcp connection: %s", err)
+						d.sendStreamMessage(sequenceNumber, smsg.Error, false, buff[:n])
+					}
+					// if we're closed, this is an expected error, so we can just end gracefully
+					return err
 				} else {
-					d.logger.Errorf("failed to read from tcp connection: %s", err)
-					d.sendStreamMessage(sequenceNumber, smsg.Error, false, buff[:n])
+					d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
+
+					// Now send this to daemon
+					d.sendStreamMessage(sequenceNumber, smsg.StdOut, true, buff[:n])
+
+					sequenceNumber += 1
 				}
-
-				return err
-			} else {
-				d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
-
-				// Now send this to daemon
-				d.sendStreamMessage(sequenceNumber, smsg.StdOut, true, buff[:n])
-
-				sequenceNumber += 1
 			}
 		}
 	})
@@ -217,7 +226,6 @@ func (d *DefaultSsh) sendStreamMessage(sequenceNumber int, streamType smsg.Strea
 
 // FIXME: check publicKey type?
 func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) error {
-	d.logger.Errorf("oh hi mark it's %s", openRequest.PublicKey)
 	// test that the provided username is valid unix user name
 	// source: https://unix.stackexchange.com/a/435120
 	usernamePattern := "^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\\$)$"
@@ -238,7 +246,10 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 		return fmt.Errorf("invalid public key provided: %s", keyContents)
 	}
 
-	d.currentAuthorizedKey = fmt.Sprintf("%s %s %s", keyType, keyContents, authorizedKeyComment)
+	// format the time to the second
+	timestamp := time.Now().Format(timeLayout)
+
+	d.currentAuthorizedKey = fmt.Sprintf("%s %s %s created_at=%s", keyType, keyContents, authorizedKeyComment, timestamp)
 
 	/* FIXME: may or may not need this
 	// Check the user exists
@@ -250,7 +261,7 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 	*/
 
 	// Add an entry to the authorized_keys for the user
-	d.logger.Infof("Adding authorized key entry %s for user: %s", d.currentAuthorizedKey, d.targetUser)
+	d.logger.Infof("Adding authorized key entry for user: %s", d.targetUser)
 	var keyAdded, err = addToAuthorizedKeyFile(d.targetUser, d.currentAuthorizedKey)
 	if !keyAdded {
 		return fmt.Errorf("failed to add authorized key entry for user %s: %v", d.targetUser, err)
@@ -261,6 +272,8 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 
 // remove keys matching a pattern
 // NOTE: this does not necessarily interact with authorized_keys in a threadsafe way
+// FIXME: this needs to have no chance of deleting proper keys
+// need to figure out how that happened...
 func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
 	authorizedKeyFile := fmt.Sprintf("/home/%s/.ssh/authorized_keys", d.targetUser)
 	f, err := os.Open(authorizedKeyFile)
@@ -274,7 +287,18 @@ func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		if !strings.Contains(scanner.Text(), pattern) {
+		key := scanner.Text()
+		keepThisKey := false
+		if strings.Contains(key, "created_at=") {
+			// any key we find that is younger than 30 seconds should be spared, since the process that wrote it may not have logged in yet
+			createdAt, _ := time.Parse(timeLayout, strings.Split(key, "created_at=")[1])
+			if time.Since(createdAt) < 30*time.Second {
+				keepThisKey = true
+			} else {
+				continue
+			}
+		}
+		if !strings.Contains(key, pattern) || keepThisKey {
 			_, err := buf.Write(scanner.Bytes())
 			if err != nil {
 				return err

@@ -137,9 +137,11 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 						errs := strings.Split(dcTmb.Err().Error(), ": ")
 						errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
 						os.Stdout.Write([]byte(errorString))
+						errorCode := 1
+						os.Exit(errorCode)
+					} else {
+						os.Exit(0)
 					}
-					errorCode := 1
-					os.Exit(errorCode)
 				}
 			}
 		}()

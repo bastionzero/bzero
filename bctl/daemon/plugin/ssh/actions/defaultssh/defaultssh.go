@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -98,12 +99,12 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 				d.logger.Errorf("Error writing to Stdout: %s", err)
 			}
 			if !smessage.More {
-				d.tmb.Kill(fmt.Errorf("received ssh quit stream message"))
+				d.tmb.Kill(fmt.Errorf("received ssh close stream message"))
+				close(d.doneChan)
 				return
 			}
 		}
 	case smsg.Error:
-		// TODO: revisit
 		d.tmb.Kill(fmt.Errorf("received an error from the agent"))
 		return
 	default:
@@ -119,10 +120,17 @@ func (d *DefaultSsh) readStdIn() {
 	for {
 		select {
 		case <-d.tmb.Dying():
+			d.logger.Errorf("oh I'm dying now")
 			return
 		default:
 			n, err := os.Stdin.Read(b)
 			if err != nil {
+				if err == io.EOF {
+					d.tmb.Kill(fmt.Errorf("finished reading from stdin"))
+					close(d.doneChan)
+					d.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: "SSH session ended"})
+					return
+				}
 				d.tmb.Kill(fmt.Errorf("error reading from Stdin: %s", err))
 				return
 			}
@@ -151,7 +159,6 @@ func (d *DefaultSsh) sendStdIn() {
 				sshInputDataMessage := ssh.SshInputMessage{
 					Data: inputBuf,
 				}
-				d.logger.Infof("Look what I'm sending... %s", string(inputBuf[:]))
 				d.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
 
 				// clear the input buffer by slicing it to size 0 which will still
