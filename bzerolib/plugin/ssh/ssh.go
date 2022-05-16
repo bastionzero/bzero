@@ -1,6 +1,10 @@
 package ssh
 
-import "net"
+import (
+	"net"
+
+	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+)
 
 type SshAction string
 
@@ -18,8 +22,9 @@ type SshFood struct {
 }
 
 type SshOpenMessage struct {
-	TargetUser string `json:"targetUser"`
-	PublicKey  []byte `json:"publicKey"`
+	TargetUser           string             `json:"targetUser"`
+	PublicKey            []byte             `json:"publicKey"`
+	StreamMessageVersion smsg.SchemaVersion `json:"streamMessageVersion"`
 }
 
 type SshInputMessage struct {

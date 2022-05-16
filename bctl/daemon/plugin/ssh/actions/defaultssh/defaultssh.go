@@ -75,7 +75,8 @@ func (d *DefaultSsh) Start() error {
 	}
 
 	sshOpenMessage := ssh.SshOpenMessage{
-		PublicKey: []byte(publicKey),
+		PublicKey:            []byte(publicKey),
+		StreamMessageVersion: smsg.CurrentSchema,
 	}
 	d.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
 
@@ -94,7 +95,6 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 		} else {
-			d.logger.Infof("Wrote to my SSH: %s", contentBytes)
 			if _, err = os.Stdout.Write(contentBytes); err != nil {
 				d.logger.Errorf("Error writing to Stdout: %s", err)
 			}
@@ -135,7 +135,7 @@ func (d *DefaultSsh) readStdIn() {
 				return
 			}
 			if n > 0 {
-				d.logger.Infof("Read %d bytes from local SSH: %s", n, b[:n])
+				d.logger.Debugf("Read %d bytes from local SSH", n)
 				d.stdInChan <- b[:n]
 			}
 		}

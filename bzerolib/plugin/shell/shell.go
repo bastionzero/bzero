@@ -13,6 +13,10 @@
 
 package shell
 
+import (
+	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+)
+
 type ShellAction string
 
 const (
@@ -23,7 +27,9 @@ type ShellActionParams struct {
 	TargetUser string `json:"targetUser"`
 }
 
-type ShellOpenMessage struct{}
+type ShellOpenMessage struct {
+	StreamMessageVersion smsg.SchemaVersion `json:"streamMessageVersion"`
+}
 
 type ShellCloseMessage struct{}
 

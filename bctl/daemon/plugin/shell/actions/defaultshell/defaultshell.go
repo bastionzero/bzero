@@ -60,7 +60,9 @@ func (d *DefaultShell) Start(attach bool) error {
 	} else {
 		// If we are not attaching then send a ShellOpen data message to start
 		// the pty on the target
-		openShellDataMessage := bzshell.ShellOpenMessage{}
+		openShellDataMessage := bzshell.ShellOpenMessage{
+			StreamMessageVersion: smsg.CurrentSchema,
+		}
 		d.sendOutputMessage(bzshell.ShellOpen, openShellDataMessage)
 	}
 

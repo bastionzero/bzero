@@ -114,11 +114,6 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 			break
 		}
 
-		// Send this data to our remote connection FIXME:
-		//d.logger.Infof("Received data %+q from daemon, forwarding to remote tcp connection", string(inputRequest.Data))
-		//d.logger.Infof("q:  %q", string(inputRequest.Data))
-		//d.logger.Infof("q+: %+q", string(inputRequest.Data))
-
 		// Set a deadline for the write so we don't block forever
 		(*d.remoteConnection).SetWriteDeadline(time.Now().Add(writeDeadline))
 		if _, err := (*d.remoteConnection).Write(inputRequest.Data); !d.tmb.Alive() {
@@ -137,7 +132,7 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 		}
 
 		d.closed = true
-		d.logger.Debugf("Ending TCP connection because we received this close message from daemon: %s", closeRequest.Reason)
+		d.logger.Infof("Ending TCP connection because we received this close message from daemon: %s", closeRequest.Reason)
 		d.remoteConnection.Close()
 		d.Kill()
 
@@ -154,9 +149,8 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 }
 
 func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
-	// FIXME: add this back in
-	//d.streamMessageVersion = openRequest.StreamMessageVersion
-	//d.logger.Infof("Setting stream message version: %s", d.streamMessageVersion)
+	d.streamMessageVersion = openRequest.StreamMessageVersion
+	d.logger.Debugf("Setting stream message version: %s", d.streamMessageVersion)
 
 	// For each start, call the dial the TCP address
 	if remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress); err != nil {
@@ -285,6 +279,7 @@ func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
 	var bs []byte
 	buf := bytes.NewBuffer(bs)
 
+	// FIXME: would readfile be safer?
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		key := scanner.Text()
