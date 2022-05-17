@@ -1,12 +1,14 @@
 package defaultssh
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"time"
 
+	gossh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/terminal"
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -20,6 +22,7 @@ import (
 const (
 	InputBufferSize   = 8 * 1024
 	InputDebounceTime = 5 * time.Millisecond
+	writeDeadline     = 5 * time.Second
 )
 
 type DefaultSsh struct {
@@ -36,6 +39,8 @@ type DefaultSsh struct {
 
 	fileService fileservice.FileService
 	ioService   ioservice.IoService
+
+	remoteAddress *net.TCPAddr
 }
 
 func New(
@@ -47,14 +52,20 @@ func New(
 	ioService ioservice.IoService,
 ) *DefaultSsh {
 
-	return &DefaultSsh{
-		logger:       logger,
-		outboxQueue:  outboxQueue,
-		doneChan:     doneChan,
-		stdInChan:    make(chan []byte, InputBufferSize),
-		identityFile: identityFile,
-		fileService:  fileService,
-		ioService:    ioService,
+	if raddr, err := net.ResolveTCPAddr("tcp", "localhost:2022"); err != nil {
+		logger.Errorf("Failed to resolve remote address: %s", err)
+		return nil
+	} else {
+		return &DefaultSsh{
+			logger:        logger,
+			outboxQueue:   outboxQueue,
+			doneChan:      doneChan,
+			stdInChan:     make(chan []byte, InputBufferSize),
+			identityFile:  identityFile,
+			fileService:   fileService,
+			ioService:     ioService,
+			remoteAddress: raddr,
+		}
 	}
 }
 
@@ -75,7 +86,7 @@ func (d *DefaultSsh) Start() error {
 		if publicKey, err = generatePublicKey(publicKeyRsa); err != nil {
 			return fmt.Errorf("error decoding temporary public key: %s", err)
 		} else {
-			d.logger.Debugf("using existing temporary keys")
+			d.logger.Debugf("using existing temporary keys!?!?")
 		}
 	} else {
 		d.logger.Debugf("generating new temporary keys")
@@ -86,6 +97,20 @@ func (d *DefaultSsh) Start() error {
 			return fmt.Errorf("error writing temporary private key: %s", err)
 		}
 	}
+
+	// Once a ServerConfig has been configured, connections can be
+	// accepted.
+	d.logger.Infof("Gonna listen")
+	listener, err := net.Listen("tcp", ":2222")
+	if err != nil {
+		d.logger.Errorf("failed to listen for connection: ", err)
+	}
+
+	defer listener.Close()
+
+	d.logger.Infof("Accepting...")
+	nConn, _ := listener.Accept()
+	d.logger.Infof("accepted")
 
 	sshOpenMessage := ssh.SshOpenMessage{
 		PublicKey:            []byte(publicKey),
@@ -124,31 +149,106 @@ func (d *DefaultSsh) Start() error {
 		}
 	})
 
+	// An SSH server is represented by a ServerConfig, which holds
+	// certificate details and handles authentication of ServerConns.
+	config := &gossh.ServerConfig{
+		PublicKeyCallback: func(c gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
+			return &gossh.Permissions{
+				// Record the public key used for authentication.
+				Extensions: map[string]string{
+					"pubkey-fp": gossh.FingerprintSHA256(pubKey),
+				},
+			}, nil
+		},
+	}
+
+	d.logger.Infof("Making config")
+
+	newPrivate, _, _ := GenerateKeys()
+
+	private, _ := gossh.ParsePrivateKey(newPrivate)
+
+	config.AddHostKey(private)
+
+	d.logger.Infof("Made config")
+
+	// Before use, a handshake must be performed on the incoming
+	// net.Conn.
+	d.logger.Infof("Trying to make thingies??")
+	_, chans, reqs, err := gossh.NewServerConn(nConn, config)
+
+	d.logger.Infof("Made thingies??")
+	if err != nil {
+		d.logger.Errorf("failed to handshake: ", err)
+	}
+
+	go gossh.DiscardRequests(reqs)
+
+	for newChannel := range chans {
+		// Channels have a type, depending on the application level
+		// protocol intended. In the case of a shell, the type is
+		// "session" and ServerShell may be used to present a simple
+		// terminal interface.
+		if newChannel.ChannelType() != "session" {
+			newChannel.Reject(gossh.UnknownChannelType, "unknown channel type")
+			continue
+		}
+		channel, requests, err := newChannel.Accept()
+		if err != nil {
+			d.logger.Errorf("Could not accept channel: %v", err)
+		}
+
+		// Sessions have out-of-band requests such as "shell",
+		// "pty-req" and "env".  Here we handle only the
+		// "shell" request.
+		go func(in <-chan *gossh.Request) {
+			for req := range in {
+				req.Reply(req.Type == "shell", nil)
+			}
+		}(requests)
+
+		term := terminal.NewTerminal(channel, "> ")
+
+		go func() {
+			defer channel.Close()
+			for {
+				line, err := term.ReadLine()
+				if err != nil {
+					break
+				}
+				fmt.Println(line)
+			}
+		}()
+	}
+
 	return nil
 
 }
 
 func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
-	d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
-	switch smsg.StreamType(smessage.Type) {
-	case smsg.StdOut:
-		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
-			d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
-		} else {
-			if _, err = d.ioService.Write(contentBytes); err != nil {
-				d.logger.Errorf("Error writing to Stdout: %s", err)
+
+	/*
+		d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
+		switch smsg.StreamType(smessage.Type) {
+		case smsg.StdOut:
+			if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
+				d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
+			} else {
+				if _, err = d.ioService.Write(contentBytes); err != nil {
+					d.logger.Errorf("Error writing to Stdout: %s", err)
+				}
+				if !smessage.More {
+					d.tmb.Kill(fmt.Errorf("received ssh close stream message"))
+					return
+				}
 			}
-			if !smessage.More {
-				d.tmb.Kill(fmt.Errorf("received ssh close stream message"))
-				return
-			}
+		case smsg.Error:
+			d.tmb.Kill(fmt.Errorf("received an error from the agent"))
+			return
+		default:
+			d.logger.Errorf("unhandled stream type: %s", smessage.Type)
 		}
-	case smsg.Error:
-		d.tmb.Kill(fmt.Errorf("received an error from the agent"))
-		return
-	default:
-		d.logger.Errorf("unhandled stream type: %s", smessage.Type)
-	}
+	*/
 }
 
 // processes input channel by debouncing all keypresses within a time interval
@@ -164,11 +264,25 @@ func (d *DefaultSsh) sendStdIn() {
 			inputBuf = append(inputBuf, b...)
 		case <-time.After(InputDebounceTime):
 			if len(inputBuf) >= 1 {
-				// Send all accumulated input in an sshInput data message
-				sshInputDataMessage := ssh.SshInputMessage{
-					Data: inputBuf,
-				}
-				d.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
+
+				/*
+					// Set a deadline for the write so we don't block forever
+					(*d.remoteConnection).SetWriteDeadline(time.Now().Add(writeDeadline))
+					if _, err := (*d.remoteConnection).Write(inputBuf); !d.tmb.Alive() {
+						return
+					} else if err != nil {
+						d.logger.Errorf("error writing to local TCP connection: %s", err)
+						d.Kill()
+					}
+				*/
+				/*
+					// Send all accumulated input in an sshInput data message
+					sshInputDataMessage := ssh.SshInputMessage{
+						Data: inputBuf,
+					}
+					d.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
+
+				*/
 
 				// clear the input buffer by slicing it to size 0 which will still
 				// keep memory allocated for the underlying capacity of the slice
