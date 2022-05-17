@@ -8,7 +8,6 @@ import (
 	"time"
 
 	gossh "golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/terminal"
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -184,41 +183,31 @@ func (d *DefaultSsh) Start() error {
 
 	go gossh.DiscardRequests(reqs)
 
-	for newChannel := range chans {
-		// Channels have a type, depending on the application level
-		// protocol intended. In the case of a shell, the type is
-		// "session" and ServerShell may be used to present a simple
-		// terminal interface.
-		if newChannel.ChannelType() != "session" {
-			newChannel.Reject(gossh.UnknownChannelType, "unknown channel type")
+	//keyID := sConn.Permissions.Extensions["key-id"]
+
+	// Service the incoming Channel channel.
+	for newChan := range chans {
+		d.logger.Errorf("I'm a cool loop")
+		if newChan.ChannelType() != "session" {
+			_ = newChan.Reject(gossh.UnknownChannelType, "unknown channel type")
 			continue
 		}
-		channel, requests, err := newChannel.Accept()
+
+		ch, reqs, err := newChan.Accept()
 		if err != nil {
-			d.logger.Errorf("Could not accept channel: %v", err)
+			d.logger.Errorf("Error accepting channel: %v", err)
+			continue
 		}
 
-		// Sessions have out-of-band requests such as "shell",
-		// "pty-req" and "env".  Here we handle only the
-		// "shell" request.
 		go func(in <-chan *gossh.Request) {
+			defer func() {
+				_ = ch.Close()
+			}()
 			for req := range in {
-				req.Reply(req.Type == "shell", nil)
+				fmt.Printf("I got %s", req.Payload)
+				d.logger.Errorf("I got %s", req.Payload)
 			}
-		}(requests)
-
-		term := terminal.NewTerminal(channel, "> ")
-
-		go func() {
-			defer channel.Close()
-			for {
-				line, err := term.ReadLine()
-				if err != nil {
-					break
-				}
-				fmt.Println(line)
-			}
-		}()
+		}(reqs)
 	}
 
 	return nil
