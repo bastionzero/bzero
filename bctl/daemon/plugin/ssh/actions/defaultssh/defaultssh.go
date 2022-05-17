@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	InputBufferSize   = 8 * 1024
+	InputBufferSize   = int(8 * 1024)
 	InputDebounceTime = 5 * time.Millisecond
 )
 
@@ -94,7 +94,7 @@ func (d *DefaultSsh) Start() error {
 
 	d.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
 
-	go d.sendStdIn()
+	// go d.sendStdIn()
 	go func() {
 		defer close(d.doneChan)
 		<-d.tmb.Dying()
@@ -118,7 +118,8 @@ func (d *DefaultSsh) Start() error {
 					return fmt.Errorf("error reading from Stdin: %s", err)
 				} else if n > 0 {
 					d.logger.Debugf("Read %d bytes from local SSH", n)
-					d.stdInChan <- b[:n]
+					d.sendSshInputMessage(b[:n])
+					// d.stdInChan <- b[:n]
 				}
 			}
 		}
@@ -152,30 +153,34 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 }
 
 // processes input channel by debouncing all keypresses within a time interval
-func (d *DefaultSsh) sendStdIn() {
-	inputBuf := make([]byte, InputBufferSize)
-	inputBuf = inputBuf[:0]
+// func (d *DefaultSsh) sendStdIn() {
+// 	inputBuf := []byte{}
 
-	for {
-		select {
-		case <-d.tmb.Dying():
-			return
-		case b := <-d.stdInChan:
-			inputBuf = append(inputBuf, b...)
-		case <-time.After(InputDebounceTime):
-			if len(inputBuf) >= 1 {
-				// Send all accumulated input in an sshInput data message
-				sshInputDataMessage := ssh.SshInputMessage{
-					Data: inputBuf,
-				}
-				d.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
+// 	for {
+// 		select {
+// 		case <-d.tmb.Dying():
+// 			return
+// 		case b := <-d.stdInChan:
+// 			inputBuf = append(inputBuf, b...)
+// 			if len(inputBuf) >= InputBufferSize {
+// 				d.sendSshInputMessage(inputBuf)
+// 				inputBuf = inputBuf[:0]
+// 			}
+// 		case <-time.After(InputDebounceTime):
+// 			if len(inputBuf) >= 1 {
+// 				d.sendSshInputMessage(inputBuf)
+// 				inputBuf = inputBuf[:0]
+// 			}
+// 		}
+// 	}
+// }
 
-				// clear the input buffer by slicing it to size 0 which will still
-				// keep memory allocated for the underlying capacity of the slice
-				inputBuf = inputBuf[:0]
-			}
-		}
+func (d *DefaultSsh) sendSshInputMessage(bs []byte) {
+	// Send all accumulated input in an sshInput data message
+	sshInputDataMessage := ssh.SshInputMessage{
+		Data: bs,
 	}
+	d.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
 }
 
 func (d *DefaultSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
