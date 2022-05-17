@@ -46,7 +46,7 @@ phases:
       - echo 'export PATH=/usr/local/go/bin:$PATH' >>~/.bash_profile
       - export PATH=/usr/local/go/bin:$PATH
       # Update npm 
-      - npm install -g npm@7
+      - npm install -g npm@8
       - # Install system-test dependencies
       - # Install helm (ref: https://helm.sh/docs/intro/install/#from-apt-debianubuntu)
       - curl https://baltocdn.com/helm/signing.asc | apt-key add -
