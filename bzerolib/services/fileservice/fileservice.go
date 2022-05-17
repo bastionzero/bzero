@@ -15,10 +15,10 @@ type FileService interface {
 // TODO: docstring
 type OsFileService struct{}
 
-func (OsFileService) ReadFile(name string) ([]byte, error) {
+func (f OsFileService) ReadFile(name string) ([]byte, error) {
 	return os.ReadFile(name)
 }
 
-func (OsFileService) WriteFile(name string, data []byte, perm fs.FileMode) error {
+func (f OsFileService) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return os.WriteFile(name, data, perm)
 }

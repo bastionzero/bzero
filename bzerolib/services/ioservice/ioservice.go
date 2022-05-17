@@ -13,10 +13,10 @@ type IoService interface {
 // TODO: docstring
 type StdIoService struct{}
 
-func (StdIoService) Read(b []byte) (n int, err error) {
+func (s StdIoService) Read(b []byte) (n int, err error) {
 	return os.Stdin.Read(b)
 }
 
-func (StdIoService) Write(b []byte) (n int, err error) {
+func (s StdIoService) Write(b []byte) (n int, err error) {
 	return os.Stdout.Write(b)
 }
