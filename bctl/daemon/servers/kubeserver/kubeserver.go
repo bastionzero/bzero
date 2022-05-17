@@ -12,6 +12,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -167,7 +168,7 @@ func (k *KubeServer) newDataChannel(dcId string, action string, websocket *webso
 
 	action = "kube/" + action
 	ksLogger := k.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, k.agentPubKey, k.configPath, k.refreshTokenCommand); err != nil {
+	if keysplitter, err := keysplitting.New(ksLogger, k.agentPubKey, tokenrefresh.NewZLIKeysplittingTokenRefresher(k.refreshTokenCommand, k.configPath)); err != nil {
 		return err
 	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &k.tmb, websocket, keysplitter, plugin, action, actionParams, attach); err != nil {
 		return err
