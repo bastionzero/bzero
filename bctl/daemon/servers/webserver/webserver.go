@@ -11,6 +11,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -182,7 +183,7 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 
 	actString := "web/" + string(action)
 	mrzapLogger := w.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(mrzapLogger, w.agentPubKey, w.configPath, w.refreshTokenCommand); err != nil {
+	if keysplitter, err := keysplitting.New(mrzapLogger, w.agentPubKey, tokenrefresh.NewZLIKeysplittingTokenRefresher(w.refreshTokenCommand, w.configPath)); err != nil {
 		return err
 	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, actionParams, attach, true); err != nil {
 		return err

@@ -4,13 +4,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"sync"
 
 	"github.com/Masterminds/semver"
 	orderedmap "github.com/wk8/go-ordered-map"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
@@ -25,20 +24,8 @@ const maxErrorRecoveryTries = 3
 // received an ack
 var pipelineLimit = 8
 
-type ZLIConfig struct {
-	KSConfig KeysplittingConfig `json:"keySplitting"`
-	TokenSet ZLITokenSetConfig  `json:"tokenSet"`
-}
-type ZLITokenSetConfig struct {
-	CurrentIdToken string `json:"id_token"`
-}
-
-type KeysplittingConfig struct {
-	PrivateKey       string `json:"privateKey"`
-	PublicKey        string `json:"publicKey"`
-	CerRand          string `json:"cerRand"`
-	CerRandSignature string `json:"cerRandSig"`
-	InitialIdToken   string `json:"initialIdToken"`
+type TokenRefresher interface {
+	Refresh() (*tokenrefresh.ZLIKeysplittingConfig, error)
 }
 
 type Keysplitting struct {
@@ -52,8 +39,7 @@ type Keysplitting struct {
 	ackPublicKey string
 
 	// for grabbing and updating id tokens
-	zliConfigPath          string
-	zliRefreshTokenCommand string
+	tokenRefresher TokenRefresher
 
 	// ordered hash map to keep track of sent keysplitting messages
 	pipelineMap  *orderedmap.OrderedMap
@@ -82,23 +68,21 @@ type Keysplitting struct {
 func New(
 	logger *logger.Logger,
 	agentPubKey string,
-	configPath string,
-	refreshTokenCommand string,
+	tokenRefresher TokenRefresher,
 ) (*Keysplitting, error) {
 
 	// TODO: load keys from storage
 	keysplitter := &Keysplitting{
-		logger:                 logger,
-		zliConfigPath:          configPath,
-		zliRefreshTokenCommand: refreshTokenCommand,
-		agentPubKey:            agentPubKey,
-		ackPublicKey:           "",
-		pipelineMap:            orderedmap.New(),
-		outboxQueue:            make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
-		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
-		recovering:             false,
-		synAction:              "initial",
-		errorRecoveryAttempt:   0,
+		logger:               logger,
+		agentPubKey:          agentPubKey,
+		tokenRefresher:       tokenRefresher,
+		ackPublicKey:         "",
+		pipelineMap:          orderedmap.New(),
+		outboxQueue:          make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
+		outOfOrderAcks:       make(map[string]*ksmsg.KeysplittingMessage),
+		recovering:           false,
+		synAction:            "initial",
+		errorRecoveryAttempt: 0,
 	}
 	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
 
@@ -417,44 +401,31 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 }
 
 func (k *Keysplitting) buildBZCert() (bzcrt.BZCert, error) {
-	// update the id token by calling the passed in zli command
-	if err := util.RunRefreshAuthCommand(k.zliRefreshTokenCommand); err != nil {
-		return bzcrt.BZCert{}, err
-	} else if zliConfig, err := k.loadZLIConfig(); err != nil {
-		return bzcrt.BZCert{}, err
-	} else {
-		// Set public and private keys because someone maybe have logged out and logged back in again
-		k.clientPubKey = zliConfig.KSConfig.PublicKey
 
-		// The golang ed25519 library uses a length 64 private key because the private key is the concatenated form
-		// privatekey = privatekey + publickey.  So if it was generated as length 32, we can correct for that here
-		if privatekeyBytes, _ := base64.StdEncoding.DecodeString(zliConfig.KSConfig.PrivateKey); len(privatekeyBytes) == 32 {
-			publickeyBytes, _ := base64.StdEncoding.DecodeString(k.clientPubKey)
-			k.clientSecretKey = base64.StdEncoding.EncodeToString(append(privatekeyBytes, publickeyBytes...))
-		} else {
-			k.clientSecretKey = zliConfig.KSConfig.PrivateKey
-		}
-
-		return bzcrt.BZCert{
-			InitialIdToken:  zliConfig.KSConfig.InitialIdToken,
-			CurrentIdToken:  zliConfig.TokenSet.CurrentIdToken,
-			ClientPublicKey: zliConfig.KSConfig.PublicKey,
-			Rand:            zliConfig.KSConfig.CerRand,
-			SignatureOnRand: zliConfig.KSConfig.CerRandSignature,
-		}, nil
+	zliConfig, err := k.tokenRefresher.Refresh()
+	if err != nil {
+		return bzcrt.BZCert{}, fmt.Errorf("failed to refresh keysplitting token: %w", err)
 	}
-}
 
-func (k *Keysplitting) loadZLIConfig() (*ZLIConfig, error) {
-	var config ZLIConfig
+	// Set public and private keys because someone maybe have logged out and
+	// logged back in again
+	k.clientPubKey = zliConfig.KSConfig.PublicKey
 
-	if configFile, err := os.Open(k.zliConfigPath); err != nil {
-		return nil, fmt.Errorf("could not open config file: %s", err)
-	} else if configFileBytes, err := ioutil.ReadAll(configFile); err != nil {
-		return nil, fmt.Errorf("failed to read config file: %s", err)
-	} else if err := json.Unmarshal(configFileBytes, &config); err != nil {
-		return nil, fmt.Errorf("could not unmarshal config file: %s", err)
+	// The golang ed25519 library uses a length 64 private key because the
+	// private key is the concatenated form privatekey = privatekey + publickey.
+	// So if it was generated as length 32, we can correct for that here
+	if privatekeyBytes, _ := base64.StdEncoding.DecodeString(zliConfig.KSConfig.PrivateKey); len(privatekeyBytes) == 32 {
+		publickeyBytes, _ := base64.StdEncoding.DecodeString(k.clientPubKey)
+		k.clientSecretKey = base64.StdEncoding.EncodeToString(append(privatekeyBytes, publickeyBytes...))
 	} else {
-		return &config, nil
+		k.clientSecretKey = zliConfig.KSConfig.PrivateKey
 	}
+
+	return bzcrt.BZCert{
+		InitialIdToken:  zliConfig.KSConfig.InitialIdToken,
+		CurrentIdToken:  zliConfig.TokenSet.CurrentIdToken,
+		ClientPublicKey: zliConfig.KSConfig.PublicKey,
+		Rand:            zliConfig.KSConfig.CerRand,
+		SignatureOnRand: zliConfig.KSConfig.CerRandSignature,
+	}, nil
 }
