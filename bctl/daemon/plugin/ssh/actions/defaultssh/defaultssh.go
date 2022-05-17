@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"gopkg.in/tomb.v2"
@@ -13,6 +12,8 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
+	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -25,23 +26,35 @@ type DefaultSsh struct {
 	tmb    tomb.Tomb
 	logger *logger.Logger
 
-	outputChan chan plugin.ActionWrapper // plugin's output queue
-	doneChan   chan struct{}
+	outboxQueue chan plugin.ActionWrapper
+	doneChan    chan struct{}
 
 	// channel where we push from StdIn
 	stdInChan chan []byte
 
 	identityFile string
+
+	fileService fileservice.FileService
+	ioService   ioservice.IoService
 }
 
-func New(logger *logger.Logger, outboxQueue chan plugin.ActionWrapper, doneChan chan struct{}, identityFile string) *DefaultSsh {
+func New(
+	logger *logger.Logger,
+	outboxQueue chan plugin.ActionWrapper,
+	doneChan chan struct{},
+	identityFile string,
+	fileService fileservice.FileService,
+	ioService ioservice.IoService,
+) *DefaultSsh {
 
 	return &DefaultSsh{
 		logger:       logger,
-		outputChan:   outboxQueue,
+		outboxQueue:  outboxQueue,
 		doneChan:     doneChan,
 		stdInChan:    make(chan []byte, InputBufferSize),
 		identityFile: identityFile,
+		fileService:  fileService,
+		ioService:    ioService,
 	}
 }
 
@@ -58,7 +71,7 @@ func (d *DefaultSsh) Start() error {
 	var privateKey, publicKey []byte
 
 	// if we already have a private key, use it. Otherwise, create a new one
-	if publicKeyRsa, err := readPublicKeyRsa(d.identityFile); err == nil {
+	if publicKeyRsa, err := readPublicKeyRsa(d.identityFile, d.fileService); err == nil {
 		if publicKey, err = generatePublicKey(publicKeyRsa); err != nil {
 			return fmt.Errorf("error decoding temporary public key: %s", err)
 		} else {
@@ -69,7 +82,7 @@ func (d *DefaultSsh) Start() error {
 		privateKey, publicKey, err = GenerateKeys()
 		if err != nil {
 			return fmt.Errorf("error generating temporary keys: %s", err)
-		} else if err := os.WriteFile(d.identityFile, privateKey, 0600); err != nil {
+		} else if err := d.fileService.WriteFile(d.identityFile, privateKey, 0600); err != nil {
 			return fmt.Errorf("error writing temporary private key: %s", err)
 		}
 	}
@@ -78,11 +91,38 @@ func (d *DefaultSsh) Start() error {
 		PublicKey:            []byte(publicKey),
 		StreamMessageVersion: smsg.CurrentSchema,
 	}
+
 	d.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
 
-	// reading Stdin in raw mode and forward keypresses after debouncing
-	go d.readStdIn()
 	go d.sendStdIn()
+	go func() {
+		defer close(d.doneChan)
+		<-d.tmb.Dying()
+	}()
+
+	d.tmb.Go(func() error {
+		b := make([]byte, InputBufferSize)
+
+		for {
+			select {
+			case <-d.tmb.Dying():
+				return nil
+			default:
+				if n, err := d.ioService.Read(b); !d.tmb.Alive() {
+					return nil
+				} else if err != nil {
+					if err == io.EOF {
+						d.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: "SSH session ended"})
+						return fmt.Errorf("finished reading from stdin")
+					}
+					return fmt.Errorf("error reading from Stdin: %s", err)
+				} else if n > 0 {
+					d.logger.Debugf("Read %d bytes from local SSH", n)
+					d.stdInChan <- b[:n]
+				}
+			}
+		}
+	})
 
 	return nil
 
@@ -95,12 +135,11 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 		} else {
-			if _, err = os.Stdout.Write(contentBytes); err != nil {
+			if _, err = d.ioService.Write(contentBytes); err != nil {
 				d.logger.Errorf("Error writing to Stdout: %s", err)
 			}
 			if !smessage.More {
 				d.tmb.Kill(fmt.Errorf("received ssh close stream message"))
-				close(d.doneChan)
 				return
 			}
 		}
@@ -109,36 +148,6 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		return
 	default:
 		d.logger.Errorf("unhandled stream type: %s", smessage.Type)
-	}
-}
-
-// Reads from StdIn and pushes to an input channel
-func (d *DefaultSsh) readStdIn() {
-
-	b := make([]byte, InputBufferSize)
-
-	for {
-		select {
-		case <-d.tmb.Dying():
-			d.logger.Errorf("oh I'm dying now")
-			return
-		default:
-			n, err := os.Stdin.Read(b)
-			if err != nil {
-				if err == io.EOF {
-					d.tmb.Kill(fmt.Errorf("finished reading from stdin"))
-					close(d.doneChan)
-					d.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: "SSH session ended"})
-					return
-				}
-				d.tmb.Kill(fmt.Errorf("error reading from Stdin: %s", err))
-				return
-			}
-			if n > 0 {
-				d.logger.Debugf("Read %d bytes from local SSH", n)
-				d.stdInChan <- b[:n]
-			}
-		}
 	}
 }
 
@@ -172,7 +181,7 @@ func (d *DefaultSsh) sendStdIn() {
 func (d *DefaultSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
-	d.outputChan <- plugin.ActionWrapper{
+	d.outboxQueue <- plugin.ActionWrapper{
 		Action:        string(action),
 		ActionPayload: payloadBytes,
 	}

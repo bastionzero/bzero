@@ -7,6 +7,8 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
+	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -24,15 +26,19 @@ type SshDaemonPlugin struct {
 	killed       bool
 	action       ISshAction
 	identityFile string
+	fileService  fileservice.FileService
+	ioService    ioservice.IoService
 }
 
-func New(logger *logger.Logger, identityFile string) *SshDaemonPlugin {
+func New(logger *logger.Logger, identityFile string, fileService fileservice.FileService, ioService ioservice.IoService) *SshDaemonPlugin {
 	return &SshDaemonPlugin{
 		logger:       logger,
 		outboxQueue:  make(chan bzplugin.ActionWrapper, 10),
 		doneChan:     make(chan struct{}),
 		killed:       false,
 		identityFile: identityFile,
+		fileService:  fileService,
+		ioService:    ioService,
 	}
 }
 
@@ -43,7 +49,7 @@ func (s *SshDaemonPlugin) StartAction() error {
 
 	// Create the DefaultSsh action
 	actLogger := s.logger.GetActionLogger(string(bzssh.DefaultSsh))
-	s.action = defaultssh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile)
+	s.action = defaultssh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.fileService, s.ioService)
 
 	// Start the ssh action
 	if err := s.action.Start(); err != nil {
