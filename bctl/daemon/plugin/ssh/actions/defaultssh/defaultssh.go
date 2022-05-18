@@ -20,6 +20,7 @@ import (
 const (
 	InputBufferSize   = int(8 * 1024)
 	InputDebounceTime = 5 * time.Millisecond
+	endedByUser       = "SSH session ended"
 )
 
 type DefaultSsh struct {
@@ -112,7 +113,7 @@ func (d *DefaultSsh) Start() error {
 					return nil
 				} else if err != nil {
 					if err == io.EOF {
-						d.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: "SSH session ended"})
+						d.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
 						return fmt.Errorf("finished reading from stdin")
 					}
 					return fmt.Errorf("error reading from Stdin: %s", err)
@@ -126,9 +127,9 @@ func (d *DefaultSsh) Start() error {
 	})
 
 	return nil
-
 }
 
+// FIXME: should I be dealing with out of order messages?
 func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
 	switch smsg.StreamType(smessage.Type) {
@@ -152,6 +153,7 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	}
 }
 
+// NOTE: this function is from a time when we were debouncing stdin; we may yet need to do so; don't delete this just yet
 // processes input channel by debouncing all keypresses within a time interval
 // func (d *DefaultSsh) sendStdIn() {
 // 	inputBuf := []byte{}

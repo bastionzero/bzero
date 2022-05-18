@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 
 	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
 	"golang.org/x/crypto/ssh"
@@ -68,8 +69,11 @@ func encodePrivateKeyToPem(privateKey *rsa.PrivateKey) []byte {
 
 // PEM -> RSA
 func decodePemToPrivateKey(privatePem []byte) (*rsa.PrivateKey, error) {
-	privateBlock, _ := pem.Decode(privatePem)
-	return x509.ParsePKCS1PrivateKey(privateBlock.Bytes)
+	if privateBlock, _ := pem.Decode(privatePem); privateBlock == nil {
+		return nil, fmt.Errorf("error decoding private key: No PEM data was found")
+	} else {
+		return x509.ParsePKCS1PrivateKey(privateBlock.Bytes)
+	}
 }
 
 // generatePublicKey take a rsa.PublicKey and return bytes suitable for writing to .pub file

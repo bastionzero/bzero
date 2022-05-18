@@ -1,6 +1,7 @@
 package ioservice
 
 import (
+	"bufio"
 	"io"
 	"os"
 )
@@ -8,6 +9,7 @@ import (
 // TODO: docstring
 type IoService interface {
 	io.ReadWriter
+	NewScanner(r io.Reader) *bufio.Scanner
 }
 
 // TODO: docstring
@@ -19,4 +21,8 @@ func (s StdIoService) Read(b []byte) (n int, err error) {
 
 func (s StdIoService) Write(b []byte) (n int, err error) {
 	return os.Stdout.Write(b)
+}
+
+func (s StdIoService) NewScanner(r io.Reader) *bufio.Scanner {
+	return bufio.NewScanner(r)
 }

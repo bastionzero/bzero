@@ -1,7 +1,6 @@
 package defaultssh
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
@@ -9,7 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/user"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -18,6 +17,10 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
+	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
+	"bastionzero.com/bctl/v1/bzerolib/services/tcpservice"
+	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -46,13 +49,26 @@ type DefaultSsh struct {
 
 	targetUser           string
 	currentAuthorizedKey string
+
+	fileService fileservice.FileService
+	ioService   ioservice.IoService
+	tcpService  tcpservice.TcpService
+	userService userservice.UserService
 }
 
-func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, targetUser string) (*DefaultSsh, error) {
+func New(
+	logger *logger.Logger,
+	doneChan chan struct{},
+	ch chan smsg.StreamMessage,
+	targetUser string,
+	fileService fileservice.FileService,
+	ioService ioservice.IoService,
+	tcpService tcpservice.TcpService,
+	userService userservice.UserService,
+) (*DefaultSsh, error) {
 
 	// Open up a connection to the TCP addr we are trying to connect to
-	// TODO: const?
-	if raddr, err := net.ResolveTCPAddr("tcp", "localhost:22"); err != nil {
+	if raddr, err := tcpService.ResolveTCPAddr("tcp", "localhost:22"); err != nil {
 		logger.Errorf("Failed to resolve remote address: %s", err)
 		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
 	} else {
@@ -62,6 +78,10 @@ func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessa
 			streamOutputChan: ch,
 			remoteAddress:    raddr,
 			targetUser:       targetUser,
+			fileService:      fileService,
+			ioService:        ioService,
+			tcpService:       tcpService,
+			userService:      userService,
 		}
 
 		// as soon as we're born, remove any old entries in our authorized_keys file
@@ -160,7 +180,7 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byt
 	d.logger.Debugf("Setting stream message version: %s", d.streamMessageVersion)
 
 	// For each start, call the dial the TCP address
-	if remoteConnection, err := net.DialTCP("tcp", nil, d.remoteAddress); err != nil {
+	if remoteConnection, err := d.tcpService.DialTCP("tcp", nil, d.remoteAddress); err != nil {
 		return []byte{}, fmt.Errorf("failed to dial remote address: %s", err)
 	} else {
 		d.remoteConnection = remoteConnection
@@ -225,7 +245,7 @@ func (d *DefaultSsh) sendStreamMessage(sequenceNumber int, streamType smsg.Strea
 	}
 }
 
-// FIXME: check publicKey type?
+// FIXME: definitely rename this && maybe check publicKey type?
 func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) error {
 	// test that the provided username is valid unix user name
 	// source: https://unix.stackexchange.com/a/435120
@@ -236,7 +256,7 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 	}
 
 	// check if user exists
-	if _, err := user.Lookup(d.targetUser); err != nil {
+	if _, err := d.userService.Lookup(d.targetUser); err != nil {
 		return fmt.Errorf("failed to find user \"%s\": %s", d.targetUser, err)
 	}
 
@@ -257,22 +277,18 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 
 	d.currentAuthorizedKey = fmt.Sprintf("%s %s %s created_at=%s", keyType, keyContents, authorizedKeyComment, timestamp)
 
-	/* FIXME: may or may not need this
-	// Check the user exists
-	u := &utility.SessionUtil{}
-	var userExists, _ = u.DoesUserExist(sshOpenActionPayload.Username)
-	if !userExists {
-		return fmt.Errorf("%s user doesnt exist", sshOpenActionPayload.Username)
-	}
-	*/
-
 	// Add an entry to the authorized_keys for the user
 	d.logger.Infof("Adding authorized key entry for user: %s", d.targetUser)
-	var keyAdded, err = addToAuthorizedKeyFile(d.targetUser, d.currentAuthorizedKey)
-	if !keyAdded {
-		return fmt.Errorf("failed to add authorized key entry for user %s: %v", d.targetUser, err)
-	}
 
+	sshDirectory, authorizedKeyFile, err := d.getAuthorizedKeys()
+
+	if err != nil {
+		return fmt.Errorf("failed to find authorized_keys file: %s", err)
+	} else if err := d.fileService.MkdirAll(sshDirectory, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create .ssh directory: %s", err)
+	} else if err := d.fileService.Append(authorizedKeyFile, keyContents); err != nil {
+		return fmt.Errorf("failed to add key to authorized_keys file: %s", err)
+	}
 	return nil
 }
 
@@ -281,15 +297,12 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 // FIXME: this needs to have no chance of deleting proper keys
 // need to figure out how that happened...
 func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
-	usr, err := user.Lookup(d.targetUser)
+	_, authorizedKeyFile, err := d.getAuthorizedKeys()
 	if err != nil {
-		return fmt.Errorf("failed to determine whether user exists: %s", err)
-	} else if usr.HomeDir == "" {
-		return fmt.Errorf("cannot connect as user without home directorys")
+		return fmt.Errorf("could not locate authorized key file: %s", err)
 	}
 
-	authorizedKeyFile := fmt.Sprintf("%s/.ssh/authorized_keys", usr.HomeDir)
-	f, err := os.Open(authorizedKeyFile)
+	f, err := d.fileService.Open(authorizedKeyFile)
 	if err != nil {
 		return err
 	}
@@ -299,7 +312,7 @@ func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
 	buf := bytes.NewBuffer(bs)
 
 	// FIXME: would readfile be safer?
-	scanner := bufio.NewScanner(f)
+	scanner := d.ioService.NewScanner(f)
 	for scanner.Scan() {
 		key := scanner.Text()
 		keepThisKey := false
@@ -327,9 +340,21 @@ func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
 		return err
 	}
 
-	err = os.WriteFile(authorizedKeyFile, buf.Bytes(), 0666)
+	err = d.fileService.WriteFile(authorizedKeyFile, buf.Bytes(), 0666)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (d *DefaultSsh) getAuthorizedKeys() (string, string, error) {
+	usr, err := d.userService.Lookup(d.targetUser)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to determine whether user exists: %s", err)
+	} else if usr.HomeDir == "" {
+		return "", "", fmt.Errorf("cannot connect as user without home directorys")
+	}
+
+	sshDirectory := fmt.Sprintf("%s/.ssh", usr.HomeDir)
+	return sshDirectory, filepath.Join(sshDirectory, "authorized_keys"), nil
 }

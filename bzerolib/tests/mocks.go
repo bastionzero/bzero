@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -102,4 +103,50 @@ func MockHttpRequest(method string, path string, headers map[string][]string, co
 		ContentLength: int64(len(content)),
 		Body:          ioutil.NopCloser(bytes.NewBufferString(content)),
 	}
+}
+
+// general-purpose connection interface
+type MockConn struct {
+	mock.Mock
+	net.Conn
+}
+
+func (m MockConn) Read(b []byte) (n int, err error) {
+	args := m.Called()
+	return args.Int(0), args.Error(1)
+}
+
+func (m MockConn) Write(b []byte) (n int, err error) {
+	args := m.Called(b)
+	return args.Int(0), args.Error(1)
+}
+
+func (m MockConn) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m MockConn) LocalAddr() net.Addr {
+	args := m.Called()
+	return args.Get(0).(net.Addr)
+}
+
+func (m MockConn) RemoteAddr() net.Addr {
+	args := m.Called()
+	return args.Get(0).(net.Addr)
+}
+
+func (m MockConn) SetDeadline(t time.Time) error {
+	args := m.Called(t)
+	return args.Error(0)
+}
+
+func (m MockConn) SetReadDeadline(t time.Time) error {
+	args := m.Called(t)
+	return args.Error(0)
+}
+
+func (m MockConn) SetWriteDeadline(t time.Time) error {
+	args := m.Called(t)
+	return args.Error(0)
 }
