@@ -88,7 +88,7 @@ func New(
 		}
 
 		// as soon as we're born, remove any old entries in our authorized_keys file
-		if err := action.clearAuthorizedKeyEntries(authorizedKeyComment); err != nil {
+		if err := action.removeBzeroKeys(); err != nil {
 			action.logger.Errorf("Failed to remove stale entries from /home/%s/.ssh/authorized_keys: %s", targetUser, err)
 		}
 
@@ -143,7 +143,7 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 			case <-d.tmb.Dying():
 				return
 			case <-time.After(maxKeyLifetime):
-				if err := d.clearAuthorizedKeyEntries(d.currentAuthorizedKey); err != nil {
+				if err := d.removeBzeroKeys(); err != nil {
 					d.logger.Errorf("Failed to remove this session's entry from %s's authorized_keys file: %s", d.targetUser, err)
 				}
 			}
@@ -181,7 +181,6 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 		d.remoteConnection.Close()
 		d.Kill()
 
-		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
 		return actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %v", action)
@@ -208,7 +207,7 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byt
 	d.tmb.Go(func() error {
 		defer func() {
 			close(d.doneChan)
-			if err := d.clearAuthorizedKeyEntries(d.currentAuthorizedKey); err != nil {
+			if err := d.removeBzeroKeys(); err != nil {
 				d.logger.Errorf("Failed to remove this session's entry from /home/%s/.ssh/authorized_keys: %s", d.targetUser, err)
 			}
 		}()
@@ -306,11 +305,9 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 	return nil
 }
 
-// remove keys matching a pattern
-// NOTE: this does not necessarily interact with authorized_keys in a threadsafe way
-// FIXME: this needs to have no chance of deleting proper keys
-// need to figure out how that happened...
-func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
+// FIXME: make this threadsafe
+// remove bzero-temp-key entries
+func (d *DefaultSsh) removeBzeroKeys() error {
 	f, err := d.fileService.Open(d.authorizedKeysFile)
 	if err != nil {
 		return err
@@ -334,7 +331,7 @@ func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
 				continue
 			}
 		}
-		if !strings.Contains(key, pattern) || keepThisKey {
+		if !strings.Contains(key, authorizedKeyComment) || keepThisKey {
 			_, err := buf.Write(scanner.Bytes())
 			if err != nil {
 				return err
