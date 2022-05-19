@@ -48,6 +48,7 @@ type DefaultSsh struct {
 	remoteConnection *net.TCPConn
 
 	targetUser           string
+	authorizedKeysFile   string
 	currentAuthorizedKey string
 
 	fileService fileservice.FileService
@@ -99,6 +100,26 @@ func (d *DefaultSsh) Kill() {
 		(*d.remoteConnection).Close()
 	}
 	d.tmb.Wait()
+}
+
+func (d *DefaultSsh) SetAuthorizedKeysFile() error {
+	usr, err := d.userService.Lookup(d.targetUser)
+	if err != nil {
+		d.logger.Errorf("%s", err)
+		return fmt.Errorf("failed to determine whether user exists: %s", err)
+	} else if usr.HomeDir == "" {
+		d.logger.Errorf("homedir = ''", err)
+		return fmt.Errorf("cannot connect as user without home directorys")
+	} else if err := d.fileService.MkdirAll(fmt.Sprintf("%s/.ssh", usr.HomeDir), os.ModePerm); err != nil {
+		d.logger.Errorf("%s", err)
+		return fmt.Errorf("failed to create %s/.ssh: %s", usr.HomeDir, err)
+	} else {
+		d.authorizedKeysFile = filepath.Join(fmt.Sprintf("%s/.ssh", usr.HomeDir), "authorized_keys")
+	}
+
+	d.logger.Errorf("Did I do it?")
+
+	return nil
 }
 
 func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
@@ -280,13 +301,9 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 	// Add an entry to the authorized_keys for the user
 	d.logger.Infof("Adding authorized key entry for user: %s", d.targetUser)
 
-	sshDirectory, authorizedKeyFile, err := d.getAuthorizedKeys()
+	d.SetAuthorizedKeysFile()
 
-	if err != nil {
-		return fmt.Errorf("failed to find authorized_keys file: %s", err)
-	} else if err := d.fileService.MkdirAll(sshDirectory, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create .ssh directory: %s", err)
-	} else if err := d.fileService.Append(authorizedKeyFile, keyContents); err != nil {
+	if err := d.fileService.Append(d.authorizedKeysFile, d.currentAuthorizedKey); err != nil {
 		return fmt.Errorf("failed to add key to authorized_keys file: %s", err)
 	}
 	return nil
@@ -297,12 +314,7 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 // FIXME: this needs to have no chance of deleting proper keys
 // need to figure out how that happened...
 func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
-	_, authorizedKeyFile, err := d.getAuthorizedKeys()
-	if err != nil {
-		return fmt.Errorf("could not locate authorized key file: %s", err)
-	}
-
-	f, err := d.fileService.Open(authorizedKeyFile)
+	f, err := d.fileService.Open(d.authorizedKeysFile)
 	if err != nil {
 		return err
 	}
@@ -340,21 +352,9 @@ func (d *DefaultSsh) clearAuthorizedKeyEntries(pattern string) error {
 		return err
 	}
 
-	err = d.fileService.WriteFile(authorizedKeyFile, buf.Bytes(), 0666)
+	err = d.fileService.WriteFile(d.authorizedKeysFile, buf.Bytes(), 0666)
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func (d *DefaultSsh) getAuthorizedKeys() (string, string, error) {
-	usr, err := d.userService.Lookup(d.targetUser)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to determine whether user exists: %s", err)
-	} else if usr.HomeDir == "" {
-		return "", "", fmt.Errorf("cannot connect as user without home directorys")
-	}
-
-	sshDirectory := fmt.Sprintf("%s/.ssh", usr.HomeDir)
-	return sshDirectory, filepath.Join(sshDirectory, "authorized_keys"), nil
 }
