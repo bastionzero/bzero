@@ -105,19 +105,14 @@ func (d *DefaultSsh) Kill() {
 func (d *DefaultSsh) SetAuthorizedKeysFile() error {
 	usr, err := d.userService.Lookup(d.targetUser)
 	if err != nil {
-		d.logger.Errorf("%s", err)
 		return fmt.Errorf("failed to determine whether user exists: %s", err)
 	} else if usr.HomeDir == "" {
-		d.logger.Errorf("homedir = ''", err)
 		return fmt.Errorf("cannot connect as user without home directorys")
 	} else if err := d.fileService.MkdirAll(fmt.Sprintf("%s/.ssh", usr.HomeDir), os.ModePerm); err != nil {
-		d.logger.Errorf("%s", err)
 		return fmt.Errorf("failed to create %s/.ssh: %s", usr.HomeDir, err)
 	} else {
 		d.authorizedKeysFile = filepath.Join(fmt.Sprintf("%s/.ssh", usr.HomeDir), "authorized_keys")
 	}
-
-	d.logger.Errorf("Did I do it?")
 
 	return nil
 }

@@ -28,4 +28,12 @@ func (m MockFileService) Open(name string) (*os.File, error) {
 	return args.Get(0).(*os.File), args.Error(1)
 }
 
-// TODO: mock MkDirAll and Append
+func (m MockFileService) MkdirAll(path string, perm os.FileMode) error {
+	args := m.Called(path, perm)
+	return args.Error(0)
+}
+
+func (m MockFileService) Append(path string, contents string) error {
+	args := m.Called(path, contents)
+	return args.Error(0)
+}
