@@ -21,9 +21,8 @@ import (
 )
 
 const (
-	chunkSize       = 64 * 1024
-	writeDeadline   = 5 * time.Second
-	localSshAddress = "localhost:22"
+	chunkSize     = 64 * 1024
+	writeDeadline = 5 * time.Second
 )
 
 type DefaultSsh struct {
@@ -221,5 +220,5 @@ func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) e
 	}
 
 	// add our authorized key to the user's authorized key file
-	return authorizedkeys.New(d.logger, &d.tmb, d.targetUser, string(openRequest.PublicKey), d.fileService, d.userService)
+	return authorizedkeys.New(d.logger, d.doneChan, d.targetUser, string(openRequest.PublicKey), d.fileService, d.userService)
 }

@@ -14,7 +14,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
-	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -24,7 +23,7 @@ const (
 
 func New(
 	logger *logger.Logger,
-	tmb *tomb.Tomb,
+	doneChan chan struct{},
 	user string,
 	pubkey string,
 	fileService fileservice.FileService,
@@ -42,11 +41,11 @@ func New(
 		// remove the key since it's ephemeral
 		go func() {
 			select {
-			case <-tmb.Dying():
+			case <-doneChan:
 			case <-time.After(maxKeyLifetime):
 			}
 
-			if err := cleanAuthorizedKeys(user, filePath, fileService); err != nil {
+			if err := cleanAuthorizedKeys(user, filePath, entry, fileService, logger); err != nil {
 				logger.Errorf("Failed to remove old keys from %s's authorized_keys file: %s", user, err)
 			}
 		}()
@@ -84,12 +83,12 @@ func buildAuthorizedKey(pubkey string) (string, error) {
 		return "", fmt.Errorf("invalid public key provided: %s", keyContents)
 	}
 
-	timestamp := time.Now().Unix()
+	timestamp := time.Now().UnixNano()
 	key := fmt.Sprintf("%s %s %s created_at=%d", keyType, keyContents, authorizedKeyComment, timestamp)
 	return key, nil
 }
 
-func cleanAuthorizedKeys(user string, filePath string, fileService fileservice.FileService) error {
+func cleanAuthorizedKeys(user string, filePath string, currentKey string, fileService fileservice.FileService, logger *logger.Logger) error {
 	fileLock := authorizedFileLock{
 		User: user,
 	}
@@ -111,17 +110,19 @@ func cleanAuthorizedKeys(user string, filePath string, fileService fileservice.F
 	for scanner.Scan() {
 		key := scanner.Text()
 
-		// if it's one of our keys
-		if strings.Contains(key, "created_at=") {
+		// remove it if it's our current key, even if it's unexpired
+		if key == currentKey {
+			continue
+		} else if strings.Contains(key, "created_at=") {
 			// parse our creation time
 			creationTimeString := strings.Split(strings.Split(key, "created_at=")[1], " ")[0]
 			if creationTimeInt, err := strconv.ParseInt(creationTimeString, 10, 64); err != nil {
 				return fmt.Errorf("malformated unix time")
 			} else {
-				unixCreationTime := time.Unix(creationTimeInt, 0)
+				unixCreationTime := time.Unix(0, creationTimeInt)
 
 				// if the key is expired, remove it
-				if time.Since(unixCreationTime) < maxKeyLifetime {
+				if time.Since(unixCreationTime) >= maxKeyLifetime {
 					continue
 				}
 			}
