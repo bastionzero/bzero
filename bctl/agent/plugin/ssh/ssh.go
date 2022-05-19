@@ -3,16 +3,17 @@ package ssh
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/defaultssh"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
-	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/tcpservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
+
+const localSshServer = "localhost:22"
 
 type ISshAction interface {
 	Receive(action string, actionPayload []byte) ([]byte, error)
@@ -55,16 +56,25 @@ func New(logger *logger.Logger,
 
 		switch parsedAction {
 		case bzssh.DefaultSsh:
-			plugin.action, rerr = defaultssh.New(
+			// Open up a connection to the TCP addr we are trying to connect to
+			raddr, err := net.ResolveTCPAddr("tcp", localSshServer)
+			if err != nil {
+				rerr = fmt.Errorf("failed to resolve remote address: %s", err)
+			}
+			remoteConnection, err := net.DialTCP("tcp", nil, raddr)
+			if err != nil {
+				rerr = fmt.Errorf("failed to dial remote address: %s", err)
+			}
+
+			subSubLogger := subLogger.GetComponentLogger("authorized_keys")
+			authKeyService := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan)
+
+			plugin.action = defaultssh.New(
 				subLogger,
 				plugin.doneChan,
 				plugin.streamOutputChan,
-				"localhost",
-				"22",
-				synPayload.TargetUser,
-				fileservice.OsFileService{},
-				tcpservice.NetTcpService{},
-				userservice.OsUserService{},
+				remoteConnection,
+				authKeyService,
 			)
 		default:
 			rerr = fmt.Errorf("unhandled SSH action")

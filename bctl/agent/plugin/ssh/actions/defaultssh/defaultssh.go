@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"regexp"
 	"time"
 
 	"gopkg.in/tomb.v2"
@@ -14,9 +13,6 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
-	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/tcpservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -37,43 +33,24 @@ type DefaultSsh struct {
 	streamOutputChan     chan smsg.StreamMessage
 	streamMessageVersion smsg.SchemaVersion
 
-	remoteAddress    *net.TCPAddr
 	remoteConnection *net.TCPConn
-
-	targetUser string
-
-	fileService fileservice.FileService
-	tcpService  tcpservice.TcpService
-	userService userservice.UserService
+	authorizedKeys   authorizedkeys.AuthorizedKeysInterface
 }
 
 func New(
 	logger *logger.Logger,
 	doneChan chan struct{},
 	ch chan smsg.StreamMessage,
-	address string,
-	port string,
-	targetUser string,
-	fileService fileservice.FileService,
-	tcpService tcpservice.TcpService,
-	userService userservice.UserService,
-) (*DefaultSsh, error) {
+	conn *net.TCPConn,
+	authKeyService authorizedkeys.AuthorizedKeysInterface,
+) *DefaultSsh {
 
-	// Open up a connection to the TCP addr we are trying to connect to
-	if raddr, err := tcpService.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%s", address, port)); err != nil {
-		logger.Errorf("Failed to resolve remote address: %s", err)
-		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
-	} else {
-		return &DefaultSsh{
-			logger:           logger,
-			doneChan:         doneChan,
-			streamOutputChan: ch,
-			remoteAddress:    raddr,
-			targetUser:       targetUser,
-			fileService:      fileService,
-			tcpService:       tcpService,
-			userService:      userService,
-		}, nil
+	return &DefaultSsh{
+		logger:           logger,
+		doneChan:         doneChan,
+		streamOutputChan: ch,
+		remoteConnection: conn,
+		authorizedKeys:   authKeyService,
 	}
 }
 
@@ -96,7 +73,7 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 		if err = json.Unmarshal(actionPayload, &openRequest); err != nil {
 			err = fmt.Errorf("malformed default SSH action payload %s", string(actionPayload))
 			break
-		} else if err = d.handleOpenShellDataAction(openRequest); err != nil {
+		} else if err = d.authorizedKeys.Add(string(openRequest.PublicKey)); err != nil {
 			break
 		}
 
@@ -147,13 +124,6 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
 	d.streamMessageVersion = openRequest.StreamMessageVersion
 	d.logger.Debugf("Setting stream message version: %s", d.streamMessageVersion)
-
-	// For each start, call the dial the TCP address
-	if remoteConnection, err := d.tcpService.DialTCP("tcp", nil, d.remoteAddress); err != nil {
-		return []byte{}, fmt.Errorf("failed to dial remote address: %s", err)
-	} else {
-		d.remoteConnection = remoteConnection
-	}
 
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
 	d.tmb.Go(func() error {
@@ -207,18 +177,4 @@ func (d *DefaultSsh) sendStreamMessage(sequenceNumber int, streamType smsg.Strea
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(contentBytes),
 	}
-}
-
-// FIXME: definitely rename this && maybe check publicKey type?
-func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) error {
-	// test that the provided username is valid unix user name
-	// source: https://unix.stackexchange.com/a/435120
-	usernamePattern := "^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\\$)$"
-	var usernameMatch, _ = regexp.MatchString(usernamePattern, d.targetUser)
-	if !usernameMatch {
-		return fmt.Errorf("invalid username provided: %s", d.targetUser)
-	}
-
-	// add our authorized key to the user's authorized key file
-	return authorizedkeys.New(d.logger, d.doneChan, d.targetUser, string(openRequest.PublicKey), d.fileService, d.userService)
 }
