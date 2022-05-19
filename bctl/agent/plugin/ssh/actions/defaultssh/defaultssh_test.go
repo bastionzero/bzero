@@ -59,7 +59,7 @@ var _ = Describe("Agent DefaultSsh action", func() {
 		mockUserService := userservice.MockUserService{}
 		mockUserService.On("Lookup", testUser).Return(&user.User{HomeDir: homeDir}, nil)
 
-		s, err := New(logger, doneChan, outboxQueue, "localhost", "2022", testUser, mockFileService, mockTcpService, mockUserService)
+		s, err := New(logger, doneChan, outboxQueue, "localhost", 2022, testUser, mockFileService, mockTcpService, mockUserService)
 		Expect(err).To(BeNil())
 
 		It("relays messages between the Daemon and the local SSH process", func() {

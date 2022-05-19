@@ -28,6 +28,7 @@ var (
 
 	// Common/shared plugin arguments
 	targetUser string
+	remotePort int
 
 	// Kube server specifc arguments
 	targetGroupsRaw, certPath, keyPath string
@@ -36,7 +37,6 @@ var (
 
 	// Db and web specifc arguments
 	remoteHost string
-	remotePort int
 
 	// Shell specific arguments
 	connectionId  string
@@ -143,6 +143,7 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 
 	params["target_id"] = targetId
 	params["target_user"] = targetUser
+	params["remote_port"] = fmt.Sprintf("%d", remotePort)
 
 	return sshserver.StartSshServer(
 		subLogger,
@@ -156,6 +157,7 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 		agentPubKey,
 		targetSelectHandler,
 		identityFile,
+		remotePort,
 	)
 }
 
@@ -313,7 +315,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
-		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile")
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "remotePort")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

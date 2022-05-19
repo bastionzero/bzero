@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
@@ -91,11 +92,13 @@ func (c *ConnectionNodeController) CreateShellConnection(connectionId string) (C
 	return c.createCnConnection(connectionId)
 }
 
-func (c *ConnectionNodeController) CreateSshConnection(targetId string, targetUser string) (ConnectionDetailsResponse, error) {
+func (c *ConnectionNodeController) CreateSshConnection(targetId string, targetUser string, remotePort string) (ConnectionDetailsResponse, error) {
 	// Create our request
+	portInt, _ := strconv.Atoi(remotePort)
 	createSshConnectionRequest := CreateSshConnectionRequest{
 		TargetId:   targetId,
 		TargetUser: targetUser,
+		RemotePort: portInt,
 	}
 
 	return c.createConnection(createSshConnectionRequest, "ssh")
