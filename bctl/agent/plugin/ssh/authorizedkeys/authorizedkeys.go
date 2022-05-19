@@ -16,8 +16,12 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
+var (
+	authorizedKeyFileName = "authorized_keys"
+	maxKeyLifetime        = 30 * time.Second
+)
+
 const (
-	maxKeyLifetime       = 30 * time.Second
 	authorizedKeyComment = "bzero-temp-key"
 )
 
@@ -81,7 +85,7 @@ func (a *AuthorizedKeys) buildFilePath() (string, error) {
 	} else if err := os.MkdirAll(filepath.Join(usr.HomeDir, ".ssh"), os.ModePerm); err != nil {
 		return "", fmt.Errorf("failed to create %s/.ssh/: %s", usr.HomeDir, err)
 	} else {
-		return filepath.Join(usr.HomeDir, ".ssh", "authorized_keys"), nil
+		return filepath.Join(usr.HomeDir, ".ssh", authorizedKeyFileName), nil
 	}
 }
 
