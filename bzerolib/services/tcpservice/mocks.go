@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// TODO: mock connection, etc.
+// mocked version of the TcpService
 type MockTcpService struct {
 	TcpService
 	mock.Mock

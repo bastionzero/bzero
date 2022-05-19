@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-// an interface providing ReadFile and WriterFile methods
+// an interface providing ways to interact with files
 // can be implemented by native os methods or dummy functions for testing
 type FileService interface {
 	ReadFile(name string) ([]byte, error)
@@ -15,7 +15,7 @@ type FileService interface {
 	Append(path string, contents string) error
 }
 
-// TODO: docstring
+// the default implementation
 type OsFileService struct{}
 
 func (f OsFileService) ReadFile(name string) ([]byte, error) {

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// TODO: docstring
+// mocked version of the FileService
 type MockFileService struct {
 	FileService
 	mock.Mock

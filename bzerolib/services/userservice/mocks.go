@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+// mocked version of the UserService
 type MockUserService struct {
 	UserService
 	mock.Mock

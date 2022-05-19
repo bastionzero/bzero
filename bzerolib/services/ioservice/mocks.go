@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// TODO: docstring
+// mocked version of the IoService
 type MockIoService struct {
 	IoService
 	mock.Mock
