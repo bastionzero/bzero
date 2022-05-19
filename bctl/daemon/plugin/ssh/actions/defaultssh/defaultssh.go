@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	InputBufferSize   = int(8 * 1024)
+	InputBufferSize   = int(64 * 1024)
 	InputDebounceTime = 5 * time.Millisecond
 	endedByUser       = "SSH session ended"
 )

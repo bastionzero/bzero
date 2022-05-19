@@ -1,35 +1,28 @@
 package defaultssh
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/tcpservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
 const (
-	chunkSize            = 64 * 1024
-	writeDeadline        = 5 * time.Second
-	maxKeyLifetime       = 30 * time.Second
-	authorizedKeyComment = "bzero-temp-key"
-	timeLayout           = "20060102150405"
+	chunkSize     = 64 * 1024
+	writeDeadline = 5 * time.Second
 )
 
 type DefaultSsh struct {
@@ -47,12 +40,9 @@ type DefaultSsh struct {
 	remoteAddress    *net.TCPAddr
 	remoteConnection *net.TCPConn
 
-	targetUser           string
-	authorizedKeysFile   string
-	currentAuthorizedKey string
+	targetUser string
 
 	fileService fileservice.FileService
-	ioService   ioservice.IoService
 	tcpService  tcpservice.TcpService
 	userService userservice.UserService
 }
@@ -65,7 +55,6 @@ func New(
 	port string,
 	targetUser string,
 	fileService fileservice.FileService,
-	ioService ioservice.IoService,
 	tcpService tcpservice.TcpService,
 	userService userservice.UserService,
 ) (*DefaultSsh, error) {
@@ -75,24 +64,16 @@ func New(
 		logger.Errorf("Failed to resolve remote address: %s", err)
 		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
 	} else {
-		action := &DefaultSsh{
+		return &DefaultSsh{
 			logger:           logger,
 			doneChan:         doneChan,
 			streamOutputChan: ch,
 			remoteAddress:    raddr,
 			targetUser:       targetUser,
 			fileService:      fileService,
-			ioService:        ioService,
 			tcpService:       tcpService,
 			userService:      userService,
-		}
-
-		// as soon as we're born, remove any old entries in our authorized_keys file
-		if err := action.removeBzeroKeys(); err != nil {
-			action.logger.Errorf("Failed to remove stale entries from /home/%s/.ssh/authorized_keys: %s", targetUser, err)
-		}
-
-		return action, nil
+		}, nil
 	}
 }
 
@@ -104,21 +85,6 @@ func (d *DefaultSsh) Kill() {
 	d.tmb.Wait()
 }
 
-func (d *DefaultSsh) SetAuthorizedKeysFile() error {
-	usr, err := d.userService.Lookup(d.targetUser)
-	if err != nil {
-		return fmt.Errorf("failed to determine whether user exists: %s", err)
-	} else if usr.HomeDir == "" {
-		return fmt.Errorf("cannot connect as user without home directorys")
-	} else if err := d.fileService.MkdirAll(fmt.Sprintf("%s/.ssh", usr.HomeDir), os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create %s/.ssh: %s", usr.HomeDir, err)
-	} else {
-		d.authorizedKeysFile = filepath.Join(fmt.Sprintf("%s/.ssh", usr.HomeDir), "authorized_keys")
-	}
-
-	return nil
-}
-
 func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
 	var err error
 
@@ -128,26 +94,21 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 	case ssh.SshOpen:
 		var openRequest ssh.SshOpenMessage
 		if err = json.Unmarshal(actionPayload, &openRequest); err != nil {
-			err = fmt.Errorf("malformed default SSH action payload %v", actionPayload)
+			err = fmt.Errorf("malformed default SSH action payload %s", string(actionPayload))
 			break
-		}
-		if err = d.handleOpenShellDataAction(openRequest); err != nil {
-			break
-		}
-
-		// as a security measure, delete the key so that it does not persist in the event of an agent crash
-		go func() {
-			select {
-			case <-d.doneChan:
-				return
-			case <-d.tmb.Dying():
-				return
-			case <-time.After(maxKeyLifetime):
-				if err := d.removeBzeroKeys(); err != nil {
-					d.logger.Errorf("Failed to remove this session's entry from %s's authorized_keys file: %s", d.targetUser, err)
-				}
+		} else {
+			// check that the target username is valid
+			var usernameMatch, _ = regexp.MatchString(userservice.ValidUsernameRegex, d.targetUser)
+			if !usernameMatch {
+				err = fmt.Errorf("invalid username provided: %s", d.targetUser)
+				break
 			}
-		}()
+
+			// add our authorized key to the user's authorized key file
+			if err = authorizedkeys.New(d.logger, d.doneChan, d.targetUser, string(openRequest.PublicKey), d.fileService, d.userService); err != nil {
+				break
+			}
+		}
 
 		return d.start(openRequest, action)
 	case ssh.SshInput:
@@ -183,7 +144,7 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 
 		return actionPayload, nil
 	default:
-		err = fmt.Errorf("unhandled stream action: %v", action)
+		err = fmt.Errorf("unhandled stream action: %s", action)
 	}
 
 	if err != nil {
@@ -205,12 +166,7 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byt
 
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
 	d.tmb.Go(func() error {
-		defer func() {
-			close(d.doneChan)
-			if err := d.removeBzeroKeys(); err != nil {
-				d.logger.Errorf("Failed to remove this session's entry from /home/%s/.ssh/authorized_keys: %s", d.targetUser, err)
-			}
-		}()
+		defer close(d.doneChan)
 
 		sequenceNumber := 0
 		buff := make([]byte, chunkSize)
@@ -260,95 +216,4 @@ func (d *DefaultSsh) sendStreamMessage(sequenceNumber int, streamType smsg.Strea
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(contentBytes),
 	}
-}
-
-// FIXME: definitely rename this && maybe check publicKey type?
-func (d *DefaultSsh) handleOpenShellDataAction(openRequest ssh.SshOpenMessage) error {
-	// test that the provided username is valid unix user name
-	// source: https://unix.stackexchange.com/a/435120
-	usernamePattern := "^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\\$)$"
-	var usernameMatch, _ = regexp.MatchString(usernamePattern, d.targetUser)
-	if !usernameMatch {
-		return fmt.Errorf("invalid username provided: %s", d.targetUser)
-	}
-
-	// check if user exists
-	if _, err := d.userService.Lookup(d.targetUser); err != nil {
-		return fmt.Errorf("failed to find user \"%s\": %s", d.targetUser, err)
-	}
-
-	// Construct the authorized key entry
-	// Assumes for now only ssh-rsa key types will be generated by the client so we do not need to validate the key type
-	keyData := strings.Fields(string(openRequest.PublicKey))
-	keyType := keyData[0]
-	keyContents := keyData[1]
-
-	// test that the provided public key is valid base64 data
-	var _, base64DecodeErr = base64.StdEncoding.DecodeString(string(keyContents))
-	if base64DecodeErr != nil {
-		return fmt.Errorf("invalid public key provided: %s", keyContents)
-	}
-
-	// format the time to the second
-	timestamp := time.Now().Format(timeLayout)
-
-	d.currentAuthorizedKey = fmt.Sprintf("%s %s %s created_at=%s", keyType, keyContents, authorizedKeyComment, timestamp)
-
-	// Add an entry to the authorized_keys for the user
-	d.logger.Infof("Adding authorized key entry for user: %s", d.targetUser)
-
-	d.SetAuthorizedKeysFile()
-
-	if err := d.fileService.Append(d.authorizedKeysFile, d.currentAuthorizedKey); err != nil {
-		return fmt.Errorf("failed to add key to authorized_keys file: %s", err)
-	}
-	return nil
-}
-
-// FIXME: make this threadsafe
-// remove bzero-temp-key entries
-func (d *DefaultSsh) removeBzeroKeys() error {
-	f, err := d.fileService.Open(d.authorizedKeysFile)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	var bs []byte
-	buf := bytes.NewBuffer(bs)
-
-	// FIXME: would readfile be safer?
-	scanner := d.ioService.NewScanner(f)
-	for scanner.Scan() {
-		key := scanner.Text()
-		keepThisKey := false
-		if strings.Contains(key, "created_at=") {
-			// any key we find that is younger than 30 seconds should be spared, since the process that wrote it may not have logged in yet
-			createdAt, _ := time.Parse(timeLayout, strings.Split(key, "created_at=")[1])
-			if time.Since(createdAt) < 30*time.Second {
-				keepThisKey = true
-			} else {
-				continue
-			}
-		}
-		if !strings.Contains(key, authorizedKeyComment) || keepThisKey {
-			_, err := buf.Write(scanner.Bytes())
-			if err != nil {
-				return err
-			}
-			_, err = buf.WriteString("\n")
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	err = d.fileService.WriteFile(d.authorizedKeysFile, buf.Bytes(), 0666)
-	if err != nil {
-		return err
-	}
-	return nil
 }

@@ -1,7 +1,6 @@
 package defaultssh
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/tcpservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -54,9 +52,6 @@ var _ = Describe("Agent DefaultSsh action", func() {
 		mockFileService.On("WriteFile", keysFile).Return(nil)
 		mockFileService.On("Append", keysFile).Return(nil)
 
-		mockIoService := ioservice.MockIoService{}
-		mockIoService.On("NewScanner", openFile).Return(bufio.NewScanner(openFile))
-
 		mockTcpService := tcpservice.MockTcpService{}
 		mockTcpService.On("ResolveTCPAddr", "tcp", "localhost:2022").Return(localAddr, nil)
 		mockTcpService.On("DialTCP", "tcp", (*net.TCPAddr)(nil), localAddr).Return(dummyConn, nil)
@@ -64,7 +59,7 @@ var _ = Describe("Agent DefaultSsh action", func() {
 		mockUserService := userservice.MockUserService{}
 		mockUserService.On("Lookup", testUser).Return(&user.User{HomeDir: homeDir}, nil)
 
-		s, err := New(logger, doneChan, outboxQueue, "localhost", "2022", testUser, mockFileService, mockIoService, mockTcpService, mockUserService)
+		s, err := New(logger, doneChan, outboxQueue, "localhost", "2022", testUser, mockFileService, mockTcpService, mockUserService)
 		Expect(err).To(BeNil())
 
 		It("relays messages between the Daemon and the local SSH process", func() {

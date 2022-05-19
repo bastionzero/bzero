@@ -9,7 +9,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/tcpservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -64,7 +63,6 @@ func New(logger *logger.Logger,
 				"22",
 				synPayload.TargetUser,
 				fileservice.OsFileService{},
-				ioservice.StdIoService{},
 				tcpservice.NetTcpService{},
 				userservice.OsUserService{},
 			)
@@ -84,15 +82,12 @@ func New(logger *logger.Logger,
 func (s *SshPlugin) Receive(action string, actionPayload []byte) ([]byte, error) {
 	s.logger.Debugf("SSH plugin received message with %s action", action)
 
-	var rerr error
 	if payload, err := s.action.Receive(action, actionPayload); err != nil {
-		rerr = err
+		s.logger.Error(err)
+		return []byte{}, err
 	} else {
-		return payload, err
+		return payload, nil
 	}
-
-	s.logger.Error(rerr)
-	return []byte{}, rerr
 }
 
 func (s *SshPlugin) Done() <-chan struct{} {

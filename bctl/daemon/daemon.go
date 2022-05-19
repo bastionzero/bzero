@@ -59,7 +59,7 @@ func main() {
 
 	// For shell plugin we read/write directly from Stdin/Stdout so we dont want
 	// our logs to show up there
-	if plugin == "shell" || plugin == "ssh" {
+	if plugin == string(bzplugin.Shell) || plugin == string(bzplugin.Ssh) {
 		writeToConsole = false
 	}
 
