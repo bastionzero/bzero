@@ -34,7 +34,7 @@ func New(
 		return err
 	} else if filePath, err := buildFilePath(user, fileService, userService); err != nil {
 		return err
-	} else if err := fileService.Append(filePath, entry); err != nil {
+	} else if err := fileService.Append(filePath, entry+"\n"); err != nil {
 		return fmt.Errorf("failed to add key to authorized_keys file: %s", err)
 	} else {
 
