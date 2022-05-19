@@ -61,6 +61,8 @@ func New(
 	logger *logger.Logger,
 	doneChan chan struct{},
 	ch chan smsg.StreamMessage,
+	address string,
+	port string,
 	targetUser string,
 	fileService fileservice.FileService,
 	ioService ioservice.IoService,
@@ -69,7 +71,7 @@ func New(
 ) (*DefaultSsh, error) {
 
 	// Open up a connection to the TCP addr we are trying to connect to
-	if raddr, err := tcpService.ResolveTCPAddr("tcp", "localhost:22"); err != nil {
+	if raddr, err := tcpService.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%s", address, port)); err != nil {
 		logger.Errorf("Failed to resolve remote address: %s", err)
 		return nil, fmt.Errorf("failed to resolve remote address: %s", err)
 	} else {

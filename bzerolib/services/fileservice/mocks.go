@@ -34,6 +34,6 @@ func (m MockFileService) MkdirAll(path string, perm os.FileMode) error {
 }
 
 func (m MockFileService) Append(path string, contents string) error {
-	args := m.Called(path, contents)
+	args := m.Called(path)
 	return args.Error(0)
 }
