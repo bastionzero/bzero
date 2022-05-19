@@ -9,7 +9,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/tcpservice"
 	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -64,7 +63,6 @@ func New(logger *logger.Logger,
 				"22",
 				synPayload.TargetUser,
 				fileservice.OsFileService{},
-				ioservice.StdIoService{},
 				tcpservice.NetTcpService{},
 				userservice.OsUserService{},
 			)
