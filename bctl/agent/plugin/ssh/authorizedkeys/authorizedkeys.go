@@ -49,7 +49,7 @@ func (a *AuthorizedKeys) Add(pubkey string) error {
 		return err
 	} else if filePath, err := a.buildFilePath(); err != nil {
 		return err
-	} else if err := addKeyToFile(filePath, entry); err != nil {
+	} else if err := a.addKeyToFile(filePath, entry); err != nil {
 		return fmt.Errorf("failed to add key to authorized_keys file: %s", err)
 	} else {
 
@@ -57,7 +57,9 @@ func (a *AuthorizedKeys) Add(pubkey string) error {
 		go func() {
 			select {
 			case <-a.doneChan:
+				a.logger.Infof("Detected a closed done chan, cleaning authorized keys file")
 			case <-time.After(maxKeyLifetime):
+				a.logger.Infof("SSH key expired, cleaning authorized keys file")
 			}
 
 			if err := a.cleanAuthorizedKeys(filePath, entry); err != nil {
@@ -166,16 +168,30 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(filePath string, currentKey string)
 	return nil
 }
 
-func addKeyToFile(filePath string, contents string) error {
-	// If the file doesn't exist, create it, or append to the file
+func (a *AuthorizedKeys) addKeyToFile(filePath string, contents string) error {
+	fileLock := authorizedFileLock{
+		User: a.user,
+	}
+
+	// acquire a lock around the authorized keys file
+	fileLock.Get()
+	defer fileLock.Release()
+
+	// if the file doesn't exist, create it, or append to the file
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	contentBytes := []byte(contents + "\n")
-	if _, err := file.Write(contentBytes); err != nil {
+	// make sure we're always writing our keys to new lines
+	if fileBytes, err := os.ReadFile(filePath); err != nil {
+		return err
+	} else if len(fileBytes) > 0 && !strings.HasSuffix(string(fileBytes), "\n") {
+		contents = "\n" + contents
+	}
+
+	if _, err := file.WriteString(contents); err != nil {
 		return err
 	}
 

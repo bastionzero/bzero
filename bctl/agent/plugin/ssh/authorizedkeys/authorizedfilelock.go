@@ -2,6 +2,7 @@ package authorizedkeys
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"time"
 )
@@ -20,10 +21,15 @@ env variable name: BZERO_$USERNAME_AUTHORIZED_FILE_LOCK
 This will allow us to only have this variable set during short intervals. If a customer is connecting to a single box as 10
 different users, then an environment dump won't result in 10 wierd new variables.
 new variables.
+
+This lock is imperfect. Sometimes, if many requests are attempting to write or read from the file at the same time, it is
+possible that one or more instances will read from the variable at exactly the same time resulting in locks being granted
+where it shouldn't have. This is a limitation of the implementation and is acceptable.
 */
 
 const (
-	busy = "busy"
+	busy    = "busy"
+	timeout = 5 * time.Second
 )
 
 type authorizedFileLock struct {
@@ -40,12 +46,19 @@ func (a *authorizedFileLock) Get() {
 	}
 
 	// we need to wait until the lock is available
+	// a random int is chosen between 1-15 milliseconds to minimize collision
+	interval := time.Duration(rand.Intn(14) + 1) // interval can't be zero
+	checkEnvVariable := time.NewTicker(interval * time.Millisecond)
+	absoluteTimeout := time.NewTicker(timeout)
 	for {
-		// sleep to allow for multiple authorizedFileLocks to query
-		time.Sleep(5 * time.Millisecond)
-
-		if os.Getenv(lock) == "" {
-			os.Setenv(lock, busy)
+		select {
+		case <-checkEnvVariable.C:
+			if os.Getenv(lock) == "" {
+				os.Setenv(lock, busy)
+				return
+			}
+		case <-absoluteTimeout.C:
+			return
 		}
 	}
 }
