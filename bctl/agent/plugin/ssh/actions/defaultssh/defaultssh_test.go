@@ -2,21 +2,15 @@ package defaultssh
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net"
-	"os"
-	"os/user"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
-	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/tcpservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/userservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
 )
@@ -31,36 +25,20 @@ var _ = Describe("Agent DefaultSsh action", func() {
 	testUser := "test-user"
 	testData := "testData"
 
-	homeDir, _ := os.MkdirTemp("", "test")
-	defer os.RemoveAll(homeDir)
-	keysFile := fmt.Sprintf("%s/.ssh/authorized_keys", homeDir)
-	openFile, _ := os.Open(keysFile)
-
 	go mockSshServer()
-	localAddr, _ := net.ResolveTCPAddr("tcp", "localhost:2022")
-	dummyConn, _ := net.DialTCP("tcp", nil, localAddr)
 
 	Context("Happy path I: closed by user", func() {
 
 		doneChan := make(chan struct{})
 		outboxQueue := make(chan smsg.StreamMessage, 1)
 
-		mockFileService := fileservice.MockFileService{}
-		mockFileService.On("MkdirAll", fmt.Sprintf("%s/.ssh", homeDir), os.ModePerm).Return(nil)
-		mockFileService.On("Open", "").Return(openFile, nil)
-		mockFileService.On("Open", keysFile).Return(&os.File{}, errors.New("not going to mock os.File"))
-		mockFileService.On("WriteFile", keysFile).Return(nil)
-		mockFileService.On("Append", keysFile).Return(nil)
+		localAddr, _ := net.ResolveTCPAddr("tcp", "localhost:2022")
+		dummyConn, _ := net.DialTCP("tcp", nil, localAddr)
 
-		mockTcpService := tcpservice.MockTcpService{}
-		mockTcpService.On("ResolveTCPAddr", "tcp", "localhost:2022").Return(localAddr, nil)
-		mockTcpService.On("DialTCP", "tcp", (*net.TCPAddr)(nil), localAddr).Return(dummyConn, nil)
+		mockAuthKeyService := authorizedkeys.MockAuthorizedKey{}
+		mockAuthKeyService.On("Add").Return(nil)
 
-		mockUserService := userservice.MockUserService{}
-		mockUserService.On("Lookup", testUser).Return(&user.User{HomeDir: homeDir}, nil)
-
-		s, err := New(logger, doneChan, outboxQueue, "localhost", 2022, testUser, mockFileService, mockTcpService, mockUserService)
-		Expect(err).To(BeNil())
+		s := New(logger, doneChan, outboxQueue, dummyConn, mockAuthKeyService)
 
 		It("relays messages between the Daemon and the local SSH process", func() {
 
