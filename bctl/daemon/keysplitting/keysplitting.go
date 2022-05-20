@@ -168,7 +168,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	if err := ksMessage.VerifySignature(k.agentPubKey); err != nil {
 		// TODO: CWC-1553: Remove this inner conditional once all agents have updated
 		if innerErr := ksMessage.VerifySignature(k.ackPublicKey); innerErr != nil {
-			return fmt.Errorf("failed to verify %v signature: inner error: %s. original error: %s", ksMessage.Type, innerErr, err)
+			return fmt.Errorf("%w: failed to verify %v signature: inner error: %s outer error: %s", ErrInvalidSignature, ksMessage.Type, innerErr, err)
 		}
 	}
 
@@ -241,7 +241,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			}
 		}
 	} else {
-		return fmt.Errorf("%T message did not correspond to a previously sent message", ksMessage.KeysplittingPayload)
+		return fmt.Errorf("%w: %T message did not correspond to a previously sent message", ErrUnknownHPointer, ksMessage.KeysplittingPayload)
 	}
 
 	return nil
@@ -285,7 +285,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 		if k.lastAck != nil {
 			ack = k.lastAck
 		} else {
-			return fmt.Errorf("can't build message because there's nothing to build it off of")
+			return fmt.Errorf("%w: can't build message because there's nothing to build it off of", ErrMissingLastAck)
 		}
 	} else {
 
