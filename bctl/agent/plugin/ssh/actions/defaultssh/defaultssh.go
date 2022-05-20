@@ -109,7 +109,6 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 		d.remoteConnection.Close()
 		d.Kill()
 
-		// give our streamoutputchan time to process all the messages we sent while the stop request was getting here
 		return actionPayload, nil
 	default:
 		err = fmt.Errorf("unhandled stream action: %s", action)

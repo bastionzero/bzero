@@ -35,7 +35,7 @@ type SshServer struct {
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
-	// TODO: revisit
+	remotePort   int
 	targetUser   string
 	identityFile string
 
@@ -59,7 +59,9 @@ func StartSshServer(
 	headers map[string]string,
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
-	identityFile string) error {
+	identityFile string,
+	remotePort int,
+) error {
 
 	server := &SshServer{
 		logger:              logger,
@@ -72,6 +74,7 @@ func StartSshServer(
 		refreshTokenCommand: refreshTokenCommand,
 		agentPubKey:         agentPubKey,
 		identityFile:        identityFile,
+		remotePort:          remotePort,
 	}
 
 	// Create a new websocket
@@ -114,8 +117,11 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 		return fmt.Errorf("failed to start action: %s", err)
 	}
 
+	s.logger.Infof("USING PORT %d", s.remotePort)
+
 	actionParams := bzssh.SshActionParams{
 		TargetUser: s.targetUser,
+		RemotePort: s.remotePort,
 	}
 
 	action = "ssh/" + action

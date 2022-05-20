@@ -618,7 +618,7 @@ func (w *Websocket) connectSsh() error {
 		return fmt.Errorf("error creating cnController")
 	}
 
-	createConnectionResponse, err := cnController.CreateSshConnection(w.params["target_id"], w.params["target_user"])
+	createConnectionResponse, err := cnController.CreateSshConnection(w.params["target_id"], w.params["target_user"], w.params["remote_port"])
 
 	return w.buildCnUrl(createConnectionResponse, err)
 }
