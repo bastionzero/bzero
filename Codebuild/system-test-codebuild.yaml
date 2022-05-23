@@ -40,11 +40,10 @@ phases:
       - pip3 install -e /cwc-infra/Bzero-Common/. && pip3 install -e /cwc-infra/Bzero-QA/.
       # Install npm dependencies
       - apt-get update -y && apt-get install build-essential cmake -y
-      # We need to 1.16 and this isnt in yum
-      - wget https://dl.google.com/go/go1.16.4.linux-amd64.tar.gz -q
-      - tar -C /usr/local -xzf go1.16.4.linux-amd64.tar.gz
-      - echo 'export PATH=/usr/local/go/bin:$PATH' >>~/.bash_profile
-      - export PATH=/usr/local/go/bin:$PATH
+      # We need 1.16 and this isn't in apt-get
+      # Codebuild images use `goenv` to manage `go` versions
+      # Source: https://github.com/aws/aws-codebuild-docker-images/issues/425
+      - goenv local 1.16.4
       # Update npm 
       - npm install -g npm@8
       - # Install system-test dependencies
