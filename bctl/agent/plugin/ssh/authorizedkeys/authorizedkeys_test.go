@@ -2,7 +2,6 @@ package authorizedkeys
 
 import (
 	"encoding/base64"
-	"fmt"
 	"os"
 	"os/user"
 	"path"
@@ -21,23 +20,24 @@ func TestDefaultSsh(t *testing.T) {
 	RunSpecs(t, "Agent Authorized Keys Suite")
 }
 
-var _ = Describe("Agent Add Authorized Keys", func() {
+var _ = Describe("Agent Authorized Keys", func() {
+	authorizedKeyFolder = "temp"
 	authorizedKeyFileName = "fake_authorized_keys"
-	maxKeyLifetime = 1 * time.Second
-
 	logger := logger.MockLogger()
 	testUser, _ := user.Current()
-	doneChan := make(chan struct{})
 
-	authorizedKeysFile := path.Join(testUser.HomeDir, ".ssh", authorizedKeyFileName)
+	authorizedKeysFile := path.Join(testUser.HomeDir, authorizedKeyFolder, authorizedKeyFileName)
 
 	fakePubKey := "ssh-rsa " + base64.StdEncoding.EncodeToString([]byte("fake"))
 
-	Context("Happy Path", func() {
-		AfterEach(func() {
-			os.Remove(authorizedKeysFile)
-		})
+	AfterEach(func() {
+		os.RemoveAll(path.Join(testUser.HomeDir, authorizedKeyFolder))
+	})
 
+	Context("Happy Path", func() {
+
+		doneChan := make(chan struct{})
+		maxKeyLifetime = 1 * time.Second
 		authKeyService := New(logger, testUser.Username, doneChan)
 
 		It("adds keys to user's authorized_keys file and removes them after expiration", func() {
@@ -51,11 +51,9 @@ var _ = Describe("Agent Add Authorized Keys", func() {
 			Expect(strings.Contains(string(fileBytes), fakePubKey)).To(BeTrue())
 
 			By("removing the key after key lifetime")
-			time.Sleep(2 * maxKeyLifetime)
+			time.Sleep(2 * time.Second)
 			fileBytes, err = os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
-
-			fmt.Printf("%s\n", string(fileBytes))
 			Expect(len(fileBytes) == 0).To(BeTrue())
 		})
 
@@ -71,20 +69,26 @@ var _ = Describe("Agent Add Authorized Keys", func() {
 
 			By("removing the key after disconnect")
 			close(doneChan)
-			time.Sleep(2 * maxKeyLifetime)
+			time.Sleep(2 * time.Second)
 
 			fileBytes, err = os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
 			Expect(len(fileBytes) == 0).To(BeTrue())
 		})
+	})
 
-		It("is thread safe if you try to add a bunch of keys to a file at once", func() {
-			doneChan = make(chan struct{})
-			maxKeyLifetime = 10 * time.Second
-			numKeys := 10
+	Context("Stressful Path", func() {
+		doneChan := make(chan struct{})
+		numKeys := 10
+
+		It("allows for writing many keys at once", func() {
+			time.Sleep(time.Second)
+			maxKeyLifetime = 5 * time.Second
 
 			// If the file doesn't exist, create it, or append to the file
-			file, err := os.OpenFile(authorizedKeysFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			err := os.MkdirAll(path.Join(testUser.HomeDir, authorizedKeyFolder), os.ModePerm)
+			Expect(err).To(BeNil())
+			file, err := os.OpenFile(authorizedKeysFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 			Expect(err).To(BeNil())
 
 			testString := "this key file is not empty"
@@ -100,7 +104,7 @@ var _ = Describe("Agent Add Authorized Keys", func() {
 			}
 
 			// wait for any stragglers to write
-			time.Sleep(3 * time.Second)
+			time.Sleep(time.Second)
 			fileBytes, err := os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
 			lines := strings.Split(string(fileBytes), "\n")
@@ -108,7 +112,7 @@ var _ = Describe("Agent Add Authorized Keys", func() {
 
 			By("removing all of the keys")
 			close(doneChan)
-			time.Sleep(3 * time.Second)
+			time.Sleep(5 * time.Second)
 
 			fileBytes, err = os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())

@@ -17,6 +17,7 @@ import (
 )
 
 var (
+	authorizedKeyFolder   = ".ssh"
 	authorizedKeyFileName = "authorized_keys"
 	maxKeyLifetime        = 30 * time.Second
 )
@@ -84,10 +85,10 @@ func (a *AuthorizedKeys) buildFilePath() (string, error) {
 		return "", fmt.Errorf("failed to determine whether user exists: %s", err)
 	} else if usr.HomeDir == "" {
 		return "", fmt.Errorf("cannot connect as user without home directories")
-	} else if err := os.MkdirAll(filepath.Join(usr.HomeDir, ".ssh"), os.ModePerm); err != nil {
-		return "", fmt.Errorf("failed to create %s/.ssh/: %s", usr.HomeDir, err)
+	} else if err := os.MkdirAll(filepath.Join(usr.HomeDir, authorizedKeyFolder), os.ModePerm); err != nil {
+		return "", fmt.Errorf("failed to create %s/%s/: %s", usr.HomeDir, authorizedKeyFolder, err)
 	} else {
-		return filepath.Join(usr.HomeDir, ".ssh", authorizedKeyFileName), nil
+		return filepath.Join(usr.HomeDir, authorizedKeyFolder, authorizedKeyFileName), nil
 	}
 }
 
