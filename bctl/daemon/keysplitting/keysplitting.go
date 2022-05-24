@@ -192,21 +192,20 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				k.recovering = false
 				k.resend(msg.Nonce)
 
-				if v, err := semver.NewVersion(msg.SchemaVersion); err != nil {
-					return fmt.Errorf("unable to parse version")
-				} else {
-					k.schemaVersion = v
+				parsedSchemaVersion, err := semver.NewVersion(msg.SchemaVersion)
+				if err != nil {
+					return ErrFailedToParseVersion
 				}
+				k.schemaVersion = parsedSchemaVersion
 
-				// check to see if we're talking with an agent that's using pre-2.0 keysplitting because
-				// we'll need to dirty the payload by adding extra quotes around it
-				// TODO: CWC-1820: remove once all daemon's are updated
+				// check to see if we're talking with an agent that's using
+				// pre-2.0 keysplitting because we'll need to dirty the payload
+				// by adding extra quotes around it TODO: CWC-1820: remove once
+				// all daemon's are updated
 				if c, err := semver.NewConstraint("< 2.0"); err != nil {
 					return fmt.Errorf("unable to create versioning constraint")
-				} else if v, err := semver.NewVersion(msg.SchemaVersion); err != nil {
-					return fmt.Errorf("unable to parse version")
 				} else {
-					k.prePipeliningAgent = c.Check(v)
+					k.prePipeliningAgent = c.Check(parsedSchemaVersion)
 
 					if k.prePipeliningAgent {
 						pipelineLimit = 1

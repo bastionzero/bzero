@@ -166,22 +166,37 @@ var _ = Describe("Daemon keysplitting", func() {
 	})
 
 	Describe("validate agent messages", func() {
-		Context("when agent message is not built on previously sent daemon message", func() {
-			var msgUnderTest *ksmsg.KeysplittingMessage
+		var msgUnderTest *ksmsg.KeysplittingMessage
 
-			AssertBehavior := func() {
+		CommonAssertFailedBehavior := func() {
+			It("validate fails when the message is unsigned", func() {
+				msgUnderTest.Signature = ""
+				err := sut.Validate(msgUnderTest)
+				Expect(err).Should(MatchError(ErrInvalidSignature))
+			})
+		}
+
+		Context("when agent message is not built on previously sent daemon message", func() {
+			AssertFailedBehavior := func() {
 				It("validate fails with unknown hpointer error", func() {
 					err := sut.Validate(msgUnderTest)
 					Expect(err).Should(MatchError(ErrUnknownHPointer))
-				})
 
-				It("no message can be sent", func() {
-					// Since we never received a valid message, we shouldn't be
-					// able to send new data
-					err := sut.Inbox(testAction, []byte{})
-					Expect(err).Should(MatchError(ErrMissingLastAck))
+					// TODO-Yuval: Find a way to assert this behavior generally
+					// even when agent message *is* built on previously sent
+					// daemon message. We currently can't do that because
+					// Inbox() is locked because BuildSyn() is called without
+					// receiving a valid message. It works here because we don't
+					// call BuildSyn() in this entire Context.
+					By("Attempting to send a message fails with error")
+					err = sut.Inbox(testAction, []byte{})
+					Expect(err).Should(MatchError(ErrMissingLastAck), "because we never received a valid ack, so there is no chain to continue from")
 				})
 			}
+
+			JustBeforeEach(func() {
+				SignAgentMsg(msgUnderTest)
+			})
 
 			Context("when the message is a SynAck-->Syn", func() {
 				BeforeEach(func() {
@@ -190,10 +205,12 @@ var _ = Describe("Daemon keysplitting", func() {
 						KeysplittingPayload: ksmsg.SynPayload{},
 					}
 					msgUnderTest = BuildSynAck(unknownSyn)
-					SignAgentMsg(msgUnderTest)
 				})
 
-				AssertBehavior()
+				Describe("failure modes", func() {
+					CommonAssertFailedBehavior()
+					AssertFailedBehavior()
+				})
 			})
 
 			Context("when the message is a DataAck-->Data", func() {
@@ -203,16 +220,16 @@ var _ = Describe("Daemon keysplitting", func() {
 						KeysplittingPayload: ksmsg.DataPayload{},
 					}
 					msgUnderTest = BuildDataAck(unknownData)
-					SignAgentMsg(msgUnderTest)
 				})
 
-				AssertBehavior()
+				Describe("failure modes", func() {
+					CommonAssertFailedBehavior()
+					AssertFailedBehavior()
+				})
 			})
 		})
 
 		Context("when agent message is built on previously sent daemon message", func() {
-			var msgUnderTest *ksmsg.KeysplittingMessage
-
 			AssertBehavior := func() {
 				It("validate succeeds when the message is signed", func() {
 					SignAgentMsg(msgUnderTest)
@@ -239,11 +256,6 @@ var _ = Describe("Daemon keysplitting", func() {
 					err = sut.Validate(msgUnderTest)
 					Expect(err).ShouldNot(HaveOccurred())
 				})
-
-				It("validate fails when the message is unsigned", func() {
-					err := sut.Validate(msgUnderTest)
-					Expect(err).Should(MatchError(ErrInvalidSignature))
-				})
 			}
 
 			Context("when the message is a SynAck-->Syn", func() {
@@ -252,7 +264,26 @@ var _ = Describe("Daemon keysplitting", func() {
 					msgUnderTest = BuildSynAck(synMsg)
 				})
 
-				AssertBehavior()
+				Describe("the happy path", func() {
+					AssertBehavior()
+				})
+
+				Describe("failure modes", func() {
+					CommonAssertFailedBehavior()
+
+					// Schema version parsing only happens when message is a
+					// SynAck
+					It("validate fails when schema version cannot be parsed", func() {
+						By("Modifying schema version to be invalid")
+						synAckPayload, _ := msgUnderTest.KeysplittingPayload.(ksmsg.SynAckPayload)
+						synAckPayload.SchemaVersion = "bad-version"
+						msgUnderTest.KeysplittingPayload = synAckPayload
+
+						SignAgentMsg(msgUnderTest)
+						err := sut.Validate(msgUnderTest)
+						Expect(err).Should(MatchError(ErrFailedToParseVersion))
+					})
+				})
 			})
 
 			Context("when the message is a DataAck", func() {
@@ -269,7 +300,13 @@ var _ = Describe("Daemon keysplitting", func() {
 						msgUnderTest = BuildDataAckForDataAfterHandshake()
 					})
 
-					AssertBehavior()
+					Describe("the happy path", func() {
+						AssertBehavior()
+					})
+
+					Describe("failure modes", func() {
+						CommonAssertFailedBehavior()
+					})
 				})
 
 				Context("when the message is a DataAck-->Data-->DataAck-->Data-->SynAck-->Syn", func() {
@@ -282,14 +319,20 @@ var _ = Describe("Daemon keysplitting", func() {
 						msgUnderTest = BuildDataAck(sentDataMsg)
 					})
 
-					AssertBehavior()
+					Describe("the happy path", func() {
+						AssertBehavior()
+					})
+
+					Describe("failure modes", func() {
+						CommonAssertFailedBehavior()
+					})
 				})
 			})
 		})
 	})
 
 	Describe("send Syn", func() {
-		Context("when nothing errors", func() {
+		Describe("the happy path", func() {
 			It("Syn is built correctly", func() {
 				payload := []byte{}
 				synMsg := SendSynWithPayload(payload)
@@ -312,7 +355,7 @@ var _ = Describe("Daemon keysplitting", func() {
 			})
 		})
 
-		Context("when something is wrong", func() {
+		Describe("failure modes", func() {
 			var synMsg *ksmsg.KeysplittingMessage
 			var buildSynError error
 
@@ -321,7 +364,7 @@ var _ = Describe("Daemon keysplitting", func() {
 				Expect(synMsg).To(BeNil())
 			})
 
-			AssertBehavior := func() {
+			AssertFailedBehavior := func() {
 				It("Syn is not sent to outbox", func() {
 					Expect(sut.Outbox()).ShouldNot(Receive())
 				})
@@ -339,7 +382,7 @@ var _ = Describe("Daemon keysplitting", func() {
 					Expect(buildSynError).To(MatchError(refreshError))
 				})
 
-				AssertBehavior()
+				AssertFailedBehavior()
 			})
 
 			Context("when signing fails", func() {
@@ -357,7 +400,7 @@ var _ = Describe("Daemon keysplitting", func() {
 					Expect(buildSynError).To(MatchError(ErrFailedToSign))
 				})
 
-				AssertBehavior()
+				AssertFailedBehavior()
 			})
 		})
 	})
@@ -371,7 +414,7 @@ var _ = Describe("Daemon keysplitting", func() {
 			synAck = PerformHandshake()
 		})
 
-		Context("when nothing errors", func() {
+		Describe("the happy path", func() {
 			It("Data is built correctly", func() {
 				payload := []byte{}
 				dataMsg := SendDataWithPayload(payload)
@@ -399,8 +442,8 @@ var _ = Describe("Daemon keysplitting", func() {
 			})
 		})
 
-		Context("when something is wrong", func() {
-			AssertBehavior := func() {
+		Describe("failure modes", func() {
+			AssertFailedBehavior := func() {
 				It("Data is not sent to outbox", func() {
 					Expect(sut.Outbox()).ShouldNot(Receive())
 				})
@@ -427,7 +470,7 @@ var _ = Describe("Daemon keysplitting", func() {
 					Expect(inboxError).To(MatchError(ErrFailedToSign))
 				})
 
-				AssertBehavior()
+				AssertFailedBehavior()
 			})
 
 			Context("when action is not specified", func() {
@@ -439,10 +482,10 @@ var _ = Describe("Daemon keysplitting", func() {
 				})
 
 				It("errors", func() {
-					Expect(inboxError).ShouldNot(BeNil())
+					Expect(inboxError).Should(HaveOccurred())
 				})
 
-				AssertBehavior()
+				AssertFailedBehavior()
 			})
 		})
 	})
