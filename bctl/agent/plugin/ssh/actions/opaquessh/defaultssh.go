@@ -1,4 +1,4 @@
-package defaultssh
+package opaquessh
 
 import (
 	"encoding/base64"
@@ -21,7 +21,7 @@ const (
 	writeDeadline = 5 * time.Second
 )
 
-type DefaultSsh struct {
+type OpaqueSsh struct {
 	tmb    tomb.Tomb
 	logger *logger.Logger
 	closed bool
@@ -43,9 +43,9 @@ func New(
 	ch chan smsg.StreamMessage,
 	conn *net.TCPConn,
 	authKeyService authorizedkeys.AuthorizedKeysInterface,
-) *DefaultSsh {
+) *OpaqueSsh {
 
-	return &DefaultSsh{
+	return &OpaqueSsh{
 		logger:           logger,
 		doneChan:         doneChan,
 		streamOutputChan: ch,
@@ -54,7 +54,7 @@ func New(
 	}
 }
 
-func (d *DefaultSsh) Kill() {
+func (d *OpaqueSsh) Kill() {
 	d.tmb.Kill(nil)
 	if d.remoteConnection != nil {
 		(*d.remoteConnection).Close()
@@ -62,19 +62,17 @@ func (d *DefaultSsh) Kill() {
 	d.tmb.Wait()
 }
 
-func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
-	var err error
+func (d *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
 
 	// Update the logger action
 	d.logger = d.logger.GetActionLogger(action)
 	switch ssh.SshSubAction(action) {
 	case ssh.SshOpen:
 		var openRequest ssh.SshOpenMessage
-		if err = json.Unmarshal(actionPayload, &openRequest); err != nil {
-			err = fmt.Errorf("malformed default SSH action payload %s", string(actionPayload))
-			break
+		if err := json.Unmarshal(actionPayload, &openRequest); err != nil {
+			return nil, fmt.Errorf("malformed default SSH action payload %s", string(actionPayload))
 		} else if err = d.authorizedKeys.Add(string(openRequest.PublicKey)); err != nil {
-			break
+			return nil, err
 		}
 
 		return d.start(openRequest, action)
@@ -82,9 +80,8 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 
 		// Deserialize the action payload, the only action passed is input
 		var inputRequest ssh.SshInputMessage
-		if err = json.Unmarshal(actionPayload, &inputRequest); err != nil {
-			err = fmt.Errorf("unable to unmarshal default SSH input message: %s", err)
-			break
+		if err := json.Unmarshal(actionPayload, &inputRequest); err != nil {
+			return nil, fmt.Errorf("unable to unmarshal default SSH input message: %s", err)
 		}
 
 		// Set a deadline for the write so we don't block forever
@@ -111,16 +108,13 @@ func (d *DefaultSsh) Receive(action string, actionPayload []byte) ([]byte, error
 
 		return actionPayload, nil
 	default:
-		err = fmt.Errorf("unhandled stream action: %s", action)
+		return nil, fmt.Errorf("unhandled stream action: %s", action)
 	}
 
-	if err != nil {
-		d.logger.Error(err)
-	}
-	return []byte{}, err
+	return []byte{}, nil
 }
 
-func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
+func (d *OpaqueSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
 	d.streamMessageVersion = openRequest.StreamMessageVersion
 	d.logger.Debugf("Setting stream message version: %s", d.streamMessageVersion)
 
@@ -167,11 +161,11 @@ func (d *DefaultSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byt
 	return []byte{}, nil
 }
 
-func (d *DefaultSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
+func (d *OpaqueSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
 	d.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  d.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		Action:         string(ssh.DefaultSsh),
+		Action:         string(ssh.OpaqueSsh),
 		Type:           streamType,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(contentBytes),

@@ -1,4 +1,4 @@
-package defaultssh
+package opaquessh
 
 import (
 	"encoding/base64"
@@ -13,7 +13,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -21,9 +20,10 @@ const (
 	InputBufferSize   = int(64 * 1024)
 	InputDebounceTime = 5 * time.Millisecond
 	endedByUser       = "SSH session ended"
+	maxKeyLifetime    = 30 * time.Second
 )
 
-type DefaultSsh struct {
+type OpaqueSsh struct {
 	tmb    tomb.Tomb
 	logger *logger.Logger
 
@@ -36,7 +36,7 @@ type DefaultSsh struct {
 	identityFile string
 
 	fileService fileservice.FileService
-	ioService   ioservice.IoService
+	ioService   io.ReadWriter
 }
 
 func New(
@@ -45,10 +45,10 @@ func New(
 	doneChan chan struct{},
 	identityFile string,
 	fileService fileservice.FileService,
-	ioService ioservice.IoService,
-) *DefaultSsh {
+	ioService io.ReadWriter,
+) *OpaqueSsh {
 
-	return &DefaultSsh{
+	return &OpaqueSsh{
 		logger:       logger,
 		outboxQueue:  outboxQueue,
 		doneChan:     doneChan,
@@ -59,19 +59,22 @@ func New(
 	}
 }
 
-func (d *DefaultSsh) Done() <-chan struct{} {
+func (d *OpaqueSsh) Done() <-chan struct{} {
 	return d.doneChan
 }
 
-func (d *DefaultSsh) Kill() {
+func (d *OpaqueSsh) Kill() {
 	d.tmb.Kill(nil)
 }
 
-func (d *DefaultSsh) Start() error {
+func (d *OpaqueSsh) Start() error {
 
 	var privateKey, publicKey []byte
 
 	// if we already have a private key, use it. Otherwise, create a new one
+	// NOTE: it is technically possible for this to create a one-time race if two SSH processes
+	// are kicked off *and* the user just logged in. However this is unlikely and can be resolved
+	// if/when we upgrade the SSH architecture
 	if publicKeyRsa, err := readPublicKeyRsa(d.identityFile, d.fileService); err == nil {
 		if publicKey, err = generatePublicKey(publicKeyRsa); err != nil {
 			return fmt.Errorf("error decoding temporary public key: %s", err)
@@ -95,10 +98,22 @@ func (d *DefaultSsh) Start() error {
 
 	d.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
 
-	// go d.sendStdIn()
 	go func() {
 		defer close(d.doneChan)
 		<-d.tmb.Dying()
+	}()
+
+	// remove the key since it's ephemeral
+	go func() {
+		select {
+		case <-d.doneChan:
+			d.logger.Infof("Detected a closed done chan, removing temporary key file")
+		case <-time.After(maxKeyLifetime):
+			d.logger.Infof("SSH key expired, removing temporary key file")
+		}
+		if err := d.fileService.Remove(d.identityFile); err != nil {
+			d.logger.Errorf("failed to remove temporary key file: %s", err)
+		}
 	}()
 
 	d.tmb.Go(func() error {
@@ -120,7 +135,6 @@ func (d *DefaultSsh) Start() error {
 				} else if n > 0 {
 					d.logger.Debugf("Read %d bytes from local SSH", n)
 					d.sendSshInputMessage(b[:n])
-					// d.stdInChan <- b[:n]
 				}
 			}
 		}
@@ -129,8 +143,7 @@ func (d *DefaultSsh) Start() error {
 	return nil
 }
 
-// FIXME: should I be dealing with out of order messages?
-func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
+func (d *OpaqueSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
 	switch smsg.StreamType(smessage.Type) {
 	case smsg.StdOut:
@@ -155,7 +168,7 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 
 // NOTE: this function is from a time when we were debouncing stdin; we may yet need to do so; don't delete this just yet
 // processes input channel by debouncing all keypresses within a time interval
-// func (d *DefaultSsh) sendStdIn() {
+// func (d *OpaqueSsh) sendStdIn() {
 // 	inputBuf := []byte{}
 
 // 	for {
@@ -177,7 +190,7 @@ func (d *DefaultSsh) ReceiveStream(smessage smsg.StreamMessage) {
 // 	}
 // }
 
-func (d *DefaultSsh) sendSshInputMessage(bs []byte) {
+func (d *OpaqueSsh) sendSshInputMessage(bs []byte) {
 	// Send all accumulated input in an sshInput data message
 	sshInputDataMessage := ssh.SshInputMessage{
 		Data: bs,
@@ -185,7 +198,7 @@ func (d *DefaultSsh) sendSshInputMessage(bs []byte) {
 	d.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
 }
 
-func (d *DefaultSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
+func (d *OpaqueSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	d.outboxQueue <- plugin.ActionWrapper{

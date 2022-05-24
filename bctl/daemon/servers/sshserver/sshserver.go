@@ -22,8 +22,7 @@ import (
 
 const (
 	// websocket connection parameters for all datachannels created by tcp server
-	// FIXME: revisit whether autoreconnect should be true
-	autoReconnect = true
+	autoReconnect = false
 	getChallenge  = false
 )
 
@@ -84,7 +83,7 @@ func StartSshServer(
 	}
 
 	// create our new datachannel
-	if err := server.newDataChannel(string(bzssh.DefaultSsh), server.websocket); err != nil {
+	if err := server.newDataChannel(string(bzssh.OpaqueSsh), server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 

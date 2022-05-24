@@ -1,4 +1,4 @@
-package defaultssh
+package opaquessh
 
 import (
 	"encoding/json"

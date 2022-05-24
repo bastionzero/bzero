@@ -1,7 +1,6 @@
 package ioservice
 
 import (
-	"bufio"
 	"io"
 	"os"
 )
@@ -10,7 +9,6 @@ import (
 // for now, restricted to Stdin/Stdout and a scanner
 type IoService interface {
 	io.ReadWriter
-	NewScanner(r io.Reader) *bufio.Scanner
 }
 
 // the default implementation
@@ -22,8 +20,4 @@ func (s StdIoService) Read(b []byte) (n int, err error) {
 
 func (s StdIoService) Write(b []byte) (n int, err error) {
 	return os.Stdout.Write(b)
-}
-
-func (s StdIoService) NewScanner(r io.Reader) *bufio.Scanner {
-	return bufio.NewScanner(r)
 }

@@ -1,4 +1,4 @@
-package defaultssh
+package opaquessh
 
 import (
 	"encoding/base64"

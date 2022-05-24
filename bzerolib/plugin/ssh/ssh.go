@@ -9,7 +9,7 @@ import (
 type SshAction string
 
 const (
-	DefaultSsh SshAction = "default"
+	OpaqueSsh SshAction = "opaque"
 )
 
 type SshActionParams struct {

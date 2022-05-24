@@ -6,14 +6,12 @@ import (
 	"net"
 	"strings"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/defaultssh"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/opaquessh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
-
-const localSshServer = "localhost:22"
 
 type ISshAction interface {
 	Receive(action string, actionPayload []byte) ([]byte, error)
@@ -55,9 +53,9 @@ func New(logger *logger.Logger,
 		var rerr error
 
 		switch parsedAction {
-		case bzssh.DefaultSsh:
+		case bzssh.OpaqueSsh:
 			// Open up a connection to the TCP addr we are trying to connect to
-			raddr, err := net.ResolveTCPAddr("tcp", localSshServer)
+			raddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("localhost:%d", synPayload.RemotePort))
 			if err != nil {
 				rerr = fmt.Errorf("failed to resolve remote address: %s", err)
 			}
@@ -69,7 +67,7 @@ func New(logger *logger.Logger,
 			subSubLogger := subLogger.GetComponentLogger("authorized_keys")
 			authKeyService := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan)
 
-			plugin.action = defaultssh.New(
+			plugin.action = opaquessh.New(
 				subLogger,
 				plugin.doneChan,
 				plugin.streamOutputChan,
