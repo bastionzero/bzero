@@ -2,6 +2,7 @@ package keysplitting
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -76,6 +77,14 @@ var _ = Describe("Daemon keysplitting", func() {
 		err := agentMsg.Sign(agentKeypair.Base64EncodedPrivateKey)
 		Expect(err).ShouldNot(HaveOccurred())
 	}
+	// Use this helper method to quickly validate messages, so another message
+	// can be received. Please prefer to call Validate() directly (and not use
+	// this function) when the It() is explictly asserting validation.
+	ValidateAgentMsg := func(agentMsg *ksmsg.KeysplittingMessage) {
+		By(fmt.Sprintf("Validating %v without error", agentMsg.Type))
+		err := sut.Validate(agentMsg)
+		Expect(err).ShouldNot(HaveOccurred())
+	}
 
 	// Helper build daemon message funcs
 	SendSynWithPayload := func(payload []byte) *ksmsg.KeysplittingMessage {
@@ -102,28 +111,12 @@ var _ = Describe("Daemon keysplitting", func() {
 		By("Pushing the Syn msg to the outbox")
 		Expect(sut.Outbox()).Should(Receive(Equal(synMsg)))
 
-		By("Asserting the keysplitting message is correct")
-		Expect(synMsg.Type).To(Equal(ksmsg.Syn))
-		Expect(synMsg.Signature).NotTo(BeEmpty())
-		synPayload, ok := synMsg.KeysplittingPayload.(ksmsg.SynPayload)
-		Expect(ok).To(BeTrue())
-
-		By("Asserting the keysplitting message payload details are correct")
-		Expect(synPayload.SchemaVersion).To(Equal(ksmsg.SchemaVersion))
-		Expect(synPayload.Type).To(BeEquivalentTo(ksmsg.Syn))
-		Expect(synPayload.Action).To(Equal(testAction))
-		// TODO-Yuval: Discuss this assertion with Lucie
-		Expect(synPayload.ActionPayload).To(BeEquivalentTo(fmt.Sprintf("\"%v\"", base64.StdEncoding.EncodeToString(payload))))
-		Expect(synPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
-		Expect(synPayload.Nonce).NotTo(BeEmpty())
-		Expect(synPayload.BZCert).To(Equal(*GetFakeBZCert()))
-
 		return synMsg
 	}
 	SendSyn := func() *ksmsg.KeysplittingMessage {
 		return SendSynWithPayload([]byte{})
 	}
-	SendDataWithPayload := func(payload []byte, expectedPrevMessage *ksmsg.KeysplittingMessage) *ksmsg.KeysplittingMessage {
+	SendDataWithPayload := func(payload []byte) *ksmsg.KeysplittingMessage {
 		By("Sending a Data msg without error")
 		err := sut.Inbox(testAction, payload)
 		Expect(err).ShouldNot(HaveOccurred())
@@ -132,30 +125,10 @@ var _ = Describe("Daemon keysplitting", func() {
 		var dataMsg *ksmsg.KeysplittingMessage
 		Eventually(sut.Outbox()).Should(Receive(&dataMsg))
 
-		By("Asserting the keysplitting message is correct")
-		Expect(dataMsg.Type).To(Equal(ksmsg.Data))
-		Expect(dataMsg.Signature).NotTo(BeEmpty())
-		dataPayload, ok := dataMsg.KeysplittingPayload.(ksmsg.DataPayload)
-		Expect(ok).To(BeTrue())
-
-		By("Asserting the keysplitting message payload details are correct")
-		Expect(dataPayload.SchemaVersion).To(Equal(agentSchemaVersion), "The schema version should match the agreed upon version found in the agent's SynAck")
-		Expect(dataPayload.Type).To(BeEquivalentTo(ksmsg.Data))
-		Expect(dataPayload.Action).To(Equal(testAction))
-		Expect(dataPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
-		// Asserts that Validate() was called for the previous Ack sent by the
-		// agent. If true, then this Data msg points to the correct message in
-		// the chain
-		Expect(dataPayload.HPointer).Should(Equal(expectedPrevMessage.Hash()), fmt.Sprintf("This Data msg's HPointer should point to the previously received message: %#v", expectedPrevMessage))
-		Expect(dataPayload.ActionPayload).To(Equal(payload))
-		expectedBzCertHash, ok := GetFakeBZCert().Hash()
-		Expect(ok).Should(BeTrue(), "There should not be an error when hashing the expected BZCert")
-		Expect(dataPayload.BZCertHash).To(Equal(expectedBzCertHash))
-
 		return dataMsg
 	}
-	SendData := func(expectedPrevMessage *ksmsg.KeysplittingMessage) *ksmsg.KeysplittingMessage {
-		return SendDataWithPayload([]byte{}, expectedPrevMessage)
+	SendData := func() *ksmsg.KeysplittingMessage {
+		return SendDataWithPayload([]byte{})
 	}
 
 	// Setup SUT that is used by all tests
@@ -279,11 +252,9 @@ var _ = Describe("Daemon keysplitting", func() {
 					// We must validate and process the SynAck, so the pipeline
 					// lock can be released and Inbox() can be called without
 					// blocking
-					By("Validating SynAck without error")
-					err := sut.Validate(synAck)
-					Expect(err).ShouldNot(HaveOccurred())
+					ValidateAgentMsg(synAck)
 
-					sentDataMsg := SendData(synAck)
+					sentDataMsg := SendData()
 					return BuildDataAck(sentDataMsg)
 				}
 
@@ -299,17 +270,176 @@ var _ = Describe("Daemon keysplitting", func() {
 					BeforeEach(func() {
 						firstDataAck := BuildDataAckForDataAfterHandshake()
 						SignAgentMsg(firstDataAck)
+						ValidateAgentMsg(firstDataAck)
 
-						By("Validating first DataAck without error")
-						err := sut.Validate(firstDataAck)
-						Expect(err).ShouldNot(HaveOccurred())
-
-						sentDataMsg := SendData(firstDataAck)
+						sentDataMsg := SendData()
 						msgUnderTest = BuildDataAck(sentDataMsg)
 					})
 
 					AssertBehavior()
 				})
+			})
+		})
+	})
+
+	Describe("send Syn", func() {
+		Context("when nothing errors", func() {
+			It("Syn is built correctly", func() {
+				payload := []byte{}
+				synMsg := SendSynWithPayload(payload)
+
+				By("Asserting the keysplitting message is correct")
+				Expect(synMsg.Type).To(Equal(ksmsg.Syn))
+				Expect(synMsg.Signature).NotTo(BeEmpty())
+				synPayload, ok := synMsg.KeysplittingPayload.(ksmsg.SynPayload)
+				Expect(ok).To(BeTrue())
+
+				By("Asserting the keysplitting message payload details are correct")
+				Expect(synPayload.SchemaVersion).To(Equal(ksmsg.SchemaVersion))
+				Expect(synPayload.Type).To(BeEquivalentTo(ksmsg.Syn))
+				Expect(synPayload.Action).To(Equal(testAction))
+				// TODO-Yuval: Discuss this assertion with Lucie
+				Expect(synPayload.ActionPayload).To(BeEquivalentTo(fmt.Sprintf("\"%v\"", base64.StdEncoding.EncodeToString(payload))))
+				Expect(synPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
+				Expect(synPayload.Nonce).NotTo(BeEmpty())
+				Expect(synPayload.BZCert).To(Equal(*GetFakeBZCert()))
+			})
+		})
+
+		Context("when something is wrong", func() {
+			var synMsg *ksmsg.KeysplittingMessage
+			var buildSynError error
+
+			JustBeforeEach(func() {
+				synMsg, buildSynError = sut.BuildSyn(testAction, []byte{}, true)
+				Expect(synMsg).To(BeNil())
+			})
+
+			AssertBehavior := func() {
+				It("Syn is not sent to outbox", func() {
+					Expect(sut.Outbox()).ShouldNot(Receive())
+				})
+			}
+
+			Context("when token refresh fails", func() {
+				var refreshError error
+				BeforeEach(func() {
+					By("Mocking the token refresher to return an error")
+					refreshError = errors.New("refresh error")
+					mockTokenRefresher.On("Refresh").Return(nil, refreshError)
+				})
+
+				It("errors", func() {
+					Expect(buildSynError).To(MatchError(refreshError))
+				})
+
+				AssertBehavior()
+			})
+
+			Context("when signing fails", func() {
+				BeforeEach(func() {
+					By("Mocking the token refresher to return a config with an invalid signing key")
+					fakeZliKsConfig = &tokenrefresh.ZLIKeysplittingConfig{
+						KSConfig: tokenrefresh.KeysplittingConfig{
+							PrivateKey: "badkey",
+						},
+					}
+					mockTokenRefresher.On("Refresh").Return(fakeZliKsConfig, nil)
+				})
+
+				It("errors", func() {
+					Expect(buildSynError).To(MatchError(ErrFailedToSign))
+				})
+
+				AssertBehavior()
+			})
+		})
+	})
+
+	Describe("send Data", func() {
+		var synAck *ksmsg.KeysplittingMessage
+
+		BeforeEach(func() {
+			// Perform handshake: Send Syn and receive SynAck. This logic is
+			// required before we can send a Data msg
+			synMsg := SendSyn()
+			synAck = BuildSynAck(synMsg)
+			SignAgentMsg(synAck)
+			ValidateAgentMsg(synAck)
+		})
+
+		Context("when nothing errors", func() {
+			It("Data is built correctly", func() {
+				payload := []byte{}
+				dataMsg := SendDataWithPayload(payload)
+				expectedPrevMessage := synAck
+
+				By("Asserting the keysplitting message is correct")
+				Expect(dataMsg.Type).To(Equal(ksmsg.Data))
+				Expect(dataMsg.Signature).NotTo(BeEmpty())
+				dataPayload, ok := dataMsg.KeysplittingPayload.(ksmsg.DataPayload)
+				Expect(ok).To(BeTrue())
+
+				By("Asserting the keysplitting message payload details are correct")
+				Expect(dataPayload.SchemaVersion).To(Equal(agentSchemaVersion), "The schema version should match the agreed upon version found in the agent's SynAck")
+				Expect(dataPayload.Type).To(BeEquivalentTo(ksmsg.Data))
+				Expect(dataPayload.Action).To(Equal(testAction))
+				Expect(dataPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
+				// Asserts that Validate() was called for the previous Ack sent by the
+				// agent. If true, then this Data msg points to the correct message in
+				// the chain
+				Expect(dataPayload.HPointer).Should(Equal(expectedPrevMessage.Hash()), fmt.Sprintf("This Data msg's HPointer should point to the previously received message: %#v", expectedPrevMessage))
+				Expect(dataPayload.ActionPayload).To(Equal(payload))
+				expectedBzCertHash, ok := GetFakeBZCert().Hash()
+				Expect(ok).Should(BeTrue(), "There should not be an error when hashing the expected BZCert")
+				Expect(dataPayload.BZCertHash).To(Equal(expectedBzCertHash))
+			})
+		})
+
+		Context("when something is wrong", func() {
+			AssertBehavior := func() {
+				It("Data is not sent to outbox", func() {
+					Expect(sut.Outbox()).ShouldNot(Receive())
+				})
+			}
+
+			Context("when signing fails", func() {
+				var inboxError error
+
+				JustBeforeEach(func() {
+					inboxError = sut.Inbox(testAction, []byte{})
+				})
+
+				BeforeEach(func() {
+					// It would be better not to set the private field and only
+					// use public functions of the SUT, but we have to perform a
+					// valid handshake before we can call Inbox(). We can't set
+					// the token refresher mock to give a bad key, otherwise the
+					// Syn would fail to send.
+					By("Setting client secret key to bad key")
+					sut.clientSecretKey = "badkey"
+				})
+
+				It("errors", func() {
+					Expect(inboxError).To(MatchError(ErrFailedToSign))
+				})
+
+				AssertBehavior()
+			})
+
+			Context("when action is not specified", func() {
+				var inboxError error
+
+				JustBeforeEach(func() {
+					// Don't specify action
+					inboxError = sut.Inbox("", []byte{})
+				})
+
+				It("errors", func() {
+					Expect(inboxError).ShouldNot(BeNil())
+				})
+
+				AssertBehavior()
 			})
 		})
 	})
