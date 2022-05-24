@@ -131,6 +131,19 @@ var _ = Describe("Daemon keysplitting", func() {
 		return SendDataWithPayload([]byte{})
 	}
 
+	// PerformHandshake completes the keysplitting handshake by sending a Syn
+	// and receiving a valid SynAck. Returns the synAck message received.
+	PerformHandshake := func() *ksmsg.KeysplittingMessage {
+		synMsg := SendSyn()
+		synAck := BuildSynAck(synMsg)
+		SignAgentMsg(synAck)
+
+		// We must validate and process the SynAck, so the pipeline lock can be
+		// released and Inbox() can be called without blocking
+		ValidateAgentMsg(synAck)
+		return synAck
+	}
+
 	// Setup SUT that is used by all tests
 	BeforeEach(func() {
 		// Setup keypairs to use for agent and daemon
@@ -245,14 +258,7 @@ var _ = Describe("Daemon keysplitting", func() {
 			Context("when the message is a DataAck", func() {
 				// Builds a DataAck-->Data-->SynAck-->Syn
 				BuildDataAckForDataAfterHandshake := func() *ksmsg.KeysplittingMessage {
-					synMsg := SendSyn()
-					synAck := BuildSynAck(synMsg)
-					SignAgentMsg(synAck)
-
-					// We must validate and process the SynAck, so the pipeline
-					// lock can be released and Inbox() can be called without
-					// blocking
-					ValidateAgentMsg(synAck)
+					PerformHandshake()
 
 					sentDataMsg := SendData()
 					return BuildDataAck(sentDataMsg)
@@ -360,12 +366,9 @@ var _ = Describe("Daemon keysplitting", func() {
 		var synAck *ksmsg.KeysplittingMessage
 
 		BeforeEach(func() {
-			// Perform handshake: Send Syn and receive SynAck. This logic is
-			// required before we can send a Data msg
-			synMsg := SendSyn()
-			synAck = BuildSynAck(synMsg)
-			SignAgentMsg(synAck)
-			ValidateAgentMsg(synAck)
+			// We must perform a successful handshake before we can attempt to
+			// send a Data msg.
+			synAck = PerformHandshake()
 		})
 
 		Context("when nothing errors", func() {
