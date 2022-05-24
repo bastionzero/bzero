@@ -300,7 +300,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 
 	// build our new data message and then ship it!
 	if newMessage, err := k.buildResponse(ack, action, actionPayload); err != nil {
-		return fmt.Errorf("failed to build new message: %s", err)
+		return fmt.Errorf("failed to build new message: %w", err)
 	} else if err := k.addToPipelineMap(newMessage); err != nil {
 		return err
 	} else {
@@ -332,7 +332,7 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 	if responseMessage, err := ksMessage.BuildUnsignedData(action, payload, k.bzcertHash, k.schemaVersion.Original()); err != nil {
 		return responseMessage, err
 	} else if err := responseMessage.Sign(k.clientSecretKey); err != nil {
-		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
+		return responseMessage, fmt.Errorf("%w: %s", ErrFailedToSign, err)
 	} else {
 		return responseMessage, nil
 	}
@@ -362,7 +362,7 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 	// Build the BZero Certificate then store hash for future messages
 	bzCert, err := k.buildBZCert()
 	if err != nil {
-		return nil, fmt.Errorf("error building bzecert: %s", err)
+		return nil, fmt.Errorf("error building bzecert: %w", err)
 	} else {
 		if hash, ok := bzCert.Hash(); ok {
 			k.bzcertHash = hash
@@ -389,7 +389,7 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 
 	// Sign it and add it to our hash map
 	if err := ksMessage.Sign(k.clientSecretKey); err != nil {
-		return nil, fmt.Errorf("could not sign payload: %s", err)
+		return nil, fmt.Errorf("%w: %s", ErrFailedToSign, err)
 	} else if err := k.addToPipelineMap(ksMessage); err != nil {
 		return nil, err
 	} else {
