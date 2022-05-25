@@ -111,9 +111,6 @@ func (d *OpaqueSsh) Start() error {
 		case <-time.After(maxKeyLifetime):
 			d.logger.Infof("SSH key expired, removing temporary key file")
 		}
-		if err := d.fileService.Remove(d.identityFile); err != nil {
-			d.logger.Errorf("failed to remove temporary key file: %s", err)
-		}
 	}()
 
 	d.tmb.Go(func() error {

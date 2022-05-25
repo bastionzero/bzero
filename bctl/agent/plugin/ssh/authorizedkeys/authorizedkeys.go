@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/services/lockservice"
 )
 
 var (
 	authorizedKeyFolder   = ".ssh"
 	authorizedKeyFileName = "authorized_keys"
-	maxKeyLifetime        = 30 * time.Second
 )
 
 const (
@@ -31,16 +31,20 @@ type AuthorizedKeysInterface interface {
 }
 
 type AuthorizedKeys struct {
-	logger   *logger.Logger
-	user     string
-	doneChan chan struct{}
+	logger      *logger.Logger
+	user        string
+	doneChan    chan struct{}
+	lockService lockservice.LockService
+	keyLifetime time.Duration
 }
 
-func New(logger *logger.Logger, user string, doneChan chan struct{}) *AuthorizedKeys {
+func New(logger *logger.Logger, user string, doneChan chan struct{}, lockService lockservice.LockService, keyLifetime time.Duration) *AuthorizedKeys {
 	return &AuthorizedKeys{
-		logger:   logger,
-		user:     user,
-		doneChan: doneChan,
+		logger:      logger,
+		user:        user,
+		doneChan:    doneChan,
+		lockService: lockService,
+		keyLifetime: keyLifetime,
 	}
 }
 
@@ -59,7 +63,7 @@ func (a *AuthorizedKeys) Add(pubkey string) error {
 			select {
 			case <-a.doneChan:
 				a.logger.Infof("Detected a closed done chan, cleaning authorized keys file")
-			case <-time.After(maxKeyLifetime):
+			case <-time.After(a.keyLifetime):
 				a.logger.Infof("SSH key expired, cleaning authorized keys file")
 			}
 
@@ -114,13 +118,20 @@ func (a *AuthorizedKeys) buildAuthorizedKey(pubkey string) (string, error) {
 }
 
 func (a *AuthorizedKeys) cleanAuthorizedKeys(filePath string, currentKey string) error {
-	fileLock := authorizedFileLock{
-		User: a.user,
+	// wait to acquire a lock on the authorized_keys file
+	lock, err := a.lockService.NewLock()
+	if err != nil {
+		return fmt.Errorf("failed to obtain lock: %s", err)
+	}
+	for {
+		if acquiredLock, err := lock.TryLock(); err != nil {
+			return fmt.Errorf("error acquiring lock: %s", err)
+		} else if acquiredLock {
+			break
+		}
 	}
 
-	// acquire a lock around the authorized keys file
-	fileLock.Get()
-	defer fileLock.Release()
+	defer lock.Unlock()
 
 	newFileBytes := []byte{}
 
@@ -142,12 +153,14 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(filePath string, currentKey string)
 			// parse our creation time
 			creationTimeString := strings.Split(strings.Split(key, "created_at=")[1], " ")[0]
 			if creationTimeInt, err := strconv.ParseInt(creationTimeString, 10, 64); err != nil {
+				// By returning here, we are opting not to overwrite the file at all.
+				// This potentially leaves it around for longer but mitigates the risk of accidentally erasing something important
 				return fmt.Errorf("malformated unix time")
 			} else {
 				unixCreationTime := time.Unix(0, creationTimeInt)
 
 				// if the key is expired, remove it
-				if time.Since(unixCreationTime) >= maxKeyLifetime {
+				if time.Since(unixCreationTime) >= a.keyLifetime {
 					continue
 				}
 			}
@@ -170,13 +183,20 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(filePath string, currentKey string)
 }
 
 func (a *AuthorizedKeys) addKeyToFile(filePath string, contents string) error {
-	fileLock := authorizedFileLock{
-		User: a.user,
+	// wait to acquire a lock on the authorized_keys file
+	lock, err := a.lockService.NewLock()
+	if err != nil {
+		return fmt.Errorf("failed to obtain lock: %s", err)
+	}
+	for {
+		if acquiredLock, err := lock.TryLock(); err != nil {
+			return fmt.Errorf("error acquiring lock: %s", err)
+		} else if acquiredLock {
+			break
+		}
 	}
 
-	// acquire a lock around the authorized keys file
-	fileLock.Get()
-	defer fileLock.Release()
+	defer lock.Unlock()
 
 	// if the file doesn't exist, create it, or append to the file
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)

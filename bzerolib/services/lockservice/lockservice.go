@@ -8,33 +8,36 @@ import (
 )
 
 // we need to implement a small client layer on top of flock to make sure we manage
-// the proper deletion of the lock file it creates
+// the proper deletion of the lock file it creates, and so that parent processes can
+// require that all of their children use the same underlying lock file
 type LockService interface {
-	TryLock() (bool, error)
-	Unlock() error
+	NewLock() (*flock.Flock, error)
+	Cleanup() error
 }
 
 type FlockLockService struct {
 	LockService
-	lock     *flock.Flock
 	lockFile string
 }
 
-func New(path string) *FlockLockService {
+// create a new FlockLockService using `path` as the underlying lockfile
+func NewLockService(path string) *FlockLockService {
 	return &FlockLockService{
-		lock:     flock.New(path),
 		lockFile: path,
 	}
 }
 
-func (f *FlockLockService) TryLock() (bool, error) {
-	return f.lock.TryLock()
+// get a new lock -- you can use its `TryLock` and `Unlock` methods to ensure threadsafe file operation
+func (f *FlockLockService) NewLock() (*flock.Flock, error) {
+	if f.lockFile == "" {
+		return nil, fmt.Errorf("You must use the NewLockService() constructor and set a file path first")
+	}
+	return flock.New(f.lockFile), nil
 }
 
-func (f *FlockLockService) Unlock() error {
-	if err := f.lock.Unlock(); err != nil {
-		return fmt.Errorf("Failed to release lock: %s", err)
-	} else if err := os.Remove(f.lockFile); err != nil {
+// you should always call `defer Cleanup()` on your LockService to ensure the underlying lockfile is removed
+func (f *FlockLockService) Cleanup() error {
+	if err := os.Remove(f.lockFile); err != nil {
 		return fmt.Errorf("Failed to remove lock file: %s", err)
 	}
 

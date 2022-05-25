@@ -4,14 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
+	"path"
 	"strings"
+	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/opaquessh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	"bastionzero.com/bctl/v1/bzerolib/services/lockservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
+
+const maxKeyLifetime = 30 * time.Second
 
 type ISshAction interface {
 	Receive(action string, actionPayload []byte) ([]byte, error)
@@ -65,7 +71,8 @@ func New(logger *logger.Logger,
 			}
 
 			subSubLogger := subLogger.GetComponentLogger("authorized_keys")
-			authKeyService := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan)
+			lockService := lockservice.NewLockService(path.Join(os.TempDir(), "ssh-lock.lock"))
+			authKeyService := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan, lockService, maxKeyLifetime)
 
 			plugin.action = opaquessh.New(
 				subLogger,

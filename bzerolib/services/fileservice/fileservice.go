@@ -10,7 +10,6 @@ import (
 type FileService interface {
 	ReadFile(name string) ([]byte, error)
 	WriteFile(name string, data []byte, perm fs.FileMode) error
-	Remove(name string) error
 }
 
 // the default implementation
@@ -22,8 +21,4 @@ func (f OsFileService) ReadFile(name string) ([]byte, error) {
 
 func (f OsFileService) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return os.WriteFile(name, data, perm)
-}
-
-func (f OsFileService) Remove(name string) error {
-	return os.Remove(name)
 }

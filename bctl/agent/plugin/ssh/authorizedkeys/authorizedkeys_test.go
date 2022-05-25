@@ -2,6 +2,7 @@ package authorizedkeys
 
 import (
 	"encoding/base64"
+	"io/ioutil"
 	"os"
 	"os/user"
 	"path"
@@ -13,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/services/lockservice"
 )
 
 func TestDefaultSsh(t *testing.T) {
@@ -20,13 +22,17 @@ func TestDefaultSsh(t *testing.T) {
 	RunSpecs(t, "Agent Authorized Keys Suite")
 }
 
-var _ = Describe("Agent Authorized Keys", func() {
-	authorizedKeyFolder = "temp"
+var _ = Describe("Agent Authorized Keys", Ordered, func() {
+	authorizedKeyFolder, _ = ioutil.TempDir("", "fake_ssh")
 	authorizedKeyFileName = "fake_authorized_keys"
 	logger := logger.MockLogger()
 	testUser, _ := user.Current()
 
 	authorizedKeysFile := path.Join(testUser.HomeDir, authorizedKeyFolder, authorizedKeyFileName)
+	os.OpenFile(authorizedKeysFile, os.O_RDONLY|os.O_CREATE, 0666)
+	lockFile := path.Join(testUser.HomeDir, authorizedKeyFolder, "test-lock.lock")
+	lockService := lockservice.NewLockService(lockFile)
+	defer lockService.Cleanup()
 
 	fakePubKey := "ssh-rsa " + base64.StdEncoding.EncodeToString([]byte("fake"))
 
@@ -37,8 +43,8 @@ var _ = Describe("Agent Authorized Keys", func() {
 	Context("Happy Path", func() {
 
 		doneChan := make(chan struct{})
-		maxKeyLifetime = 1 * time.Second
-		authKeyService := New(logger, testUser.Username, doneChan)
+
+		authKeyService := New(logger, testUser.Username, doneChan, lockService, time.Second)
 
 		It("adds keys to user's authorized_keys file and removes them after expiration", func() {
 
@@ -48,13 +54,13 @@ var _ = Describe("Agent Authorized Keys", func() {
 
 			fileBytes, err := os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
-			Expect(strings.Contains(string(fileBytes), fakePubKey)).To(BeTrue())
+			Expect(fileBytes).To(ContainSubstring(string(fakePubKey)))
 
 			By("removing the key after key lifetime")
-			time.Sleep(2 * time.Second)
+			time.Sleep(3 * time.Second)
 			fileBytes, err = os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
-			Expect(len(fileBytes) == 0).To(BeTrue())
+			Expect(len(fileBytes)).To(Equal(0))
 		})
 
 		It("adds keys to user's authorized_keys file and removes them on disconnect", func() {
@@ -65,7 +71,7 @@ var _ = Describe("Agent Authorized Keys", func() {
 
 			fileBytes, err := os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
-			Expect(strings.Contains(string(fileBytes), fakePubKey)).To(BeTrue())
+			Expect(fileBytes).To(ContainSubstring(string(fakePubKey)))
 
 			By("removing the key after disconnect")
 			close(doneChan)
@@ -73,7 +79,7 @@ var _ = Describe("Agent Authorized Keys", func() {
 
 			fileBytes, err = os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
-			Expect(len(fileBytes) == 0).To(BeTrue())
+			Expect(len(fileBytes)).To(Equal(0))
 		})
 	})
 
@@ -83,7 +89,6 @@ var _ = Describe("Agent Authorized Keys", func() {
 
 		It("allows for writing many keys at once", func() {
 			time.Sleep(time.Second)
-			maxKeyLifetime = 5 * time.Second
 
 			// If the file doesn't exist, create it, or append to the file
 			err := os.MkdirAll(path.Join(testUser.HomeDir, authorizedKeyFolder), os.ModePerm)
@@ -97,8 +102,9 @@ var _ = Describe("Agent Authorized Keys", func() {
 			file.Close()
 
 			By("adding a bunch of keys to the authorized_key file at once")
+
 			for i := 0; i < numKeys; i++ {
-				authKeyService := New(logger, testUser.Username, doneChan)
+				authKeyService := New(logger, testUser.Username, doneChan, lockService, 30*time.Second)
 				err := authKeyService.Add(fakePubKey)
 				Expect(err).To(BeNil())
 			}
@@ -108,19 +114,18 @@ var _ = Describe("Agent Authorized Keys", func() {
 			fileBytes, err := os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
 			lines := strings.Split(string(fileBytes), "\n")
-			Expect(len(lines) == numKeys+1).To(BeTrue())
+			Expect(len(lines)).To(Equal(numKeys + 1))
 
 			By("removing all of the keys")
 			close(doneChan)
-			time.Sleep(5 * time.Second)
+			time.Sleep(3 * time.Second)
 
 			fileBytes, err = os.ReadFile(authorizedKeysFile)
 			Expect(err).To(BeNil())
 			lines = strings.Split(string(fileBytes), "\n")
 
-			// our environment-based lock is not perfect and because of that some keys aren't deleted
-			// this is an acceptable situation within reason, here we allow 2 keys to fail clearing
-			Expect(len(lines) < 3).To(BeTrue())
+			// this should equal 2 -- 1 for the non-deleted key and 1 newline
+			Expect(len(lines)).To(Equal(2))
 
 			// make sure we are not wiping any existing keys
 			Expect(strings.Contains(string(fileBytes), testString)).To(BeTrue())
