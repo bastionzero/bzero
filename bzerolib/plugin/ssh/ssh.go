@@ -14,6 +14,7 @@ const (
 
 type SshActionParams struct {
 	TargetUser string `json:"targetUser"`
+	RemoteHost string `json:"remoteHost"`
 	RemotePort int    `json:"remotePort"`
 }
 

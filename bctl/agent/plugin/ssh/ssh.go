@@ -61,7 +61,7 @@ func New(logger *logger.Logger,
 		switch parsedAction {
 		case bzssh.OpaqueSsh:
 			// Open up a connection to the TCP addr we are trying to connect to
-			raddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("localhost:%d", synPayload.RemotePort))
+			raddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", synPayload.RemoteHost, synPayload.RemotePort))
 			if err != nil {
 				rerr = fmt.Errorf("failed to resolve remote address: %s", err)
 			}

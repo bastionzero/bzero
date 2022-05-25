@@ -35,7 +35,7 @@ var (
 	localhostToken, configPath         string
 	targetGroups                       []string
 
-	// Db and web specifc arguments
+	// Db, web, and ssh specifc arguments
 	remoteHost string
 
 	// Shell specific arguments
@@ -143,6 +143,7 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 
 	params["target_id"] = targetId
 	params["target_user"] = targetUser
+	params["remote_host"] = remoteHost
 	params["remote_port"] = fmt.Sprintf("%d", remotePort)
 
 	return sshserver.StartSshServer(
@@ -157,6 +158,7 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 		agentPubKey,
 		targetSelectHandler,
 		identityFile,
+		remoteHost,
 		remotePort,
 	)
 }
@@ -315,7 +317,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
-		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "remotePort")
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "remoteHost", "remotePort")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

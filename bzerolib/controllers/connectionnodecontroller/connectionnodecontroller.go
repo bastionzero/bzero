@@ -92,12 +92,13 @@ func (c *ConnectionNodeController) CreateShellConnection(connectionId string) (C
 	return c.createCnConnection(connectionId)
 }
 
-func (c *ConnectionNodeController) CreateSshConnection(targetId string, targetUser string, remotePort string) (ConnectionDetailsResponse, error) {
+func (c *ConnectionNodeController) CreateSshConnection(targetId string, targetUser string, remoteHost string, remotePort string) (ConnectionDetailsResponse, error) {
 	// Create our request
 	portInt, _ := strconv.Atoi(remotePort)
 	createSshConnectionRequest := CreateSshConnectionRequest{
 		TargetId:   targetId,
 		TargetUser: targetUser,
+		RemoteHost: remoteHost,
 		RemotePort: portInt,
 	}
 
