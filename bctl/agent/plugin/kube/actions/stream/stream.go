@@ -16,6 +16,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/plugin/kube/actions/stream"
 	kubeutils "bastionzero.com/bctl/v1/bzerolib/plugin/kube/utils"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"gopkg.in/tomb.v2"
 )
 
 // wrap the client-creation code so that during testing we can inject a mock client
@@ -26,6 +27,7 @@ var makeRequest = func(req *http.Request) (*http.Response, error) {
 
 type StreamAction struct {
 	logger *logger.Logger
+	tmb    tomb.Tomb
 
 	doneChan             chan struct{}
 	streamOutputChan     chan smsg.StreamMessage
@@ -57,7 +59,10 @@ func New(logger *logger.Logger,
 }
 
 func (s *StreamAction) Kill() {
-	close(s.doneChan)
+	if s.tmb.Alive() {
+		s.tmb.Kill(nil)
+		s.tmb.Wait()
+	}
 }
 
 func (s *StreamAction) Receive(action string, actionPayload []byte) ([]byte, error) {
@@ -82,7 +87,7 @@ func (s *StreamAction) Receive(action string, actionPayload []byte) ([]byte, err
 		}
 
 		s.logger.Info("Stopping Stream Action")
-		close(s.doneChan) // close the go routines
+		s.Kill()
 
 		return []byte{}, nil
 	default:
@@ -143,13 +148,21 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 
 	sequenceNumber := 1
 
-	go func() {
+	s.tmb.Go(func() error {
 		defer res.Body.Close()
+		defer close(s.doneChan)
+
+		// Subscribe to our own tomb so we can kill a blocking read
+		go func() {
+			<-s.tmb.Dying()
+			cancel()
+		}()
+
 		for {
 			// Read into the buffer
-			numBytes, err := br.Read(buf)
-
-			if err != nil {
+			if numBytes, err := br.Read(buf); !s.tmb.Alive() {
+				return nil
+			} else if err != nil {
 				switch err {
 				case context.Canceled:
 					s.logger.Info("Stream action stream closed")
@@ -182,26 +195,20 @@ func (s *StreamAction) startStream(streamActionRequest stream.KubeStreamActionPa
 				default:
 					s.sendStreamMessage(sequenceNumber, smsg.Stream, false, buf[:numBytes], streamActionRequest.LogId)
 				}
-				return
+				return err
+			} else {
+				// Stream the response back
+				switch s.streamMessageVersion {
+				// prior to 202204
+				case "":
+					s.sendStreamMessage(sequenceNumber, smsg.StreamData, true, buf[:numBytes], streamActionRequest.LogId)
+				default:
+					s.sendStreamMessage(sequenceNumber, smsg.Data, true, buf[:numBytes], streamActionRequest.LogId)
+				}
+				sequenceNumber += 1
 			}
-
-			// Stream the response back
-			switch s.streamMessageVersion {
-			// prior to 202204
-			case "":
-				s.sendStreamMessage(sequenceNumber, smsg.StreamData, true, buf[:numBytes], streamActionRequest.LogId)
-			default:
-				s.sendStreamMessage(sequenceNumber, smsg.Data, true, buf[:numBytes], streamActionRequest.LogId)
-			}
-			sequenceNumber += 1
 		}
-	}()
-
-	// Subscribe to our done channel
-	go func() {
-		<-s.doneChan
-		cancel()
-	}()
+	})
 
 	return []byte{}, nil
 }
