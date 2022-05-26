@@ -1,8 +1,6 @@
 package ssh
 
 import (
-	"net"
-
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -16,11 +14,6 @@ type SshActionParams struct {
 	TargetUser string `json:"targetUser"`
 	RemoteHost string `json:"remoteHost"`
 	RemotePort int    `json:"remotePort"`
-}
-
-type SshFood struct {
-	Action SshAction
-	Conn   *net.TCPConn
 }
 
 type SshOpenMessage struct {
