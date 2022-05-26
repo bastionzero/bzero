@@ -15,6 +15,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/filelock"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -41,6 +42,10 @@ func New(logger *logger.Logger, username string, doneChan chan struct{}, authKey
 		return nil, fmt.Errorf("failed to determine whether user exists: %s", err)
 	} else if usr.HomeDir == "" {
 		return nil, fmt.Errorf("cannot connect as user without home directories")
+	} else if ok, err := checkDirPermissions(usr.HomeDir, username); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("user %s does not have permission to edit dir: %s", username, usr.HomeDir)
 	} else if keyFilePath, err := buildKeyFilePath(usr.HomeDir, authKeyFolder); err != nil {
 		return nil, err
 	} else if fileLock, err := createFileLock(usr.HomeDir, lockFileFolder); err != nil {
@@ -235,4 +240,46 @@ func createFileLock(homeDir string, lockFileFolder string) (*filelock.FileLock, 
 	} else {
 		return filelock.NewLockService(filepath.Join(homeDir, lockFileFolder, lockFileName)), nil
 	}
+}
+
+func checkDirPermissions(path string, userName string) (bool, error) {
+	if info, err := os.Stat(path); err != nil {
+		return false, fmt.Errorf("path does not exist")
+	} else if !info.IsDir() {
+		return false, fmt.Errorf("path isn't a directory")
+	} else if info.Mode().Perm()&(1<<(uint(7))) == 0 {
+		// Check if the user bit is enabled in file permission
+		return false, fmt.Errorf("write permission bit is not set on this directory for user")
+	}
+
+	var stat unix.Stat_t
+	if err := unix.Stat(path, &stat); err != nil {
+		return false, fmt.Errorf("unable to get stat")
+	}
+
+	user, err := user.Lookup(userName)
+	if err != nil {
+		return false, fmt.Errorf("failed to lookup user: %s", err)
+	}
+
+	if uid, err := strconv.Atoi(user.Uid); err != nil {
+		return false, fmt.Errorf("failed to convert user string GID to int: %s", err)
+	} else if uint32(uid) == stat.Uid { // if file owner is user
+		return true, nil
+	}
+
+	// check to see if file belongs to any group that the user is in
+	if gids, err := user.GroupIds(); err != nil {
+		return false, fmt.Errorf("failed to get user groups: %s", err)
+	} else {
+		for _, gid := range gids {
+			if gidInt, err := strconv.Atoi(gid); err != nil {
+				return false, fmt.Errorf("failed to convert user string GID to int: %s", err)
+			} else if uint32(gidInt) == stat.Gid {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }
