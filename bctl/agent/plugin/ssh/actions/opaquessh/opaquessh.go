@@ -10,7 +10,6 @@ import (
 
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -20,6 +19,10 @@ const (
 	chunkSize     = 64 * 1024
 	writeDeadline = 5 * time.Second
 )
+
+type AuthorizedKeysInterface interface {
+	Add(pubkey string) error
+}
 
 type OpaqueSsh struct {
 	tmb    tomb.Tomb
@@ -34,7 +37,7 @@ type OpaqueSsh struct {
 	streamMessageVersion smsg.SchemaVersion
 
 	remoteConnection *net.TCPConn
-	authorizedKeys   authorizedkeys.AuthorizedKeysInterface
+	authorizedKeys   AuthorizedKeysInterface
 }
 
 func New(
@@ -42,7 +45,7 @@ func New(
 	doneChan chan struct{},
 	ch chan smsg.StreamMessage,
 	conn *net.TCPConn,
-	authKeys authorizedkeys.AuthorizedKeysInterface,
+	authKeys AuthorizedKeysInterface,
 ) *OpaqueSsh {
 
 	return &OpaqueSsh{
