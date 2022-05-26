@@ -9,13 +9,12 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
+	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
-	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 )
@@ -114,7 +113,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
 
-	plugin := ssh.New(pluginLogger, s.identityFile, fileservice.OsFileService{}, ioservice.StdIoService{})
+	plugin := ssh.New(pluginLogger, s.identityFile, bzio.OsFileIo{}, bzio.StdIo{})
 	if err := plugin.StartAction(); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)
 	}

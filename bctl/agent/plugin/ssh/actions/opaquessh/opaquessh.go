@@ -42,7 +42,7 @@ func New(
 	doneChan chan struct{},
 	ch chan smsg.StreamMessage,
 	conn *net.TCPConn,
-	authKeyService authorizedkeys.AuthorizedKeysInterface,
+	authKeys authorizedkeys.AuthorizedKeysInterface,
 ) *OpaqueSsh {
 
 	return &OpaqueSsh{
@@ -50,7 +50,7 @@ func New(
 		doneChan:         doneChan,
 		streamOutputChan: ch,
 		remoteConnection: conn,
-		authorizedKeys:   authKeyService,
+		authorizedKeys:   authKeys,
 	}
 }
 

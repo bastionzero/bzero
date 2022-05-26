@@ -9,11 +9,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
-	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
-	"bastionzero.com/bctl/v1/bzerolib/services/ioservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
 )
@@ -34,11 +33,11 @@ var _ = Describe("Daemon DefaultSsh action", func() {
 		doneChan := make(chan struct{})
 		outboxQueue := make(chan plugin.ActionWrapper, 1)
 
-		mockFileService := fileservice.MockFileService{}
+		mockFileService := bzio.MockBzFileIo{}
 		// provide the action this demo (valid) private key
 		mockFileService.On("ReadFile", identityFile).Return([]byte(tests.DemoPem), nil)
 
-		mockIoService := ioservice.MockIoService{TestData: testData}
+		mockIoService := bzio.MockBzIo{TestData: testData}
 		mockIoService.On("Read").Return(len(testData), nil)
 		mockIoService.On("Write", []byte(testOutput)).Return(len(testOutput), nil).Times(2)
 
@@ -96,13 +95,13 @@ var _ = Describe("Daemon DefaultSsh action", func() {
 		doneChan := make(chan struct{})
 		outboxQueue := make(chan plugin.ActionWrapper, 1)
 
-		mockFileService := fileservice.MockFileService{}
+		mockFileService := bzio.MockBzFileIo{}
 		// provide the action an invalid private key -- this will force it to generate a new one
 		mockFileService.On("ReadFile", identityFile).Return([]byte("invalid key"), nil)
 		// ...which we expect to be written out
 		mockFileService.On("WriteFile", identityFile).Return(nil)
 
-		mockIoService := ioservice.MockIoService{TestData: testData}
+		mockIoService := bzio.MockBzIo{TestData: testData}
 		mockIoService.On("Read").Return(0, io.EOF)
 
 		s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService)

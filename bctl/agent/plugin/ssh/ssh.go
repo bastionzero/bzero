@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -13,11 +11,17 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
-	"bastionzero.com/bctl/v1/bzerolib/services/lockservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
-const maxKeyLifetime = 30 * time.Second
+const (
+	sshFolder      = ".ssh"
+	maxKeyLifetime = 30 * time.Second
+)
+
+type AuthorizedKeysInterface interface {
+	Add(pubkey string) error
+}
 
 type ISshAction interface {
 	Receive(action string, actionPayload []byte) ([]byte, error)
@@ -71,15 +75,17 @@ func New(logger *logger.Logger,
 			}
 
 			subSubLogger := subLogger.GetComponentLogger("authorized_keys")
-			lockService := lockservice.NewLockService(path.Join(os.TempDir(), "ssh-lock.lock"))
-			authKeyService := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan, lockService, maxKeyLifetime)
+			authKeys, err := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan, sshFolder, sshFolder, maxKeyLifetime)
+			if err != nil {
+				rerr = fmt.Errorf("failed to set up authorized_keys file: %s", err)
+			}
 
 			plugin.action = opaquessh.New(
 				subLogger,
 				plugin.doneChan,
 				plugin.streamOutputChan,
 				remoteConnection,
-				authKeyService,
+				authKeys,
 			)
 
 		default:

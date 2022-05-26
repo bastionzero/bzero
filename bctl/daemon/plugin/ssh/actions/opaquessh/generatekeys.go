@@ -9,7 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
-	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
+	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -91,8 +91,8 @@ func generatePublicKey(publicKey *rsa.PublicKey) ([]byte, error) {
 
 // takes a private key path and returns a public key struct
 // returns an error if the key cannot be read or is invalid
-func readPublicKeyRsa(privateKeyPath string, fileService fileservice.FileService) (*rsa.PublicKey, error) {
-	if privatePem, err := fileService.ReadFile(privateKeyPath); err != nil {
+func readPublicKeyRsa(privateKeyPath string, fileIo bzio.BzFileIo) (*rsa.PublicKey, error) {
+	if privatePem, err := fileIo.ReadFile(privateKeyPath); err != nil {
 		return nil, err
 	} else if privateKey, err := decodePemToPrivateKey(privatePem); err != nil {
 		return nil, err

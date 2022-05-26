@@ -9,10 +9,10 @@ import (
 
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
-	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -35,8 +35,8 @@ type OpaqueSsh struct {
 
 	identityFile string
 
-	fileService fileservice.FileService
-	ioService   io.ReadWriter
+	filIo bzio.BzFileIo
+	stdIo io.ReadWriter
 }
 
 func New(
@@ -44,8 +44,8 @@ func New(
 	outboxQueue chan plugin.ActionWrapper,
 	doneChan chan struct{},
 	identityFile string,
-	fileService fileservice.FileService,
-	ioService io.ReadWriter,
+	filIo bzio.BzFileIo,
+	stdIo io.ReadWriter,
 ) *OpaqueSsh {
 
 	return &OpaqueSsh{
@@ -54,8 +54,8 @@ func New(
 		doneChan:     doneChan,
 		stdInChan:    make(chan []byte, InputBufferSize),
 		identityFile: identityFile,
-		fileService:  fileService,
-		ioService:    ioService,
+		filIo:        filIo,
+		stdIo:        stdIo,
 	}
 }
 
@@ -75,7 +75,7 @@ func (d *OpaqueSsh) Start() error {
 	// NOTE: it is technically possible for this to create a one-time race if two SSH processes
 	// are kicked off *and* the user just logged in. However this is unlikely and can be resolved
 	// if/when we upgrade the SSH architecture
-	if publicKeyRsa, err := readPublicKeyRsa(d.identityFile, d.fileService); err == nil {
+	if publicKeyRsa, err := readPublicKeyRsa(d.identityFile, d.filIo); err == nil {
 		if publicKey, err = generatePublicKey(publicKeyRsa); err != nil {
 			return fmt.Errorf("error decoding temporary public key: %s", err)
 		} else {
@@ -86,7 +86,7 @@ func (d *OpaqueSsh) Start() error {
 		privateKey, publicKey, err = GenerateKeys()
 		if err != nil {
 			return fmt.Errorf("error generating temporary keys: %s", err)
-		} else if err := d.fileService.WriteFile(d.identityFile, privateKey, 0600); err != nil {
+		} else if err := d.filIo.WriteFile(d.identityFile, privateKey, 0600); err != nil {
 			return fmt.Errorf("error writing temporary private key: %s", err)
 		}
 	}
@@ -121,7 +121,7 @@ func (d *OpaqueSsh) Start() error {
 			case <-d.tmb.Dying():
 				return nil
 			default:
-				if n, err := d.ioService.Read(b); !d.tmb.Alive() {
+				if n, err := d.stdIo.Read(b); !d.tmb.Alive() {
 					return nil
 				} else if err != nil {
 					if err == io.EOF {
@@ -147,7 +147,7 @@ func (d *OpaqueSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 		} else {
-			if _, err = d.ioService.Write(contentBytes); err != nil {
+			if _, err = d.stdIo.Write(contentBytes); err != nil {
 				d.logger.Errorf("Error writing to Stdout: %s", err)
 			}
 			if !smessage.More {

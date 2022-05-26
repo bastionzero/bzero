@@ -5,10 +5,10 @@ import (
 	"io"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/opaquessh"
+	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
-	"bastionzero.com/bctl/v1/bzerolib/services/fileservice"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -26,19 +26,19 @@ type SshDaemonPlugin struct {
 	killed       bool
 	action       ISshAction
 	identityFile string
-	fileService  fileservice.FileService
-	ioService    io.ReadWriter
+	filIo        bzio.BzFileIo
+	stdIo        io.ReadWriter
 }
 
-func New(logger *logger.Logger, identityFile string, fileService fileservice.FileService, ioService io.ReadWriter) *SshDaemonPlugin {
+func New(logger *logger.Logger, identityFile string, filIo bzio.BzFileIo, stdIo io.ReadWriter) *SshDaemonPlugin {
 	return &SshDaemonPlugin{
 		logger:       logger,
 		outboxQueue:  make(chan bzplugin.ActionWrapper, 10),
 		doneChan:     make(chan struct{}),
 		killed:       false,
 		identityFile: identityFile,
-		fileService:  fileService,
-		ioService:    ioService,
+		filIo:        filIo,
+		stdIo:        stdIo,
 	}
 }
 
@@ -49,7 +49,7 @@ func (s *SshDaemonPlugin) StartAction() error {
 
 	// Create the OpaqueSsh action
 	actLogger := s.logger.GetActionLogger(string(bzssh.OpaqueSsh))
-	s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.fileService, s.ioService)
+	s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
 
 	// Start the ssh action
 	if err := s.action.Start(); err != nil {

@@ -13,17 +13,14 @@ import (
 	"strings"
 	"time"
 
+	"bastionzero.com/bctl/v1/bzerolib/filelock"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/services/lockservice"
-)
-
-var (
-	authorizedKeyFolder   = ".ssh"
-	authorizedKeyFileName = "authorized_keys"
 )
 
 const (
-	authorizedKeyComment = "bzero-temp-key"
+	authorizedKeyComment  = "bzero-temp-key"
+	lockFileName          = "bz-lock.lock"
+	authorizedKeyFileName = "authorized_keys"
 )
 
 type AuthorizedKeysInterface interface {
@@ -31,20 +28,35 @@ type AuthorizedKeysInterface interface {
 }
 
 type AuthorizedKeys struct {
-	logger      *logger.Logger
-	user        string
-	doneChan    chan struct{}
-	lockService lockservice.LockService
+	logger   *logger.Logger
+	doneChan chan struct{}
+
 	keyLifetime time.Duration
+
+	keyFilePath string
+	fileLock    *filelock.FileLock
 }
 
-func New(logger *logger.Logger, user string, doneChan chan struct{}, lockService lockservice.LockService, keyLifetime time.Duration) *AuthorizedKeys {
-	return &AuthorizedKeys{
-		logger:      logger,
-		user:        user,
-		doneChan:    doneChan,
-		lockService: lockService,
-		keyLifetime: keyLifetime,
+func New(logger *logger.Logger, username string, doneChan chan struct{}, authKeyFolder string, lockFileFolder string, keyLifetime time.Duration) (*AuthorizedKeys, error) {
+
+	if err := validateUsername(username); err != nil {
+		return nil, err
+	} else if usr, err := user.Lookup(username); err != nil {
+		return nil, fmt.Errorf("failed to determine whether user exists: %s", err)
+	} else if usr.HomeDir == "" {
+		return nil, fmt.Errorf("cannot connect as user without home directories")
+	} else if keyFilePath, err := buildKeyFilePath(usr.HomeDir, authKeyFolder); err != nil {
+		return nil, err
+	} else if fileLock, err := createFileLock(usr.HomeDir, lockFileFolder); err != nil {
+		return nil, err
+	} else {
+		return &AuthorizedKeys{
+			logger:      logger,
+			doneChan:    doneChan,
+			fileLock:    fileLock,
+			keyLifetime: keyLifetime,
+			keyFilePath: keyFilePath,
+		}, nil
 	}
 }
 
@@ -52,9 +64,7 @@ func (a *AuthorizedKeys) Add(pubkey string) error {
 	// build authorized key entry in the right format then add it to the file
 	if entry, err := a.buildAuthorizedKey(pubkey); err != nil {
 		return err
-	} else if filePath, err := a.buildFilePath(); err != nil {
-		return err
-	} else if err := a.addKeyToFile(filePath, entry); err != nil {
+	} else if err := a.addKeyToFile(entry); err != nil {
 		return fmt.Errorf("failed to add key to authorized_keys file: %s", err)
 	} else {
 
@@ -67,33 +77,17 @@ func (a *AuthorizedKeys) Add(pubkey string) error {
 				a.logger.Infof("SSH key expired, cleaning authorized keys file")
 			}
 
-			if err := a.cleanAuthorizedKeys(filePath, entry); err != nil {
-				a.logger.Errorf("Failed to remove old keys from %s's authorized_keys file: %s", a.user, err)
+			if err := a.cleanAuthorizedKeys(entry); err != nil {
+				a.logger.Errorf("Failed to remove old keys from %s: %s", a.keyFilePath, err)
 			}
+
+			// when our parent is done, clean up our file lock
+			<-a.doneChan
+			a.fileLock.Cleanup()
 		}()
 	}
 
 	return nil
-}
-
-func (a *AuthorizedKeys) buildFilePath() (string, error) {
-	// test that the provided username is valid unix user name
-	// source: https://unix.stackexchange.com/a/435120
-	usernamePattern := "^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\\$)$"
-	var usernameMatch, _ = regexp.MatchString(usernamePattern, a.user)
-	if !usernameMatch {
-		return "", fmt.Errorf("invalid username provided: %s", a.user)
-	}
-
-	if usr, err := user.Lookup(a.user); err != nil {
-		return "", fmt.Errorf("failed to determine whether user exists: %s", err)
-	} else if usr.HomeDir == "" {
-		return "", fmt.Errorf("cannot connect as user without home directories")
-	} else if err := os.MkdirAll(filepath.Join(usr.HomeDir, authorizedKeyFolder), os.ModePerm); err != nil {
-		return "", fmt.Errorf("failed to create %s/%s/: %s", usr.HomeDir, authorizedKeyFolder, err)
-	} else {
-		return filepath.Join(usr.HomeDir, authorizedKeyFolder, authorizedKeyFileName), nil
-	}
 }
 
 func (a *AuthorizedKeys) buildAuthorizedKey(pubkey string) (string, error) {
@@ -117,9 +111,46 @@ func (a *AuthorizedKeys) buildAuthorizedKey(pubkey string) (string, error) {
 	return key, nil
 }
 
-func (a *AuthorizedKeys) cleanAuthorizedKeys(filePath string, currentKey string) error {
+func (a *AuthorizedKeys) addKeyToFile(contents string) error {
 	// wait to acquire a lock on the authorized_keys file
-	lock, err := a.lockService.NewLock()
+	lock, err := a.fileLock.NewLock()
+	if err != nil {
+		return fmt.Errorf("failed to obtain lock: %s", err)
+	}
+	for {
+		if acquiredLock, err := lock.TryLock(); err != nil {
+			return fmt.Errorf("error acquiring lock: %s", err)
+		} else if acquiredLock {
+			break
+		}
+	}
+
+	defer lock.Unlock()
+
+	// if the file doesn't exist, create it, or append to the file
+	file, err := os.OpenFile(a.keyFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// make sure we're always writing our keys to new lines
+	if fileBytes, err := os.ReadFile(a.keyFilePath); err != nil {
+		return err
+	} else if len(fileBytes) > 0 && !strings.HasSuffix(string(fileBytes), "\n") {
+		contents = "\n" + contents
+	}
+
+	if _, err := file.WriteString(contents); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *AuthorizedKeys) cleanAuthorizedKeys(currentKey string) error {
+	// wait to acquire a lock on the authorized_keys file
+	lock, err := a.fileLock.NewLock()
 	if err != nil {
 		return fmt.Errorf("failed to obtain lock: %s", err)
 	}
@@ -136,9 +167,9 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(filePath string, currentKey string)
 	newFileBytes := []byte{}
 
 	// read the authorized key file
-	fileBytes, err := os.ReadFile(filePath)
+	fileBytes, err := os.ReadFile(a.keyFilePath)
 	if err != nil {
-		return fmt.Errorf("failed to read from authorized_keys file \"%s\": %s", filePath, err)
+		return fmt.Errorf("failed to read from authorized_keys file \"%s\": %s", a.keyFilePath, err)
 	}
 
 	// iterate over the lines in our file, each line presents a new authorized_key entry
@@ -149,7 +180,7 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(filePath string, currentKey string)
 		// remove it if it's our current key, even if it's unexpired
 		if key == currentKey {
 			continue
-		} else if strings.Contains(key, "created_at=") {
+		} else if strings.Contains(key, authorizedKeyComment) && strings.Contains(key, "created_at=") {
 			// parse our creation time
 			creationTimeString := strings.Split(strings.Split(key, "created_at=")[1], " ")[0]
 			if creationTimeInt, err := strconv.ParseInt(creationTimeString, 10, 64); err != nil {
@@ -176,45 +207,36 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(filePath string, currentKey string)
 	}
 
 	// write our new file
-	if err := os.WriteFile(filePath, newFileBytes, 0666); err != nil {
+	if err := os.WriteFile(a.keyFilePath, newFileBytes, 0666); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *AuthorizedKeys) addKeyToFile(filePath string, contents string) error {
-	// wait to acquire a lock on the authorized_keys file
-	lock, err := a.lockService.NewLock()
-	if err != nil {
-		return fmt.Errorf("failed to obtain lock: %s", err)
+// test that the provided username is valid unix user name
+// source: https://unix.stackexchange.com/a/435120
+func validateUsername(username string) error {
+	usernamePattern := "^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\\$)$"
+	var usernameMatch, _ = regexp.MatchString(usernamePattern, username)
+	if !usernameMatch {
+		return fmt.Errorf("invalid username provided: %s", username)
 	}
-	for {
-		if acquiredLock, err := lock.TryLock(); err != nil {
-			return fmt.Errorf("error acquiring lock: %s", err)
-		} else if acquiredLock {
-			break
-		}
-	}
-
-	defer lock.Unlock()
-
-	// if the file doesn't exist, create it, or append to the file
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	// make sure we're always writing our keys to new lines
-	if fileBytes, err := os.ReadFile(filePath); err != nil {
-		return err
-	} else if len(fileBytes) > 0 && !strings.HasSuffix(string(fileBytes), "\n") {
-		contents = "\n" + contents
-	}
-
-	if _, err := file.WriteString(contents); err != nil {
-		return err
-	}
-
 	return nil
+}
+
+// validate that the user has a home directory, drop down to their permissions, and create authorized_keys if not exists
+func buildKeyFilePath(homeDir string, keyFolder string) (string, error) {
+	if err := os.MkdirAll(filepath.Join(homeDir, keyFolder), os.ModePerm); err != nil {
+		return "", fmt.Errorf("failed to create %s/%s/: %s", homeDir, keyFolder, err)
+	} else {
+		return filepath.Join(homeDir, keyFolder, authorizedKeyFileName), nil
+	}
+}
+
+func createFileLock(homeDir string, lockFileFolder string) (*filelock.FileLock, error) {
+	if err := os.MkdirAll(filepath.Join(homeDir, lockFileFolder), os.ModePerm); err != nil {
+		return nil, fmt.Errorf("failed to create %s/%s/: %s", homeDir, lockFileFolder, err)
+	} else {
+		return filelock.NewLockService(filepath.Join(homeDir, lockFileFolder, lockFileName)), nil
+	}
 }

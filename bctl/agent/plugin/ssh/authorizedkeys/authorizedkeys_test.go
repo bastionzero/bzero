@@ -2,7 +2,6 @@ package authorizedkeys
 
 import (
 	"encoding/base64"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path"
@@ -14,7 +13,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/services/lockservice"
 )
 
 func TestDefaultSsh(t *testing.T) {
@@ -23,16 +21,12 @@ func TestDefaultSsh(t *testing.T) {
 }
 
 var _ = Describe("Agent Authorized Keys", func() {
-	authorizedKeyFolder, _ = ioutil.TempDir("", "fake_ssh")
-	authorizedKeyFileName = "fake_authorized_keys"
+	authorizedKeyFolder := "fake_ssh"
 	logger := logger.MockLogger()
 	testUser, _ := user.Current()
 
 	authorizedKeysFile := path.Join(testUser.HomeDir, authorizedKeyFolder, authorizedKeyFileName)
 	os.OpenFile(authorizedKeysFile, os.O_RDONLY|os.O_CREATE, 0666)
-	lockFile := path.Join(testUser.HomeDir, authorizedKeyFolder, "test-lock.lock")
-	lockService := lockservice.NewLockService(lockFile)
-	defer lockService.Cleanup()
 
 	fakePubKey := "ssh-rsa " + base64.StdEncoding.EncodeToString([]byte("fake"))
 
@@ -44,9 +38,8 @@ var _ = Describe("Agent Authorized Keys", func() {
 
 		doneChan := make(chan struct{})
 
-		authKeyService := New(logger, testUser.Username, doneChan, lockService, time.Second)
-
 		It("adds keys to user's authorized_keys file and removes them after expiration", func() {
+			authKeyService, _ := New(logger, testUser.Username, doneChan, authorizedKeyFolder, authorizedKeyFolder, time.Second)
 
 			By("adding a key to the authorized_keys file without error")
 			err := authKeyService.Add(fakePubKey)
@@ -64,6 +57,7 @@ var _ = Describe("Agent Authorized Keys", func() {
 		})
 
 		It("adds keys to user's authorized_keys file and removes them on disconnect", func() {
+			authKeyService, _ := New(logger, testUser.Username, doneChan, authorizedKeyFolder, authorizedKeyFolder, time.Second)
 
 			By("adding a key to the authorized_keys file without error")
 			err := authKeyService.Add(fakePubKey)
@@ -105,8 +99,9 @@ var _ = Describe("Agent Authorized Keys", func() {
 
 			for i := 0; i < numKeys; i++ {
 				go func() {
-					authKeyService := New(logger, testUser.Username, doneChan, lockService, 30*time.Second)
-					err := authKeyService.Add(fakePubKey)
+					authKeyService, err := New(logger, testUser.Username, doneChan, authorizedKeyFolder, authorizedKeyFolder, time.Second)
+					Expect(err).To(BeNil())
+					err = authKeyService.Add(fakePubKey)
 					Expect(err).To(BeNil())
 				}()
 			}
