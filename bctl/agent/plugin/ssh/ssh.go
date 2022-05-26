@@ -19,10 +19,6 @@ const (
 	maxKeyLifetime = 30 * time.Second
 )
 
-type AuthorizedKeysInterface interface {
-	Add(pubkey string) error
-}
-
 type ISshAction interface {
 	Receive(action string, actionPayload []byte) ([]byte, error)
 	Kill()
