@@ -16,7 +16,6 @@ type LockService interface {
 }
 
 type FlockLockService struct {
-	LockService
 	lockFile string
 }
 
@@ -30,7 +29,7 @@ func NewLockService(path string) *FlockLockService {
 // get a new lock -- you can use its `TryLock` and `Unlock` methods to ensure threadsafe file operation
 func (f *FlockLockService) NewLock() (*flock.Flock, error) {
 	if f.lockFile == "" {
-		return nil, fmt.Errorf("You must use the NewLockService() constructor and set a file path first")
+		return nil, fmt.Errorf("you must use the NewLockService() constructor and set a file path first")
 	}
 	return flock.New(f.lockFile), nil
 }
@@ -38,7 +37,7 @@ func (f *FlockLockService) NewLock() (*flock.Flock, error) {
 // you should always call `defer Cleanup()` on your LockService to ensure the underlying lockfile is removed
 func (f *FlockLockService) Cleanup() error {
 	if err := os.Remove(f.lockFile); err != nil {
-		return fmt.Errorf("Failed to remove lock file: %s", err)
+		return fmt.Errorf("failed to remove lock file: %s", err)
 	}
 
 	return nil

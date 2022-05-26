@@ -6,7 +6,6 @@ import (
 
 // mocked version of the IoService
 type MockIoService struct {
-	IoService
 	mock.Mock
 	TestData string
 }

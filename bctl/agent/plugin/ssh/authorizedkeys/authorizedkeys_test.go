@@ -22,7 +22,7 @@ func TestDefaultSsh(t *testing.T) {
 	RunSpecs(t, "Agent Authorized Keys Suite")
 }
 
-var _ = Describe("Agent Authorized Keys", Ordered, func() {
+var _ = Describe("Agent Authorized Keys", func() {
 	authorizedKeyFolder, _ = ioutil.TempDir("", "fake_ssh")
 	authorizedKeyFileName = "fake_authorized_keys"
 	logger := logger.MockLogger()
@@ -104,9 +104,11 @@ var _ = Describe("Agent Authorized Keys", Ordered, func() {
 			By("adding a bunch of keys to the authorized_key file at once")
 
 			for i := 0; i < numKeys; i++ {
-				authKeyService := New(logger, testUser.Username, doneChan, lockService, 30*time.Second)
-				err := authKeyService.Add(fakePubKey)
-				Expect(err).To(BeNil())
+				go func() {
+					authKeyService := New(logger, testUser.Username, doneChan, lockService, 30*time.Second)
+					err := authKeyService.Add(fakePubKey)
+					Expect(err).To(BeNil())
+				}()
 			}
 
 			// wait for any stragglers to write

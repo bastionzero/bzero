@@ -8,7 +8,6 @@ import (
 
 // mocked version of the FileService
 type MockFileService struct {
-	FileService
 	mock.Mock
 }
 

@@ -163,30 +163,6 @@ func (d *OpaqueSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	}
 }
 
-// NOTE: this function is from a time when we were debouncing stdin; we may yet need to do so; don't delete this just yet
-// processes input channel by debouncing all keypresses within a time interval
-// func (d *OpaqueSsh) sendStdIn() {
-// 	inputBuf := []byte{}
-
-// 	for {
-// 		select {
-// 		case <-d.tmb.Dying():
-// 			return
-// 		case b := <-d.stdInChan:
-// 			inputBuf = append(inputBuf, b...)
-// 			if len(inputBuf) >= InputBufferSize {
-// 				d.sendSshInputMessage(inputBuf)
-// 				inputBuf = inputBuf[:0]
-// 			}
-// 		case <-time.After(InputDebounceTime):
-// 			if len(inputBuf) >= 1 {
-// 				d.sendSshInputMessage(inputBuf)
-// 				inputBuf = inputBuf[:0]
-// 			}
-// 		}
-// 	}
-// }
-
 func (d *OpaqueSsh) sendSshInputMessage(bs []byte) {
 	// Send all accumulated input in an sshInput data message
 	sshInputDataMessage := ssh.SshInputMessage{
