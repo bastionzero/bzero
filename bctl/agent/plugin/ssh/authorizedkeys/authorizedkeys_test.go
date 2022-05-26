@@ -2,6 +2,7 @@ package authorizedkeys
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"os/user"
 	"path"
@@ -20,7 +21,7 @@ func TestDefaultSsh(t *testing.T) {
 	RunSpecs(t, "Agent Authorized Keys Suite")
 }
 
-var _ = Describe("Agent Authorized Keys", func() {
+var _ = Describe("Agent Authorized Keys", Ordered, func() {
 	authorizedKeyFolder := "fake_ssh"
 	logger := logger.MockLogger()
 	testUser, _ := user.Current()
@@ -99,7 +100,7 @@ var _ = Describe("Agent Authorized Keys", func() {
 
 			for i := 0; i < numKeys; i++ {
 				go func() {
-					authKeyService, err := New(logger, testUser.Username, doneChan, authorizedKeyFolder, authorizedKeyFolder, time.Second)
+					authKeyService, err := New(logger, testUser.Username, doneChan, authorizedKeyFolder, authorizedKeyFolder, 30*time.Second)
 					Expect(err).To(BeNil())
 					err = authKeyService.Add(fakePubKey)
 					Expect(err).To(BeNil())
@@ -113,11 +114,12 @@ var _ = Describe("Agent Authorized Keys", func() {
 			lines := strings.Split(string(fileBytes), "\n")
 			Expect(len(lines)).To(Equal(numKeys + 1))
 
-			By("removing all of the keys")
+			By("removing all of the keys by closing")
 			close(doneChan)
-			time.Sleep(3 * time.Second)
+			time.Sleep(5 * time.Second)
 
 			fileBytes, err = os.ReadFile(authorizedKeysFile)
+			fmt.Println(fileBytes)
 			Expect(err).To(BeNil())
 			lines = strings.Split(string(fileBytes), "\n")
 

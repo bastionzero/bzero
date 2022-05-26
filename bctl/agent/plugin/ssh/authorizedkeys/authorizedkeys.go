@@ -83,8 +83,9 @@ func (a *AuthorizedKeys) Add(pubkey string) error {
 			}
 
 			// when our parent is done, clean up our file lock
-			<-a.doneChan
-			a.fileLock.Cleanup()
+			// FIXME: but the problem now is that the lock file vanishes
+			//<-a.doneChan
+			//a.fileLock.Cleanup()
 		}()
 	}
 
