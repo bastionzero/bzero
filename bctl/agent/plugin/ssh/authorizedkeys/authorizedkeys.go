@@ -81,11 +81,6 @@ func (a *AuthorizedKeys) Add(pubkey string) error {
 			if err := a.cleanAuthorizedKeys(entry); err != nil {
 				a.logger.Errorf("Failed to remove old keys from %s: %s", a.keyFilePath, err)
 			}
-
-			// when our parent is done, clean up our file lock
-			// FIXME: but the problem now is that the lock file vanishes
-			//<-a.doneChan
-			//a.fileLock.Cleanup()
 		}()
 	}
 
