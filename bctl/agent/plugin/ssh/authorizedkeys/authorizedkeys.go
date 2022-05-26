@@ -23,10 +23,6 @@ const (
 	authorizedKeyFileName = "authorized_keys"
 )
 
-type AuthorizedKeysInterface interface {
-	Add(pubkey string) error
-}
-
 type AuthorizedKeys struct {
 	logger   *logger.Logger
 	doneChan chan struct{}
