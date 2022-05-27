@@ -18,7 +18,7 @@ import (
 
 const (
 	// amount of time we're willing to wait for our first keysplitting message
-	handshakeTimeout = 20 * time.Second
+	handshakeTimeout = time.Minute // TODO: Decrease
 
 	// maximum amount of time we want to keep this datachannel alive after
 	// neither receiving nor sending anything
