@@ -133,8 +133,7 @@ func setupLogger() (*logger.Logger, error) {
 	}
 
 	// setup our loggers
-	writeToConsole := true
-	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile, writeToConsole); err != nil {
+	if logger, err := logger.NewWithStdOutConsoleWriter(logger.DefaultLoggerConfig(logLevel), logFile); err != nil {
 		return nil, err
 	} else {
 		logger.AddAgentVersion(getAgentVersion())

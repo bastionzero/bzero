@@ -59,14 +59,22 @@ func main() {
 		writeToConsole = false
 	}
 
-	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logPath, writeToConsole); err != nil {
-		reportError(logger, err)
+	var loggerObject *logger.Logger
+	var err error
+	if writeToConsole {
+		loggerObject, err = logger.NewWithStdOutConsoleWriter(logger.DefaultLoggerConfig(logLevel), logPath)
 	} else {
-		logger.AddDaemonVersion(daemonVersion)
+		loggerObject, err = logger.NewWithNoConsoleWriters(logger.DefaultLoggerConfig(logLevel), logPath)
+	}
+
+	if err != nil {
+		reportError(loggerObject, err)
+	} else {
+		loggerObject.AddDaemonVersion(daemonVersion)
 
 		// print out parseflags error now
 		if flagErr != nil {
-			reportError(logger, flagErr)
+			reportError(loggerObject, flagErr)
 		} else {
 			// Create our headers and params
 			headers := make(map[string]string)
@@ -78,8 +86,8 @@ func main() {
 			params := make(map[string]string)
 			params["version"] = daemonVersion
 
-			if err := startServer(logger, headers, params); err != nil {
-				logger.Error(err)
+			if err := startServer(loggerObject, headers, params); err != nil {
+				loggerObject.Error(err)
 				os.Exit(1)
 			} else {
 				select {} // sleep forever

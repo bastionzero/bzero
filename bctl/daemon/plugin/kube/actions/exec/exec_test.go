@@ -36,7 +36,7 @@ var _ = Describe("Daemon Exec action", Ordered, func() {
 		NewSPDYService = oldNewSPDYService
 	})
 
-	logger := logger.MockLogger()
+	logger := logger.DevNullLogger()
 
 	requestId := "rid"
 	logId := "lid"

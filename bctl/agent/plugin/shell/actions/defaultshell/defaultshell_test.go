@@ -99,7 +99,7 @@ func TestShellOpen(t *testing.T) {
 
 	streamMessageChan := make(chan smsg.StreamMessage)
 	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
+	dshell, err := New(logger.DevNullLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -110,7 +110,7 @@ func TestShellClose(t *testing.T) {
 
 	streamMessageChan := make(chan smsg.StreamMessage)
 	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
+	dshell, err := New(logger.DevNullLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -129,7 +129,7 @@ func TestShellInput(t *testing.T) {
 
 	streamMessageChan := make(chan smsg.StreamMessage)
 	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
+	dshell, err := New(logger.DevNullLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -149,7 +149,7 @@ func TestShellResize(t *testing.T) {
 
 	streamMessageChan := make(chan smsg.StreamMessage)
 	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
+	dshell, err := New(logger.DevNullLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)
@@ -175,7 +175,7 @@ func TestShellReplay(t *testing.T) {
 	// init shell
 	streamMessageChan := make(chan smsg.StreamMessage)
 	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
+	dshell, err := New(logger.DevNullLogger(), streamMessageChan, doneChan, runAsUser)
 	assert.Nil(t, err)
 
 	shellOpen(t, dshell)

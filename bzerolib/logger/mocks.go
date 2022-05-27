@@ -1,7 +1,7 @@
 package logger
 
-func MockLogger() *Logger {
-	if logger, err := New(DefaultLoggerConfig(Debug.String()), "/dev/null", false); err == nil {
+func DevNullLogger() *Logger {
+	if logger, err := NewWithNoConsoleWriters(DefaultLoggerConfig(Debug.String()), "/dev/null"); err == nil {
 		return logger
 	}
 	return nil

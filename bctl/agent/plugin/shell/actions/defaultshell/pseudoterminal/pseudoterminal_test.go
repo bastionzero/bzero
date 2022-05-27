@@ -93,7 +93,7 @@ func TestDoesUserExist(t *testing.T) {
 }
 
 func getPseudoTerminal() (*PseudoTerminal, error) {
-	logger := logger.MockLogger()
+	logger := logger.DevNullLogger()
 	runAsUser, err := whoAmI()
 	if err != nil {
 		return nil, fmt.Errorf("failed to grab current user")

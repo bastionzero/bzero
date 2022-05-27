@@ -49,7 +49,7 @@ func TestStream(t *testing.T) {
 }
 
 var _ = Describe("Agent Stream action", Ordered, func() {
-	logger := logger.MockLogger()
+	logger := logger.DevNullLogger()
 
 	requestId := "rid"
 	testString := "test"
