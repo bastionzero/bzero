@@ -339,28 +339,45 @@ var _ = Describe("Daemon keysplitting", func() {
 
 	Describe("send Syn", func() {
 		Describe("the happy path", func() {
-			It("Syn is built correctly", func() {
-				payload := []byte{}
-				synMsg := SendSynWithPayload(payload)
+			AssertBehavior := func() {
+				It("Syn is built correctly", func() {
+					payload := []byte{}
+					synMsg := SendSynWithPayload(payload)
 
-				By("Asserting the keysplitting message is correct")
-				Expect(synMsg.Type).To(Equal(ksmsg.Syn))
-				Expect(synMsg.Signature).NotTo(BeEmpty())
-				synPayload, ok := synMsg.KeysplittingPayload.(ksmsg.SynPayload)
-				Expect(ok).To(BeTrue())
+					By("Asserting the keysplitting message is correct")
+					Expect(synMsg.Type).To(Equal(ksmsg.Syn))
+					Expect(synMsg.Signature).NotTo(BeEmpty())
+					synPayload, ok := synMsg.KeysplittingPayload.(ksmsg.SynPayload)
+					Expect(ok).To(BeTrue())
 
-				By("Asserting the keysplitting message payload details are correct")
-				Expect(synPayload.SchemaVersion).To(Equal(ksmsg.SchemaVersion))
-				Expect(synPayload.Type).To(BeEquivalentTo(ksmsg.Syn))
-				Expect(synPayload.Action).To(Equal(testAction))
-				// TODO-Yuval: Discuss this assertion with Lucie
-				Expect(synPayload.ActionPayload).To(BeEquivalentTo(fmt.Sprintf("\"%v\"", base64.StdEncoding.EncodeToString(payload))))
-				Expect(synPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
-				Expect(synPayload.Nonce).NotTo(BeEmpty())
-				Expect(synPayload.BZCert).To(Equal(*GetFakeBZCert()))
+					By("Asserting the keysplitting message payload details are correct")
+					Expect(synPayload.SchemaVersion).To(Equal(ksmsg.SchemaVersion))
+					Expect(synPayload.Type).To(BeEquivalentTo(ksmsg.Syn))
+					Expect(synPayload.Action).To(Equal(testAction))
+					// TODO-Yuval: Discuss this assertion with Lucie
+					Expect(synPayload.ActionPayload).To(BeEquivalentTo(fmt.Sprintf("\"%v\"", base64.StdEncoding.EncodeToString(payload))))
+					Expect(synPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
+					Expect(synPayload.Nonce).NotTo(BeEmpty())
+					Expect(synPayload.BZCert).To(Equal(*GetFakeBZCert()))
 
-				By("Asserting the message signature validates")
-				Expect(synMsg.VerifySignature(daemonKeypair.Base64EncodedPublicKey)).ShouldNot(HaveOccurred())
+					By("Asserting the message signature validates")
+					Expect(synMsg.VerifySignature(daemonKeypair.Base64EncodedPublicKey)).ShouldNot(HaveOccurred())
+				})
+			}
+
+			Context("when private key is 32 bytes", func() {
+				BeforeEach(func() {
+					// For this context only, set the private key to 32 bytes
+					daemonKeypair.Base64EncodedPrivateKey = base64.StdEncoding.EncodeToString(daemonKeypair.PrivateKey[:32])
+				})
+
+				AssertBehavior()
+			})
+
+			Context("when private key is not 32 bytes", func() {
+				// There is nothing extra to setup because our test suite by
+				// default uses private key that is not 32 bytes
+				AssertBehavior()
 			})
 		})
 
