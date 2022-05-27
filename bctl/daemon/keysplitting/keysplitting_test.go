@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/mocks"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
@@ -491,6 +492,134 @@ var _ = Describe("Daemon keysplitting", func() {
 				})
 
 				AssertFailedBehavior()
+			})
+		})
+	})
+
+	Describe("pipelining", func() {
+		Describe("the happy path", func() {
+			Describe("send Data messages when there are outstanding DataAcks", func() {
+				type sentKeysplittingData struct {
+					sentPayload []byte
+					sentMsg     *ksmsg.KeysplittingMessage
+				}
+				var firstDataMsg *ksmsg.KeysplittingMessage
+				var sentData []*sentKeysplittingData
+
+				AssertDataMsgIsCorrect := func(dataMsg *ksmsg.KeysplittingMessage, expectedPayload []byte, expectedPrevMessage *ksmsg.KeysplittingMessage) {
+					dataPayload, ok := dataMsg.KeysplittingPayload.(ksmsg.DataPayload)
+					Expect(ok).To(BeTrue(), "passed in message must be a Data msg")
+					Expect(dataPayload.HPointer).Should(Equal(expectedPrevMessage.Hash()), fmt.Sprintf("This Data msg's HPointer should point to the previously received message: %#v", expectedPrevMessage))
+					Expect(dataPayload.ActionPayload).To(Equal(expectedPayload), "The Data's payload should match the expected payload")
+				}
+
+				AssertBehavior := func() {
+					It("all Data based on predicted DataAcks are sent and built correctly", func() {
+						prevMsg := firstDataMsg
+						for i := 0; i < len(sentData); i++ {
+							By(fmt.Sprintf("Asserting Data(%v)-->predicted DataAck(Data(%v)) is built correctly", i+1, i))
+
+							// Data points to a predicted DataAck for prevMsg
+							By(fmt.Sprintf("Building predicted DataAck(Data(%v))", i))
+							predictedDataAck := BuildDataAck(prevMsg)
+
+							currMsg := sentData[i]
+							By(fmt.Sprintf("Asserting Data(%v) is correct", i+1))
+							AssertDataMsgIsCorrect(currMsg.sentMsg, currMsg.sentPayload, predictedDataAck)
+
+							// Update pointer
+							prevMsg = currMsg.sentMsg
+						}
+					})
+				}
+
+				SendDataAndTrack := func(id int) {
+					By(fmt.Sprintf("Sending Data(%v)", id))
+					payload := []byte(fmt.Sprintf("Data msg - #%v", id))
+					dataMsg := SendDataWithPayload(payload)
+					sentData = append(sentData, &sentKeysplittingData{
+						sentPayload: payload,
+						sentMsg:     dataMsg,
+					})
+				}
+
+				BeforeEachBehavior := func(numOutstandingDataAcks int) {
+					for i := 1; i <= numOutstandingDataAcks; i++ {
+						SendDataAndTrack(i)
+					}
+				}
+
+				BeforeEach(func() {
+					// Initalize slice to prevent specs from leaking into one
+					// another
+					sentData = make([]*sentKeysplittingData, 0)
+
+					// Perform a successful handshake before attempting to send Data
+					synAck := PerformHandshake()
+
+					// Send a single Data-->SynAck, so we can start sending Data
+					// that is built on outstanding DataAcks, starting with the
+					// DataAck for this first Data message
+					By("Sending Data(0)")
+					payload := []byte("Data msg - #0")
+					firstDataMsg = SendDataWithPayload(payload)
+					By("Asserting Data(0) is built correctly")
+					AssertDataMsgIsCorrect(firstDataMsg, payload, synAck)
+				})
+
+				Context("when 1 DataAck is outstanding", func() {
+					BeforeEach(func() {
+						BeforeEachBehavior(1)
+					})
+
+					AssertBehavior()
+				})
+
+				Context("when 3 DataAcks are outstanding", func() {
+					BeforeEach(func() {
+						BeforeEachBehavior(3)
+					})
+
+					AssertBehavior()
+				})
+
+				Context("when the max pipelining limit is reached", func() {
+					BeforeEach(func() {
+						// Send enough Data to fill the pipeline to its max capacity
+						BeforeEachBehavior(pipelineLimit - 1)
+
+						// Send the message that causes Inbox() to block (because
+						// pipeline is full) on a separate goroutine, so we can
+						// unblock it on the main thread
+						done := make(chan interface{})
+						go func() {
+							defer GinkgoRecover()
+
+							By("Sending a message that causes Inbox() to block because pipeline is full")
+							SendDataAndTrack(pipelineLimit)
+
+							// We only close the channel once SendDataAndTrack()
+							// returns. SendDataAndTrack() returns only once Inbox()
+							// unblocks and we see the message on the outbox.
+							close(done)
+						}()
+
+						// Give enough time for the goroutine above to get blocked
+						time.Sleep(1 * time.Second)
+
+						// Build DataAck for first Data msg sent
+						By("Building DataAck for first Data msg sent")
+						dataAckForFirstDataMsg := BuildDataAck(firstDataMsg)
+						SignAgentMsg(dataAckForFirstDataMsg)
+						By("Validating DataAck for first Data msg sent to release the pipeline lock")
+						// Pipeline lock is released when we call Validate()
+						ValidateAgentMsg(dataAckForFirstDataMsg)
+
+						Eventually(done).Should(BeClosed())
+					})
+
+					AssertBehavior()
+				})
 			})
 		})
 	})
