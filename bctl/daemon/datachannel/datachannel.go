@@ -141,10 +141,15 @@ func New(
 }
 
 func (d *DataChannel) handshakeOrTimeout() error {
+	start := time.Now()
 	select {
 	case <-d.tmb.Dying():
 		return nil
 	case agentMessage := <-d.inputChan:
+		// log the time it took to complete the handshake
+		diff := time.Since(start)
+		d.logger.Infof("It took %s to complete handshake", diff.Round(time.Millisecond).String())
+
 		switch am.MessageType(agentMessage.MessageType) {
 		case am.Error:
 			return d.handleError(agentMessage)
