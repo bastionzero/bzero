@@ -376,7 +376,7 @@ var _ = Describe("Daemon keysplitting", func() {
 
 			Context("when private key is not 32 bytes", func() {
 				// There is nothing extra to setup because our test suite by
-				// default uses private key that is not 32 bytes
+				// default uses a private key that is not 32 bytes
 				AssertBehavior()
 			})
 		})
@@ -434,44 +434,67 @@ var _ = Describe("Daemon keysplitting", func() {
 	Describe("send Data", func() {
 		var synAck *ksmsg.KeysplittingMessage
 
-		BeforeEach(func() {
-			// We must perform a successful handshake before we can attempt to
-			// send a Data msg.
-			synAck = PerformHandshake()
-		})
-
 		Describe("the happy path", func() {
-			It("Data is built correctly", func() {
-				payload := []byte{}
-				dataMsg := SendDataWithPayload(payload)
-				expectedPrevMessage := synAck
+			JustBeforeEach(func() {
+				// We must perform a successful handshake before we can attempt
+				// to send a Data msg.
+				synAck = PerformHandshake()
+			})
 
-				By("Asserting the keysplitting message is correct")
-				Expect(dataMsg.Type).To(Equal(ksmsg.Data))
-				Expect(dataMsg.Signature).NotTo(BeEmpty())
-				dataPayload, ok := dataMsg.KeysplittingPayload.(ksmsg.DataPayload)
-				Expect(ok).To(BeTrue())
+			AssertBehavior := func() {
+				It("Data is built correctly", func() {
+					payload := []byte{}
+					dataMsg := SendDataWithPayload(payload)
+					expectedPrevMessage := synAck
 
-				By("Asserting the keysplitting message payload details are correct")
-				Expect(dataPayload.SchemaVersion).To(Equal(agentSchemaVersion), "The schema version should match the agreed upon version found in the agent's SynAck")
-				Expect(dataPayload.Type).To(BeEquivalentTo(ksmsg.Data))
-				Expect(dataPayload.Action).To(Equal(testAction))
-				Expect(dataPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
-				// Asserts that Validate() was called for the previous Ack sent by the
-				// agent. If true, then this Data msg points to the correct message in
-				// the chain
-				Expect(dataPayload.HPointer).Should(Equal(expectedPrevMessage.Hash()), fmt.Sprintf("This Data msg's HPointer should point to the previously received message: %#v", expectedPrevMessage))
-				Expect(dataPayload.ActionPayload).To(Equal(payload))
-				expectedBzCertHash, ok := GetFakeBZCert().Hash()
-				Expect(ok).Should(BeTrue(), "There should not be an error when hashing the expected BZCert")
-				Expect(dataPayload.BZCertHash).To(Equal(expectedBzCertHash))
+					By("Asserting the keysplitting message is correct")
+					Expect(dataMsg.Type).To(Equal(ksmsg.Data))
+					Expect(dataMsg.Signature).NotTo(BeEmpty())
+					dataPayload, ok := dataMsg.KeysplittingPayload.(ksmsg.DataPayload)
+					Expect(ok).To(BeTrue())
 
-				By("Asserting the message signature validates")
-				Expect(dataMsg.VerifySignature(daemonKeypair.Base64EncodedPublicKey)).ShouldNot(HaveOccurred())
+					By("Asserting the keysplitting message payload details are correct")
+					Expect(dataPayload.SchemaVersion).To(Equal(agentSchemaVersion), "The schema version should match the agreed upon version found in the agent's SynAck")
+					Expect(dataPayload.Type).To(BeEquivalentTo(ksmsg.Data))
+					Expect(dataPayload.Action).To(Equal(testAction))
+					Expect(dataPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
+					// Asserts that Validate() was called for the previous Ack sent by the
+					// agent. If true, then this Data msg points to the correct message in
+					// the chain
+					Expect(dataPayload.HPointer).Should(Equal(expectedPrevMessage.Hash()), fmt.Sprintf("This Data msg's HPointer should point to the previously received message: %#v", expectedPrevMessage))
+					Expect(dataPayload.ActionPayload).To(Equal(payload))
+					expectedBzCertHash, ok := GetFakeBZCert().Hash()
+					Expect(ok).Should(BeTrue(), "There should not be an error when hashing the expected BZCert")
+					Expect(dataPayload.BZCertHash).To(Equal(expectedBzCertHash))
+
+					By("Asserting the message signature validates")
+					Expect(dataMsg.VerifySignature(daemonKeypair.Base64EncodedPublicKey)).ShouldNot(HaveOccurred())
+				})
+			}
+
+			Context("when private key is 32 bytes", func() {
+				BeforeEach(func() {
+					// For this context only, set the private key to 32 bytes
+					daemonKeypair.Base64EncodedPrivateKey = base64.StdEncoding.EncodeToString(daemonKeypair.PrivateKey[:32])
+				})
+
+				AssertBehavior()
+			})
+
+			Context("when private key is not 32 bytes", func() {
+				// There is nothing extra to setup because our test suite by
+				// default uses a private key that is not 32 bytes
+				AssertBehavior()
 			})
 		})
 
 		Describe("failure modes", func() {
+			BeforeEach(func() {
+				// We must perform a successful handshake before we can attempt
+				// to send a Data msg.
+				synAck = PerformHandshake()
+			})
+
 			AssertFailedBehavior := func() {
 				It("Data is not sent to outbox", func() {
 					Expect(sut.Outbox()).ShouldNot(Receive())
