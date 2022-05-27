@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/mocks"
@@ -156,8 +157,12 @@ var _ = Describe("Daemon keysplitting", func() {
 		// Setup mocks here
 		mockTokenRefresher = &mocks.TokenRefresher{}
 
+		// Configure the SUT's logger to print to Ginkgo's writer
+		ginkgoLogger, err := logger.New(logger.DefaultLoggerConfig(logger.Trace.String()), "/dev/null", []io.Writer{GinkgoWriter})
+		Expect(err).ShouldNot(HaveOccurred())
+
 		// Init the SUT
-		sut, err = New(logger.MockLogger(), agentKeypair.Base64EncodedPublicKey, mockTokenRefresher)
+		sut, err = New(ginkgoLogger, agentKeypair.Base64EncodedPublicKey, mockTokenRefresher)
 		Expect(err).ShouldNot(HaveOccurred())
 	})
 
