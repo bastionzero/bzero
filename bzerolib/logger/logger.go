@@ -61,7 +61,15 @@ func DefaultLoggerConfig(logLevel string) *LoggerConfig {
 	}
 }
 
-func New(config *LoggerConfig, logFilePath string, writeToConsole bool) (*Logger, error) {
+func NewWithStdOutConsoleWriter(config *LoggerConfig, logFilePath string) (*Logger, error) {
+	return New(config, logFilePath, []io.Writer{os.Stdout})
+}
+
+func NewWithNoConsoleWriters(config *LoggerConfig, logFilePath string) (*Logger, error) {
+	return New(config, logFilePath, []io.Writer{})
+}
+
+func New(config *LoggerConfig, logFilePath string, consoleWriterDestinations []io.Writer) (*Logger, error) {
 	// Let's us display stack info on errors
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	zerolog.TimeFieldFormat = time.StampMilli
@@ -86,8 +94,9 @@ func New(config *LoggerConfig, logFilePath string, writeToConsole bool) (*Logger
 
 		writers := []io.Writer{logFileWithRotation}
 
-		if writeToConsole {
-			consoleWriter := zerolog.ConsoleWriter{Out: os.Stdout}
+		// Add console writers for all specified io.Writer destinations
+		for _, dest := range consoleWriterDestinations {
+			consoleWriter := zerolog.ConsoleWriter{Out: dest}
 			writers = append(writers, consoleWriter)
 		}
 		multi := zerolog.MultiLevelWriter(writers...)

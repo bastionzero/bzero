@@ -26,7 +26,7 @@ var _ = Describe("Default Shell", Ordered, func() {
 	runAsUser := "test"
 	testContent := "BastionZero"
 
-	logger := logger.MockLogger()
+	logger := logger.DevNullLogger()
 	streamMessageChan := make(chan smsg.StreamMessage)
 	doneChan := make(chan struct{})
 
