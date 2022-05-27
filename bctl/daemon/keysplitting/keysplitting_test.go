@@ -358,6 +358,9 @@ var _ = Describe("Daemon keysplitting", func() {
 				Expect(synPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
 				Expect(synPayload.Nonce).NotTo(BeEmpty())
 				Expect(synPayload.BZCert).To(Equal(*GetFakeBZCert()))
+
+				By("Asserting the message signature validates")
+				Expect(synMsg.VerifySignature(daemonKeypair.Base64EncodedPublicKey)).ShouldNot(HaveOccurred())
 			})
 		})
 
@@ -445,6 +448,9 @@ var _ = Describe("Daemon keysplitting", func() {
 				expectedBzCertHash, ok := GetFakeBZCert().Hash()
 				Expect(ok).Should(BeTrue(), "There should not be an error when hashing the expected BZCert")
 				Expect(dataPayload.BZCertHash).To(Equal(expectedBzCertHash))
+
+				By("Asserting the message signature validates")
+				Expect(dataMsg.VerifySignature(daemonKeypair.Base64EncodedPublicKey)).ShouldNot(HaveOccurred())
 			})
 		})
 
