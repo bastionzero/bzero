@@ -29,3 +29,8 @@ Does this PR have any security impact?
 - [ ] No
 
 If yes, please explain:
+
+## Do you want to create slack channel?
+- [ ] Yes
+
+If yes, please select reviewers and assignees you would like to add to the channel
