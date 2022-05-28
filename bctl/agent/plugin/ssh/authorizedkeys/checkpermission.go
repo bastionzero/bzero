@@ -38,7 +38,7 @@ func checkPermissionToWrite(path string, usr *user.User) (bool, error) {
 func checkPermissions(path string, usr *user.User, checkExecute bool) (bool, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return false, fmt.Errorf("path does not exist")
+		return false, fmt.Errorf("error grabbing file %s info: %s", path, err)
 	} else if info.Sys() == nil {
 		return false, fmt.Errorf("unable to retrieve owner or group")
 	}
