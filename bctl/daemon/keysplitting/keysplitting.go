@@ -41,16 +41,21 @@ type Keysplitting struct {
 	// for grabbing and updating id tokens
 	tokenRefresher TokenRefresher
 
-	// ordered hash map to keep track of sent keysplitting messages
-	pipelineMap  *orderedmap.OrderedMap
+	// pipelineLock mutex coordinates usage of pipelineMap, isHandshakeComplete,
+	// and lastAck
 	pipelineLock sync.Mutex
 	pipelineOpen *sync.Cond
+	// ordered hash map to keep track of sent keysplitting messages
+	pipelineMap *orderedmap.OrderedMap
+	// isHandshakeComplete is true when SynAck has been received. It is reset to
+	// false during recovery
+	isHandshakeComplete bool
+	// not the last ack we've received but the last ack we've received *in order*
+	lastAck *ksmsg.KeysplittingMessage
 
 	// a channel for all the messages we give the datachannel to send
 	outboxQueue chan *ksmsg.KeysplittingMessage
 
-	// not the last ack we've received but the last ack we've received *in order*
-	lastAck        *ksmsg.KeysplittingMessage
 	outOfOrderAcks map[string]*ksmsg.KeysplittingMessage
 
 	// bool variable for letting the datachannel know when to start processing incoming messages again
@@ -85,6 +90,8 @@ func New(
 		recovering:           false,
 		synAction:            "initial",
 		errorRecoveryAttempt: 0,
+		isHandshakeComplete:  false,
+		lastAck:              nil,
 	}
 	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
 	// Default to global constant
@@ -176,15 +183,20 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		}
 	}
 
-	// Check this messages is in response to one we've sent
-	if hpointer, err := ksMessage.GetHpointer(); err != nil {
+	hpointer, err := ksMessage.GetHpointer()
+	if err != nil {
 		return err
-	} else if _, ok := k.pipelineMap.Get(hpointer); ok {
+	}
+
+	// Lock pipelineMap's mutex before accessing it
+	k.pipelineLock.Lock()
+	defer k.pipelineLock.Unlock()
+
+	// Check this messages is in response to one we've sent
+	if _, ok := k.pipelineMap.Get(hpointer); ok {
 		switch ksMessage.Type {
 		case ksmsg.SynAck:
 			if msg, ok := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload); ok {
-				defer k.pipelineLock.Unlock()
-
 				k.lastAck = ksMessage
 				k.pipelineMap.Delete(hpointer) // delete syn from map
 
@@ -216,6 +228,9 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 						k.pipelineLimit = 1
 					}
 				}
+
+				// We've received a SynAck, so the handshake is complete
+				k.isHandshakeComplete = true
 			}
 		case ksmsg.DataAck:
 			// check if incoming message corresponds to our most recently sent data
@@ -240,10 +255,12 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 				// If we're here, it means that the previous data message that caused the error was accepted
 				k.errorRecoveryAttempt = 0
-
-				k.pipelineOpen.Broadcast()
 			}
 		}
+
+		// Condition variable changed. We must call Broadcast() to prevent
+		// deadlock
+		k.pipelineOpen.Broadcast()
 	} else {
 		return fmt.Errorf("%w: %T message did not correspond to a previously sent message", ErrUnknownHPointer, ksMessage.KeysplittingPayload)
 	}
@@ -266,11 +283,10 @@ func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
 	k.pipelineLock.Lock()
 	defer k.pipelineLock.Unlock()
 
-	// we only want to pipeline up to the maximum allowed amount
-	if k.pipelineMap.Len() >= k.pipelineLimit {
-		k.logger.Debug("Pipeline full, waiting to send next message")
+	// Wait if pipeline is full OR if handshake is not complete
+	for k.pipelineMap.Len() >= k.pipelineLimit || !k.isHandshakeComplete {
+		k.logger.Debug(fmt.Sprintf("Pipeline length: %v, Pipeline full: %v, Handshake complete: %v. Waiting to send next message...", k.pipelineMap.Len(), k.pipelineMap.Len() >= k.pipelineLimit, k.isHandshakeComplete))
 		k.pipelineOpen.Wait()
-		k.logger.Debug("Pipeline open, sending message")
 	}
 
 	return k.pipeline(action, actionPayload)
@@ -284,15 +300,11 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	// get the ack we're going to be building our new message off of
 	var ack *ksmsg.KeysplittingMessage
 	if pair := k.pipelineMap.Newest(); pair == nil {
-
-		// if our pipeline map is empty, we build off our last received ack
-		if k.lastAck != nil {
-			ack = k.lastAck
-		} else {
-			return fmt.Errorf("%w: can't build message because there's nothing to build it off of", ErrMissingLastAck)
-		}
+		// if our pipeline map is empty, we build off our last received ack.
+		// lastAck is guaranteed to be set because pipeline() is only called
+		// after handshake is complete
+		ack = k.lastAck
 	} else {
-
 		// otherwise, we're going to need to predict the ack we're building off of
 		ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
 		if newAck, err := ksMessage.BuildUnsignedDataAck([]byte{}, k.agentPubKey, k.schemaVersion.Original()); err != nil {
@@ -352,8 +364,15 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 }
 
 func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
-	// lock our pipeline because nothing can be calculated until we get our synack
+	// lock our pipeline mutex because we are accessing pipelineMap and
+	// isHandshakeComplete
 	k.pipelineLock.Lock()
+	defer k.pipelineLock.Unlock()
+
+	// Reset state
+	k.isHandshakeComplete = false
+	k.lastAck = nil
+
 	if k.synAction == "initial" {
 		k.synAction = action
 	}

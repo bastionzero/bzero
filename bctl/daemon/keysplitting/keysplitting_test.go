@@ -49,7 +49,6 @@ var _ = Describe("Daemon keysplitting", func() {
 
 	// Helper build agent message funcs
 	BuildSynAckWithPayload := func(synMsg *ksmsg.KeysplittingMessage, payload []byte) *ksmsg.KeysplittingMessage {
-		By("Building an unsigned SynAck without error")
 		synAckMsg, err := synMsg.BuildUnsignedSynAck(
 			payload,
 			agentKeypair.Base64EncodedPublicKey,
@@ -63,7 +62,6 @@ var _ = Describe("Daemon keysplitting", func() {
 		return BuildSynAckWithPayload(synMsg, []byte{})
 	}
 	BuildDataAckWithPayload := func(dataMsg *ksmsg.KeysplittingMessage, payload []byte) *ksmsg.KeysplittingMessage {
-		By("Building an unsigned DataAck without error")
 		dataAckMsg, err := dataMsg.BuildUnsignedDataAck(
 			payload,
 			agentKeypair.Base64EncodedPublicKey,
@@ -76,7 +74,6 @@ var _ = Describe("Daemon keysplitting", func() {
 		return BuildDataAckWithPayload(dataMsg, []byte{})
 	}
 	SignAgentMsg := func(agentMsg *ksmsg.KeysplittingMessage) {
-		By(fmt.Sprintf("Signing %v without error", agentMsg.Type))
 		err := agentMsg.Sign(agentKeypair.Base64EncodedPrivateKey)
 		Expect(err).ShouldNot(HaveOccurred())
 	}
@@ -84,7 +81,6 @@ var _ = Describe("Daemon keysplitting", func() {
 	// can be received. Please prefer to call Validate() directly (and not use
 	// this function) when the It() is explictly asserting validation.
 	ValidateAgentMsg := func(agentMsg *ksmsg.KeysplittingMessage) {
-		By(fmt.Sprintf("Validating %v without error", agentMsg.Type))
 		err := sut.Validate(agentMsg)
 		Expect(err).ShouldNot(HaveOccurred())
 	}
@@ -92,7 +88,6 @@ var _ = Describe("Daemon keysplitting", func() {
 	// Helper build daemon message funcs
 	SendSynWithPayload := func(payload []byte) *ksmsg.KeysplittingMessage {
 		// We must mock the token refresher, so that we can call BuildSyn
-		By("Mocking the token refresher to return a dummy KS config")
 		fakeZliKsConfig = &tokenrefresh.ZLIKeysplittingConfig{
 			KSConfig: tokenrefresh.KeysplittingConfig{
 				PublicKey:        daemonKeypair.Base64EncodedPublicKey,
@@ -107,26 +102,21 @@ var _ = Describe("Daemon keysplitting", func() {
 		}
 		mockTokenRefresher.On("Refresh").Return(fakeZliKsConfig, nil)
 
-		By("Building a signed Syn without error")
 		synMsg, err := sut.BuildSyn(testAction, payload, true)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		By("Pushing the Syn msg to the outbox")
 		Expect(sut.Outbox()).Should(Receive(Equal(synMsg)))
-
 		return synMsg
 	}
 	SendSyn := func() *ksmsg.KeysplittingMessage {
 		return SendSynWithPayload([]byte{})
 	}
 	SendDataWithPayload := func(payload []byte) *ksmsg.KeysplittingMessage {
-		By("Sending a Data msg without error")
 		err := sut.Inbox(testAction, payload)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		By("Pushing the Data msg to the outbox")
 		var dataMsg *ksmsg.KeysplittingMessage
-		Eventually(sut.Outbox()).Should(Receive(&dataMsg))
+		Eventually(sut.Outbox()).Should(Receive(&dataMsg), "outbox should receive the Data message sent by Inbox()")
 
 		return dataMsg
 	}
@@ -191,20 +181,11 @@ var _ = Describe("Daemon keysplitting", func() {
 				It("validate fails with unknown hpointer error", func() {
 					err := sut.Validate(msgUnderTest)
 					Expect(err).Should(MatchError(ErrUnknownHPointer))
-
-					// TODO-Yuval: Find a way to assert this behavior generally
-					// even when agent message *is* built on previously sent
-					// daemon message. We currently can't do that because
-					// Inbox() is locked because BuildSyn() is called without
-					// receiving a valid message. It works here because we don't
-					// call BuildSyn() in this entire Context.
-					By("Attempting to send a message fails with error")
-					err = sut.Inbox(testAction, []byte{})
-					Expect(err).Should(MatchError(ErrMissingLastAck), "because we never received a valid ack, so there is no chain to continue from")
 				})
 			}
 
 			JustBeforeEach(func() {
+				By(fmt.Sprintf("Signing %v without error", msgUnderTest.Type))
 				SignAgentMsg(msgUnderTest)
 			})
 
@@ -214,6 +195,7 @@ var _ = Describe("Daemon keysplitting", func() {
 						Type:                ksmsg.Syn,
 						KeysplittingPayload: ksmsg.SynPayload{},
 					}
+					By("Building an unsigned SynAck without error")
 					msgUnderTest = BuildSynAck(unknownSyn)
 				})
 
@@ -229,6 +211,7 @@ var _ = Describe("Daemon keysplitting", func() {
 						Type:                ksmsg.Data,
 						KeysplittingPayload: ksmsg.DataPayload{},
 					}
+					By("Building an unsigned DataAck without error")
 					msgUnderTest = BuildDataAck(unknownData)
 				})
 
@@ -242,6 +225,7 @@ var _ = Describe("Daemon keysplitting", func() {
 		Context("when agent message is built on previously sent daemon message", func() {
 			AssertBehavior := func() {
 				It("validate succeeds when the message is signed", func() {
+					By(fmt.Sprintf("Signing %v without error", msgUnderTest.Type))
 					SignAgentMsg(msgUnderTest)
 
 					By("Validating without error")
@@ -251,6 +235,7 @@ var _ = Describe("Daemon keysplitting", func() {
 
 				// Remove this test once CWC-1553 is addressed
 				It("validate succeeds when the message is signed by a legacy agent (CWC-1553)", func() {
+					By(fmt.Sprintf("Signing %v without error", msgUnderTest.Type))
 					SignAgentMsg(msgUnderTest)
 
 					By("Create different agent keypair than the one used when signing messages")
@@ -271,6 +256,7 @@ var _ = Describe("Daemon keysplitting", func() {
 			Context("when the message is a SynAck-->Syn", func() {
 				BeforeEach(func() {
 					synMsg := SendSyn()
+					By("Building an unsigned SynAck without error")
 					msgUnderTest = BuildSynAck(synMsg)
 				})
 
@@ -289,6 +275,7 @@ var _ = Describe("Daemon keysplitting", func() {
 						synAckPayload.SchemaVersion = "bad-version"
 						msgUnderTest.KeysplittingPayload = synAckPayload
 
+						By(fmt.Sprintf("Signing %v without error", msgUnderTest.Type))
 						SignAgentMsg(msgUnderTest)
 						err := sut.Validate(msgUnderTest)
 						Expect(err).Should(MatchError(ErrFailedToParseVersion))
@@ -299,9 +286,12 @@ var _ = Describe("Daemon keysplitting", func() {
 			Context("when the message is a DataAck", func() {
 				// Builds a DataAck-->Data-->SynAck-->Syn
 				BuildDataAckForDataAfterHandshake := func() *ksmsg.KeysplittingMessage {
+					By("Performing handshake without error")
 					PerformHandshake()
 
+					By("Sending a Data msg without error")
 					sentDataMsg := SendData()
+					By("Building an unsigned DataAck without error")
 					return BuildDataAck(sentDataMsg)
 				}
 
@@ -322,10 +312,14 @@ var _ = Describe("Daemon keysplitting", func() {
 				Context("when the message is a DataAck-->Data-->DataAck-->Data-->SynAck-->Syn", func() {
 					BeforeEach(func() {
 						firstDataAck := BuildDataAckForDataAfterHandshake()
+						By("Signing first DataAck without error")
 						SignAgentMsg(firstDataAck)
+						By("Validating first DataAck without error")
 						ValidateAgentMsg(firstDataAck)
 
+						By("Sending second Data msg without error")
 						sentDataMsg := SendData()
+						By("Building second, unsigned DataAck without error")
 						msgUnderTest = BuildDataAck(sentDataMsg)
 					})
 
@@ -442,12 +436,14 @@ var _ = Describe("Daemon keysplitting", func() {
 			JustBeforeEach(func() {
 				// We must perform a successful handshake before we can attempt
 				// to send a Data msg.
+				By("Performing handshake without error")
 				synAck = PerformHandshake()
 			})
 
 			AssertBehavior := func(prePipelining bool) {
 				It("Data is built correctly", func() {
 					payload := []byte{}
+					By("Sending a Data msg without error")
 					dataMsg := SendDataWithPayload(payload)
 					expectedPrevMessage := synAck
 
@@ -511,6 +507,7 @@ var _ = Describe("Daemon keysplitting", func() {
 			BeforeEach(func() {
 				// We must perform a successful handshake before we can attempt
 				// to send a Data msg.
+				By("Performing handshake without error")
 				synAck = PerformHandshake()
 			})
 
@@ -576,9 +573,11 @@ var _ = Describe("Daemon keysplitting", func() {
 			var dataMsg *ksmsg.KeysplittingMessage
 			BeforeEach(func() {
 				agentSchemaVersion = prePipeliningVersion
+				By("Performing handshake without error")
 				synAck := PerformHandshake()
 
 				// Send some Data
+				By("Sending a Data msg without error")
 				dataMsg = SendData()
 				// Payload contains extra quotes because this is pre-pipelining
 				AssertDataMsgIsCorrect(dataMsg, []byte("\"\""), synAck)
@@ -606,17 +605,15 @@ var _ = Describe("Daemon keysplitting", func() {
 
 					// Check that nothing is received on Outbox for some fixed
 					// duration
-					By(fmt.Sprintf("Checking that no message is sent to the Outbox for %v", timeToPollNothingReceivedOnOutbox))
-					Consistently(sut.Outbox(), timeToPollNothingReceivedOnOutbox).ShouldNot(Receive())
+					Consistently(sut.Outbox(), timeToPollNothingReceivedOnOutbox).ShouldNot(Receive(), "no message should be sent to outbox because there is an outstanding DataAck")
 
 					// Validate the DataAck so the goroutine spawned above can
 					// unblock and terminate
-					By("Building and validating DataAck so goroutine can unblock")
 					dataAck = BuildDataAck(dataMsg)
 					SignAgentMsg(dataAck)
 					ValidateAgentMsg(dataAck)
 
-					Eventually(done).Should(BeClosed())
+					Eventually(done).Should(BeClosed(), "done should eventually be closed because agent sent DataAck to unblock pipeline")
 				})
 			})
 		})
@@ -673,6 +670,7 @@ var _ = Describe("Daemon keysplitting", func() {
 				sentData = make([]*sentKeysplittingData, 0)
 
 				// Perform a successful handshake before attempting to send Data
+				By("Performing handshake without error")
 				synAck = PerformHandshake()
 
 				// Send a single Data-->SynAck, so we can start sending Data
@@ -728,18 +726,15 @@ var _ = Describe("Daemon keysplitting", func() {
 
 							// Check that nothing is received on Outbox for some
 							// fixed duration
-							By(fmt.Sprintf("Checking that no message is sent to the Outbox for %v", timeToPollNothingReceivedOnOutbox))
-							Consistently(sut.Outbox(), timeToPollNothingReceivedOnOutbox).ShouldNot(Receive())
+							Consistently(sut.Outbox(), timeToPollNothingReceivedOnOutbox).ShouldNot(Receive(), "no message should be sent to outbox because pipeline is full")
 
 							// Build DataAck for first Data msg sent
-							By("Building DataAck for first Data msg sent")
 							dataAckForFirstDataMsg := BuildDataAck(firstDataMsg)
 							SignAgentMsg(dataAckForFirstDataMsg)
-							By("Validating DataAck for first Data msg sent to release the pipeline lock")
 							// Pipeline lock is released when we call Validate()
 							ValidateAgentMsg(dataAckForFirstDataMsg)
 
-							Eventually(done).Should(BeClosed())
+							Eventually(done).Should(BeClosed(), "done should eventually be closed because agent sent DataAck to unblock pipeline")
 						})
 
 						AssertSendingDataBehavior()
