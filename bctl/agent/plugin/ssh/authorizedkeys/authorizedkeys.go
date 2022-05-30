@@ -4,19 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"os/user"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/filelock"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/unixuser"
 )
 
 const (
@@ -32,23 +29,18 @@ type AuthorizedKeys struct {
 
 	keyLifetime time.Duration
 
-	usr *user.User
+	usr *unixuser.UnixUser
 
 	keyFilePath string
 	fileLock    *filelock.FileLock
 }
 
 func New(logger *logger.Logger, username string, doneChan chan struct{}, authKeyFolder string, lockFileFolder string, keyLifetime time.Duration) (*AuthorizedKeys, error) {
-
-	if err := validateUsername(username); err != nil {
-		return nil, err
-	}
-
-	usr, err := user.Lookup(username)
+	usr, err := unixuser.Lookup(username)
 	if err != nil {
-		return nil, fmt.Errorf("failed to determine whether user exists: %s", err)
+		return nil, err
 	} else if usr.HomeDir == "" {
-		return nil, fmt.Errorf("cannot connect as user without home directories")
+		return nil, fmt.Errorf("user does not have an associated home directory")
 	}
 
 	authKey := &AuthorizedKeys{
@@ -58,7 +50,7 @@ func New(logger *logger.Logger, username string, doneChan chan struct{}, authKey
 		usr:         usr,
 	}
 
-	if err := authKey.setKeyFilePath(usr.HomeDir, authKeyFolder); err != nil {
+	if err := authKey.setKeyFilePath(authKeyFolder); err != nil {
 		return nil, err
 	} else if err := authKey.setFileLock(usr.HomeDir, lockFileFolder); err != nil {
 		return nil, err
@@ -130,7 +122,7 @@ func (a *AuthorizedKeys) addKeyToFile(contents string) error {
 
 	defer lock.Unlock()
 
-	file, err := a.openAuthorizedKeys()
+	file, err := a.usr.OpenFile(a.keyFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, authorizedKeysFilePermission)
 	if err != nil {
 		return err
 	}
@@ -148,29 +140,6 @@ func (a *AuthorizedKeys) addKeyToFile(contents string) error {
 	}
 
 	return nil
-}
-
-func (a *AuthorizedKeys) openAuthorizedKeys() (*os.File, error) {
-	// check if file exists
-	if _, err := os.Stat(a.keyFilePath); errors.Is(err, fs.ErrNotExist) {
-		// check permissions to create file
-		if ok, err := checkPermissionToCreate(filepath.Dir(a.keyFilePath), a.usr); !ok {
-			return nil, fmt.Errorf("failed create permissions check for %s: %s", filepath.Dir(a.keyFilePath), err)
-		} else if err := os.WriteFile(a.keyFilePath, []byte{}, authorizedKeysFilePermission); err != nil { // create file
-			return nil, fmt.Errorf("unable to create authorized_keys file %s: %s", a.keyFilePath, err)
-		} else if err := setFileOwner(a.keyFilePath, a.usr); err != nil {
-			return nil, err
-		}
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to check whether path %s exists: %s", a.keyFilePath, err)
-	} else {
-		// check if we have permission to write to file
-		if ok, err := checkPermissionToWrite(a.keyFilePath, a.usr); !ok {
-			return nil, fmt.Errorf("failed write permissions check for %s: %s", a.keyFilePath, err)
-		}
-	}
-
-	return os.OpenFile(a.keyFilePath, os.O_APPEND|os.O_WRONLY, 0644)
 }
 
 func (a *AuthorizedKeys) cleanAuthorizedKeys(currentKey string) error {
@@ -238,55 +207,25 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(currentKey string) error {
 	return nil
 }
 
-// test that the provided username is valid unix user name
-// source: https://unix.stackexchange.com/a/435120
-func validateUsername(username string) error {
-	usernamePattern := "^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\\$)$"
-	var usernameMatch, _ = regexp.MatchString(usernamePattern, username)
-	if !usernameMatch {
-		return fmt.Errorf("invalid username provided: %s", username)
-	}
-	return nil
-}
-
 // validate that the user has a home directory, drop down to their permissions, and create authorized_keys if not exists
-func (a *AuthorizedKeys) setKeyFilePath(homeDir string, keyFolder string) error {
-	path := filepath.Join(homeDir, keyFolder)
+func (a *AuthorizedKeys) setKeyFilePath(keyFolder string) error {
+	path := filepath.Join(a.usr.HomeDir, keyFolder)
 
-	// check if directory exists
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-		// check if we have permission to create directory
-		if ok, err := checkPermissionToCreate(homeDir, a.usr); !ok {
-			return fmt.Errorf("failed create permissions check for %s: %s", homeDir, err)
-		} else if err := os.Mkdir(path, 0700); err != nil {
-			return fmt.Errorf("failed to create %s/%s/: %s", homeDir, keyFolder, err)
-		} else if err := setFileOwner(path, a.usr); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return fmt.Errorf("failed to check whether path %s exists: %s", path, err)
+	if err := a.usr.Mkdir(path, 0700); err != nil {
+		return err
+	} else {
+		a.keyFilePath = filepath.Join(path, authorizedKeyFileName)
 	}
 
-	a.keyFilePath = filepath.Join(path, authorizedKeyFileName)
 	return nil
 }
 
 func (a *AuthorizedKeys) setFileLock(homeDir string, lockFileFolder string) error {
-	if err := os.MkdirAll(filepath.Join(homeDir, lockFileFolder), os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create %s/%s/: %s", homeDir, lockFileFolder, err)
+	path := filepath.Join(homeDir, lockFileFolder)
+	if err := os.MkdirAll(path, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create : %s", path, err)
 	} else {
-		a.fileLock = filelock.NewLockService(filepath.Join(homeDir, lockFileFolder, lockFileName))
+		a.fileLock = filelock.NewLockService(filepath.Join(path, lockFileName))
 		return nil
 	}
-}
-
-func setFileOwner(filepath string, usr *user.User) error {
-	if uid, err := strconv.Atoi(usr.Uid); err != nil {
-		return fmt.Errorf("failed to convert user string UID to int: %s", err)
-	} else if gid, err := strconv.Atoi(usr.Gid); err != nil {
-		return fmt.Errorf("failed to convert user string GID to int: %s", err)
-	} else if err := os.Chown(filepath, uid, gid); err != nil { // change owner of file to user
-		return fmt.Errorf("failed to set user %s as authorized_key owner", usr.Username)
-	}
-	return nil
 }
