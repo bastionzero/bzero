@@ -17,12 +17,12 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
-// max number of times we will try to resend after an error message
-const maxErrorRecoveryTries = 3
+// Max number of times we will try to resend after an error message
+const MaxErrorRecoveryTries = 3
 
-// the number of messages we're allowed to precalculate and send without having
+// The number of messages we're allowed to precalculate and send without having
 // received an ack
-var pipelineLimit = 8
+const PipelineLimit = 8
 
 type TokenRefresher interface {
 	Refresh() (*tokenrefresh.ZLIKeysplittingConfig, error)
@@ -63,6 +63,8 @@ type Keysplitting struct {
 
 	// keep track of how many times we've tried to recover
 	errorRecoveryAttempt int
+
+	pipelineLimit int
 }
 
 func New(
@@ -78,13 +80,15 @@ func New(
 		tokenRefresher:       tokenRefresher,
 		ackPublicKey:         "",
 		pipelineMap:          orderedmap.New(),
-		outboxQueue:          make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
+		outboxQueue:          make(chan *ksmsg.KeysplittingMessage, PipelineLimit),
 		outOfOrderAcks:       make(map[string]*ksmsg.KeysplittingMessage),
 		recovering:           false,
 		synAction:            "initial",
 		errorRecoveryAttempt: 0,
 	}
 	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
+	// Default to global constant
+	keysplitter.pipelineLimit = PipelineLimit
 
 	return keysplitter, nil
 }
@@ -119,7 +123,7 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 		}
 	}
 
-	if k.errorRecoveryAttempt >= maxErrorRecoveryTries {
+	if k.errorRecoveryAttempt >= MaxErrorRecoveryTries {
 		return fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
 	} else {
 		k.errorRecoveryAttempt++
@@ -208,7 +212,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 					k.prePipeliningAgent = c.Check(parsedSchemaVersion)
 
 					if k.prePipeliningAgent {
-						pipelineLimit = 1
+						// Override default
+						k.pipelineLimit = 1
 					}
 				}
 			}
@@ -218,7 +223,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				return fmt.Errorf("we received an ack but we're not waiting for a response to any messages")
 			} else if pair.Key != hpointer {
 				k.logger.Info("Received an out-of-order ack message")
-				if len(k.outOfOrderAcks) > pipelineLimit {
+				if len(k.outOfOrderAcks) > k.pipelineLimit {
 					// we're missing an ack sometime in the past, let's try to recover
 					if _, err := k.BuildSyn("", []byte{}, true); err != nil {
 						k.recovering = true
@@ -262,7 +267,7 @@ func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
 	defer k.pipelineLock.Unlock()
 
 	// we only want to pipeline up to the maximum allowed amount
-	if k.pipelineMap.Len() >= pipelineLimit {
+	if k.pipelineMap.Len() >= k.pipelineLimit {
 		k.logger.Debug("Pipeline full, waiting to send next message")
 		k.pipelineOpen.Wait()
 		k.logger.Debug("Pipeline open, sending message")

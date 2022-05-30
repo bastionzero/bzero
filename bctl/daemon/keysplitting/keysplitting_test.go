@@ -31,8 +31,8 @@ var _ = Describe("Daemon keysplitting", func() {
 	var daemonKeypair *tests.Ed25519KeyPair
 	var mockTokenRefresher *mocks.TokenRefresher
 	var fakeZliKsConfig *tokenrefresh.ZLIKeysplittingConfig
+	var agentSchemaVersion string
 	testAction := "test/action"
-	agentSchemaVersion := ksmsg.SchemaVersion
 
 	// Get the BZCert the daemon is expected to use given our faked ZLI
 	// keysplitting configuration
@@ -154,6 +154,9 @@ var _ = Describe("Daemon keysplitting", func() {
 		Expect(err).ShouldNot(HaveOccurred())
 		daemonKeypair, err = tests.GenerateEd25519Key()
 		Expect(err).ShouldNot(HaveOccurred())
+
+		// Set schema version to use when building agent messages
+		agentSchemaVersion = ksmsg.SchemaVersion
 
 		// Setup mocks here
 		mockTokenRefresher = &mocks.TokenRefresher{}
@@ -441,7 +444,7 @@ var _ = Describe("Daemon keysplitting", func() {
 				synAck = PerformHandshake()
 			})
 
-			AssertBehavior := func() {
+			AssertBehavior := func(prePipelining bool) {
 				It("Data is built correctly", func() {
 					payload := []byte{}
 					dataMsg := SendDataWithPayload(payload)
@@ -458,11 +461,16 @@ var _ = Describe("Daemon keysplitting", func() {
 					Expect(dataPayload.Type).To(BeEquivalentTo(ksmsg.Data))
 					Expect(dataPayload.Action).To(Equal(testAction))
 					Expect(dataPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
-					// Asserts that Validate() was called for the previous Ack sent by the
-					// agent. If true, then this Data msg points to the correct message in
-					// the chain
+					// Asserts that Validate() was called for the previous Ack
+					// sent by the agent. If true, then this Data msg points to
+					// the correct message in the chain
 					Expect(dataPayload.HPointer).Should(Equal(expectedPrevMessage.Hash()), fmt.Sprintf("This Data msg's HPointer should point to the previously received message: %#v", expectedPrevMessage))
-					Expect(dataPayload.ActionPayload).To(Equal(payload))
+					if prePipelining {
+						// TODO: Remove when CWC-1820 is resolved
+						Expect(dataPayload.ActionPayload).To(BeEquivalentTo(fmt.Sprintf("\"%v\"", base64.StdEncoding.EncodeToString(payload))), "Pre-pipelining includes extra quotes")
+					} else {
+						Expect(dataPayload.ActionPayload).To(Equal(payload))
+					}
 					expectedBzCertHash, ok := GetFakeBZCert().Hash()
 					Expect(ok).Should(BeTrue(), "There should not be an error when hashing the expected BZCert")
 					Expect(dataPayload.BZCertHash).To(Equal(expectedBzCertHash))
@@ -478,13 +486,23 @@ var _ = Describe("Daemon keysplitting", func() {
 					daemonKeypair.Base64EncodedPrivateKey = base64.StdEncoding.EncodeToString(daemonKeypair.PrivateKey[:32])
 				})
 
-				AssertBehavior()
+				AssertBehavior(false)
 			})
 
 			Context("when private key is not 32 bytes", func() {
 				// There is nothing extra to setup because our test suite by
 				// default uses a private key that is not 32 bytes
-				AssertBehavior()
+				AssertBehavior(false)
+			})
+
+			Context("when version is pre-pipelining agent (CWC-1820)", func() {
+				BeforeEach(func() {
+					// For this context only, set the schema version to
+					// something prior to pipelining
+					agentSchemaVersion = "1.9"
+				})
+
+				AssertBehavior(true)
 			})
 		})
 
@@ -632,7 +650,7 @@ var _ = Describe("Daemon keysplitting", func() {
 				Context("when the max pipelining limit is reached", func() {
 					BeforeEach(func() {
 						// Send enough Data to fill the pipeline to its max capacity
-						BeforeEachBehavior(pipelineLimit - 1)
+						BeforeEachBehavior(PipelineLimit - 1)
 
 						// Send the message that causes Inbox() to block (because
 						// pipeline is full) on a separate goroutine, so we can
@@ -642,7 +660,7 @@ var _ = Describe("Daemon keysplitting", func() {
 							defer GinkgoRecover()
 
 							By("Sending a message that causes Inbox() to block because pipeline is full")
-							SendDataAndTrack(pipelineLimit)
+							SendDataAndTrack(PipelineLimit)
 
 							// We only close the channel once SendDataAndTrack()
 							// returns. SendDataAndTrack() returns only once Inbox()
