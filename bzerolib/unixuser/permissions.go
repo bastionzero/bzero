@@ -121,7 +121,7 @@ func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool
 		return true, nil
 	case fileUid:
 		if ok := perms.verify(owner, mode); !ok {
-			return false, fmt.Errorf("user is owner but does not have correct permissions: %s", info.Mode().String())
+			return false, fmt.Errorf("user is owner but does not have sufficient permission to %s %s: %s", mode, path, info.Mode().String())
 		} else {
 			return true, nil
 		}
@@ -135,7 +135,7 @@ func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool
 		for _, gid := range gids {
 			if uint32(gid) == fileGid {
 				if ok := perms.verify(group, mode); !ok {
-					return false, fmt.Errorf("user is a group member but does not have correct permissions: %s", info.Mode().String())
+					return false, fmt.Errorf("user is a group member but does not have sufficient permission to %s %s: %s", mode, path, info.Mode().String())
 				} else {
 					return true, nil
 				}
@@ -145,7 +145,7 @@ func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool
 
 	// check to see if anyone can write to the file
 	if ok := perms.verify(other, mode); !ok {
-		return false, fmt.Errorf("user is neither owner nor group member but still does not have correct permissions: %s", info.Mode().String())
+		return false, fmt.Errorf("user is neither owner nor group member but still does not have sufficient permission to %s %s: %s", mode, path, info.Mode().String())
 	} else {
 		return true, nil
 	}
