@@ -103,7 +103,7 @@ func (m *modeParser) verify(usrGroup userGroup, mode checkPermissionMode) bool {
 	return false
 }
 
-// functions for defining owner priveledges
+// functions for determining owner privileges
 
 func (m *modeParser) ownerCanRead() bool {
 	return m.canRead(ownerReadBit)
@@ -125,7 +125,7 @@ func (m *modeParser) ownerCanCreate() bool {
 	return m.ownerCanWrite() && m.ownerCanOpen()
 }
 
-// functions for defining group priveledges
+// functions for determining group privileges
 
 func (m *modeParser) groupCanRead() bool {
 	return m.canRead(groupReadBit)
@@ -147,7 +147,7 @@ func (m *modeParser) groupCanCreate() bool {
 	return m.groupCanWrite() && m.groupCanOpen()
 }
 
-// functions for defining other priveledges
+// functions for determining other privileges
 
 func (m *modeParser) otherCanRead() bool {
 	return m.canRead(otherReadBit)
