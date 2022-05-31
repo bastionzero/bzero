@@ -27,7 +27,6 @@ type AuthorizedKeysInterface interface {
 type OpaqueSsh struct {
 	tmb    tomb.Tomb
 	logger *logger.Logger
-	closed bool
 
 	// channel for letting the plugin know we're done
 	doneChan chan struct{}
@@ -104,9 +103,7 @@ func (d *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error)
 			d.logger.Errorf("unable to unmarshal default SSH close message: %s", jerr)
 		}
 
-		d.closed = true
 		d.logger.Infof("Ending TCP connection because we received this close message from daemon: %s", closeRequest.Reason)
-		d.remoteConnection.Close()
 		d.Kill()
 
 		return actionPayload, nil
@@ -142,12 +139,10 @@ func (d *OpaqueSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte
 						d.logger.Errorf("connection closed (EOF)")
 						// Let our daemon know that we have got the error and we need to close the connection
 						d.sendStreamMessage(sequenceNumber, smsg.StdOut, false, buff[:n])
-					} else if !d.closed {
+					} else {
 						d.logger.Errorf("failed to read from tcp connection: %s", err)
 						d.sendStreamMessage(sequenceNumber, smsg.Error, false, buff[:n])
 					}
-					// if we're closed, this is an expected error, so we can just end gracefully
-					return err
 				} else {
 					d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
 
