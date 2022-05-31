@@ -184,7 +184,7 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 	mrzapLogger := w.logger.GetComponentLogger("mrzap")
 	if keysplitter, err := keysplitting.New(mrzapLogger, w.agentPubKey, w.configPath, w.refreshTokenCommand); err != nil {
 		return err
-	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, actionParams, attach); err != nil {
+	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, actionParams, attach, true); err != nil {
 		return err
 	} else {
 

@@ -127,7 +127,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	ksLogger := ss.logger.GetComponentLogger("mrzap")
 	if keysplitter, err := keysplitting.New(ksLogger, ss.agentPubKey, ss.configPath, ss.refreshTokenCommand); err != nil {
 		return err
-	} else if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, actionParams, attach); err != nil {
+	} else if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, actionParams, attach, false); err != nil {
 		return err
 	} else {
 
