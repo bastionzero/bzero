@@ -232,7 +232,7 @@ func (a *AuthorizedKeys) setFileLock(homeDir string, lockFileFolder string) erro
 	if err := os.MkdirAll(path, os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create %s: %s", path, err)
 	} else {
-		a.fileLock = filelock.NewLockService(filepath.Join(path, lockFileName))
+		a.fileLock = filelock.NewFileLock(filepath.Join(path, lockFileName))
 		return nil
 	}
 }
