@@ -109,25 +109,24 @@ func (u *UnixUser) OpenFile(path string, flag int, perm fs.FileMode) (*os.File, 
 		}
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to check whether path %s exists: %s", path, err)
-	} else {
+	}
 
-		// when opening a file, users specify at least one of the following flags: O_RDONLY,
-		// O_WRONLY, O_RDWR which we check against the user's permissions
-		switch {
-		case flag&os.O_RDONLY != 0:
-			if ok, err := u.CanRead(path); !ok {
-				return nil, fmt.Errorf("user %s cannot read %s: %s", u.Username, path, err)
-			}
-		case flag&os.O_WRONLY != 0:
-			if ok, err := u.CanWrite(path); !ok {
-				return nil, fmt.Errorf("user %s cannot write to %s: %s", u.Username, path, err)
-			}
-		case flag&os.O_RDWR != 0:
-			if ok, err := u.CanRead(path); !ok {
-				return nil, fmt.Errorf("user %s cannot read %s: %s", u.Username, path, err)
-			} else if ok, err := u.CanWrite(path); !ok {
-				return nil, fmt.Errorf("user %s cannot write to %s: %s", u.Username, path, err)
-			}
+	// when opening a file, users specify at least one of the following flags: O_RDONLY,
+	// O_WRONLY, O_RDWR which we check against the user's permissions
+	switch {
+	case flag&os.O_RDONLY != 0:
+		if ok, err := u.CanRead(path); !ok {
+			return nil, fmt.Errorf("user %s cannot read %s: %s", u.Username, path, err)
+		}
+	case flag&os.O_WRONLY != 0:
+		if ok, err := u.CanWrite(path); !ok {
+			return nil, fmt.Errorf("user %s cannot write to %s: %s", u.Username, path, err)
+		}
+	case flag&os.O_RDWR != 0:
+		if ok, err := u.CanRead(path); !ok {
+			return nil, fmt.Errorf("user %s cannot read %s: %s", u.Username, path, err)
+		} else if ok, err := u.CanWrite(path); !ok {
+			return nil, fmt.Errorf("user %s cannot write to %s: %s", u.Username, path, err)
 		}
 	}
 

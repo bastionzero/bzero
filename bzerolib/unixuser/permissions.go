@@ -53,14 +53,6 @@ const (
 	create  checkPermissionMode = "create"
 )
 
-type userGroup string
-
-const (
-	owner userGroup = "owner"
-	group userGroup = "group"
-	other userGroup = "other"
-)
-
 func (u *UnixUser) CanRead(path string) (bool, error) {
 	return u.checkPermissions(path, read)
 }
@@ -77,17 +69,24 @@ func (u *UnixUser) CanOpen(path string) (bool, error) {
 	return u.checkPermissions(path, open)
 }
 
+// This function does some extra logic to determine whether a user can or cannot
+// create a given file. It loops through the path, searching for the longest path
+// that exists and then checks the user's ability to create in that directory.
 func (u *UnixUser) CanCreate(path string) (bool, error) {
 	if path == "/" {
 		return u.checkPermissions(path, create)
 	} else {
+		// slash at end will not give us the proper dir in the .Dir call below
+		// so we remove it, if it exists
 		path = strings.TrimSuffix(path, "/")
 	}
 
-	// loop through all dirs in path until it finds one that exists
-	// and it can check permissions of.
-	// filepath.Dir will return "." if the filepath is empty
-	for path != "." && !strings.Contains(path, "./") {
+	// filepath.Dir will return "." if the filepath is empty, but we want to ignore
+	// that if it was not in the original path
+	notInPath := !strings.Contains(path, "./")
+
+	// loop through all subpaths in path until it finds longest one that exists
+	for path != "." && notInPath {
 		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 			path = filepath.Dir(path)
 			continue
@@ -97,7 +96,7 @@ func (u *UnixUser) CanCreate(path string) (bool, error) {
 			return u.checkPermissions(path, create)
 		}
 	}
-	return u.checkPermissions(path, create)
+	return false, fmt.Errorf("invalid path")
 }
 
 func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool, error) {

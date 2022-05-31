@@ -129,6 +129,8 @@ func (a *AuthorizedKeys) addKeyToFile(contents string) error {
 	defer file.Close()
 
 	// make sure we're always writing our keys to new lines
+	// this read of the file is so that the key entry can be built/formatted properly and is,
+	//  therefore a function of the process and not the user
 	if fileBytes, err := os.ReadFile(a.keyFilePath); err != nil {
 		return err
 	} else if len(fileBytes) > 0 && !strings.HasSuffix(string(fileBytes), "\n") {
@@ -142,6 +144,8 @@ func (a *AuthorizedKeys) addKeyToFile(contents string) error {
 	return nil
 }
 
+// this function acts on behalf of the process, any file system reads are a result of the process
+// cleaning up the file and not the user attempting to delete the key themselves
 func (a *AuthorizedKeys) cleanAuthorizedKeys(currentKey string) error {
 	// wait to acquire a lock on the authorized_keys file
 	lock, err := a.fileLock.NewLock()
@@ -199,8 +203,8 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(currentKey string) error {
 		return err
 	}
 
-	// we don't need to check permissions here, because it's the process's responsibility
-	// to clean the authorized_keys file
+	// we don't need to check permissions here, because it's the agent's responsibility
+	// to clean the authorized_keys file, not the user's
 	if err := os.WriteFile(a.keyFilePath, newFileBytes, authorizedKeysFilePermission); err != nil {
 		return err
 	}
@@ -222,6 +226,9 @@ func (a *AuthorizedKeys) setKeyFilePath(keyFolder string) error {
 
 func (a *AuthorizedKeys) setFileLock(homeDir string, lockFileFolder string) error {
 	path := filepath.Join(homeDir, lockFileFolder)
+
+	// since the file lock is for the benefit of the agent and not the user, it is the agent's
+	// responsibility to create it. The user never directly interacts with it.
 	if err := os.MkdirAll(path, os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create %s: %s", path, err)
 	} else {
