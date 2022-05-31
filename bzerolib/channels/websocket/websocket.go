@@ -21,7 +21,6 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/controllers/agentcontroller"
 	"bastionzero.com/bctl/v1/bzerolib/controllers/connectionnodecontroller"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
@@ -435,14 +434,6 @@ func (w *Websocket) connect() error {
 				// safe to fail on this error since GetChallenge has its own retry logic
 				if err := w.solveChallenge(); err != nil {
 					return fmt.Errorf("error solving challenge: %s", err)
-				}
-			}
-
-			// If we have the option to refresh our auth details do it here before reconnecting
-			if w.refreshTokenCommand != "" {
-				if err := util.RunRefreshAuthCommand(w.refreshTokenCommand); err != nil {
-					w.logger.Error(fmt.Errorf("error executing refresh auth command: %s -- will retry", err))
-					continue
 				}
 			}
 
