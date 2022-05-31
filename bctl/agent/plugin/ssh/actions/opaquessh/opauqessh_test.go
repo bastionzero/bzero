@@ -17,15 +17,18 @@ import (
 
 func TestDefaultSsh(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Agent DefaultSsh Suite")
+	RunSpecs(t, "Agent OpaqueSsh Suite")
 }
 
-var _ = Describe("Agent DefaultSsh action", func() {
+var _ = Describe("Agent OpaqueSsh action", func() {
 	logger := logger.MockLogger()
 	testUser := "test-user"
 	testData := "testData"
 
-	go mockSshServer()
+	readyChan := make(chan struct{})
+	go mockSshServer(readyChan)
+	// wait for server to spin up
+	<-readyChan
 
 	Context("Happy path I: closed by user", func() {
 
@@ -87,9 +90,10 @@ var _ = Describe("Agent DefaultSsh action", func() {
 	})
 })
 
-func mockSshServer() {
+func mockSshServer(readyChan chan struct{}) {
 	l, _ := net.Listen("tcp", ":2022")
 	defer l.Close()
+	readyChan <- struct{}{}
 	buf := make([]byte, chunkSize)
 	for {
 		conn, err := l.Accept()

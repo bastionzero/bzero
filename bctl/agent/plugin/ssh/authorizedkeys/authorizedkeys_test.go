@@ -2,7 +2,6 @@ package authorizedkeys
 
 import (
 	"encoding/base64"
-	"fmt"
 	"os"
 	"os/user"
 	"path"
@@ -119,7 +118,6 @@ var _ = Describe("Agent Authorized Keys", Ordered, func() {
 			time.Sleep(5 * time.Second)
 
 			fileBytes, err = os.ReadFile(authorizedKeysFile)
-			fmt.Println(fileBytes)
 			Expect(err).To(BeNil())
 			lines = strings.Split(string(fileBytes), "\n")
 

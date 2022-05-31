@@ -75,11 +75,11 @@ func (s *SshDaemonPlugin) Outbox() <-chan bzplugin.ActionWrapper {
 }
 
 func (s *SshDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
-	s.logger.Debugf("ssh plugin received %v stream", smessage.Type)
+	s.logger.Debugf("Ssh plugin received %v stream", smessage.Type)
 	if s.action != nil {
 		s.action.ReceiveStream(smessage)
 	} else {
-		s.logger.Debug("ssh plugin received stream message before an action was created. Ignoring")
+		s.logger.Debug("Ssh plugin received stream message before an action was created. Ignoring")
 	}
 }
 

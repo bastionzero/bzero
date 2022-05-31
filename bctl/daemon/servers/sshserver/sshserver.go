@@ -140,14 +140,12 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 					dc.Close(errors.New("ssh server closing"))
 					return
 				case <-dcTmb.Dead():
-					// bubble up our error to the user
 					if dcTmb.Err() != nil {
-						// let's just take our innermost error to give the user
+						// just take our innermost error to give the user
 						errs := strings.Split(dcTmb.Err().Error(), ": ")
-						errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
+						errorString := fmt.Sprintf("error: %s\n", errs[len(errs)-1])
 						os.Stdout.Write([]byte(errorString))
-						errorCode := 1
-						os.Exit(errorCode)
+						os.Exit(1)
 					} else {
 						os.Exit(0)
 					}

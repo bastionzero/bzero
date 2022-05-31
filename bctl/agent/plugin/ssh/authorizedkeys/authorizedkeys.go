@@ -18,7 +18,7 @@ import (
 
 const (
 	authorizedKeyComment         = "bzero-temp-key"
-	lockFileName                 = "bz-lock.lock"
+	lockFileName                 = ".bzero.lock"
 	authorizedKeyFileName        = "authorized_keys"
 	authorizedKeysFilePermission = 0600 // only owner (user) can read/write
 )

@@ -39,13 +39,7 @@ type OpaqueSsh struct {
 	authorizedKeys   AuthorizedKeysInterface
 }
 
-func New(
-	logger *logger.Logger,
-	doneChan chan struct{},
-	ch chan smsg.StreamMessage,
-	conn *net.TCPConn,
-	authKeys AuthorizedKeysInterface,
-) *OpaqueSsh {
+func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *net.TCPConn, authKeys AuthorizedKeysInterface) *OpaqueSsh {
 
 	return &OpaqueSsh{
 		logger:           logger,
