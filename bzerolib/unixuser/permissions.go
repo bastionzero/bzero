@@ -88,7 +88,7 @@ func (u *UnixUser) CanCreate(path string) (bool, error) {
 			return u.checkPermissions(path, filemode.Create)
 		}
 	}
-	return false, fmt.Errorf("invalid path")
+	return false, fmt.Errorf("path does not exist on this machine: %s", path)
 }
 
 func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool, error) {
