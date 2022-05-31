@@ -41,32 +41,24 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-)
 
-type checkPermissionMode string
-
-const (
-	read    checkPermissionMode = "read"
-	write   checkPermissionMode = "write"
-	execute checkPermissionMode = "execute"
-	open    checkPermissionMode = "open"
-	create  checkPermissionMode = "create"
+	"bastionzero.com/bctl/v1/bzerolib/unixuser/filemode"
 )
 
 func (u *UnixUser) CanRead(path string) (bool, error) {
-	return u.checkPermissions(path, read)
+	return u.checkPermissions(path, filemode.Read)
 }
 
 func (u *UnixUser) CanWrite(path string) (bool, error) {
-	return u.checkPermissions(path, write)
+	return u.checkPermissions(path, filemode.Write)
 }
 
 func (u *UnixUser) CanExecute(path string) (bool, error) {
-	return u.checkPermissions(path, execute)
+	return u.checkPermissions(path, filemode.Execute)
 }
 
 func (u *UnixUser) CanOpen(path string) (bool, error) {
-	return u.checkPermissions(path, open)
+	return u.checkPermissions(path, filemode.Open)
 }
 
 // This function does some extra logic to determine whether a user can or cannot
@@ -74,7 +66,7 @@ func (u *UnixUser) CanOpen(path string) (bool, error) {
 // that exists and then checks the user's ability to create in that directory.
 func (u *UnixUser) CanCreate(path string) (bool, error) {
 	if path == "/" {
-		return u.checkPermissions(path, create)
+		return u.checkPermissions(path, filemode.Create)
 	} else {
 		// slash at end will not give us the proper dir in the .Dir call below
 		// so we remove it, if it exists
@@ -93,13 +85,13 @@ func (u *UnixUser) CanCreate(path string) (bool, error) {
 		} else if err != nil {
 			return false, fmt.Errorf("failed to read file path: %s", err)
 		} else {
-			return u.checkPermissions(path, create)
+			return u.checkPermissions(path, filemode.Create)
 		}
 	}
 	return false, fmt.Errorf("invalid path")
 }
 
-func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool, error) {
+func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool, error) {
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, fmt.Errorf("path does not exist: %s", path)
@@ -110,7 +102,7 @@ func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool
 	}
 
 	// create our parser so we can abstract annoying bit checks
-	perms := newFileModeParser(info.Mode())
+	perms := filemode.NewParser(info.Mode())
 
 	// check if user is root or the file owner
 	fileUid := info.Sys().(*syscall.Stat_t).Uid
@@ -119,8 +111,8 @@ func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool
 		// if you're root, you can do anything
 		return true, nil
 	case fileUid:
-		if ok := perms.verify(owner, mode); !ok {
-			return false, fmt.Errorf("user is owner but does not have sufficient permission to %s %s: %s", mode, path, info.Mode().String())
+		if ok := perms.Verify(filemode.Owner, check); !ok {
+			return false, fmt.Errorf("user is owner but does not have sufficient permission to %s %s: %s", check, path, info.Mode().String())
 		} else {
 			return true, nil
 		}
@@ -133,8 +125,8 @@ func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool
 	} else {
 		for _, gid := range gids {
 			if uint32(gid) == fileGid {
-				if ok := perms.verify(group, mode); !ok {
-					return false, fmt.Errorf("user is a group member but does not have sufficient permission to %s %s: %s", mode, path, info.Mode().String())
+				if ok := perms.Verify(filemode.Group, check); !ok {
+					return false, fmt.Errorf("user is a group member but does not have sufficient permission to %s %s: %s", check, path, info.Mode().String())
 				} else {
 					return true, nil
 				}
@@ -143,8 +135,8 @@ func (u *UnixUser) checkPermissions(path string, mode checkPermissionMode) (bool
 	}
 
 	// check to see if anyone can write to the file
-	if ok := perms.verify(other, mode); !ok {
-		return false, fmt.Errorf("user is neither owner nor group member but still does not have sufficient permission to %s %s: %s", mode, path, info.Mode().String())
+	if ok := perms.Verify(filemode.Other, check); !ok {
+		return false, fmt.Errorf("user is neither owner nor group member and does not have sufficient permission to %s %s: %s", check, path, info.Mode().String())
 	} else {
 		return true, nil
 	}
