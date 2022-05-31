@@ -13,12 +13,12 @@ const (
 	executeBitOffset = 2
 )
 
-type UserGroup int
+type PrivilegeSet int
 
 const (
-	Owner UserGroup = 1
-	Group UserGroup = 4
-	Other UserGroup = 7
+	User  PrivilegeSet = 1
+	Group PrivilegeSet = 4
+	Other PrivilegeSet = 7
 )
 
 type CheckType string
@@ -41,48 +41,36 @@ func NewParser(mode fs.FileMode) *ModeParser {
 	}
 }
 
-func (m *ModeParser) Verify(usrGroup UserGroup, mode CheckType) bool {
+func (m *ModeParser) Verify(usrGroup PrivilegeSet, mode CheckType) bool {
 	switch mode {
 	case Read:
-		if m.CanRead(usrGroup) {
-			return true
-		}
+		return m.CanRead(usrGroup)
 	case Write:
-		if m.CanWrite(usrGroup) {
-			return true
-		}
-	case Execute:
-		if m.CanExecute(usrGroup) {
-			return true
-		}
-	case Open:
-		if m.CanOpen(usrGroup) {
-			return true
-		}
+		return m.CanWrite(usrGroup)
+	case Execute, Open:
+		return m.CanExecute(usrGroup)
 	case Create:
-		if m.CanCreate(usrGroup) {
-			return true
-		}
+		return m.CanCreate(usrGroup)
 	}
 	return false
 }
 
-func (m *ModeParser) CanRead(usr UserGroup) bool {
+func (m *ModeParser) CanRead(usr PrivilegeSet) bool {
 	return string(m.mode[int(usr)+readBitOffset]) == "r"
 }
 
-func (m *ModeParser) CanWrite(usr UserGroup) bool {
+func (m *ModeParser) CanWrite(usr PrivilegeSet) bool {
 	return string(m.mode[int(usr)+writeBitOffset]) == "w"
 }
 
-func (m *ModeParser) CanExecute(usr UserGroup) bool {
+func (m *ModeParser) CanExecute(usr PrivilegeSet) bool {
 	return string(m.mode[int(usr)+executeBitOffset]) == "x"
 }
 
-func (m *ModeParser) CanOpen(usr UserGroup) bool {
+func (m *ModeParser) CanOpen(usr PrivilegeSet) bool {
 	return m.CanExecute(usr)
 }
 
-func (m *ModeParser) CanCreate(usr UserGroup) bool {
+func (m *ModeParser) CanCreate(usr PrivilegeSet) bool {
 	return m.CanExecute(usr) && m.CanWrite(usr)
 }

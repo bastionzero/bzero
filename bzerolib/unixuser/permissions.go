@@ -114,7 +114,7 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 		// if you're root, you can do anything
 		return true, nil
 	case fileUid:
-		if ok := perms.Verify(filemode.Owner, check); !ok {
+		if ok := perms.Verify(filemode.User, check); !ok {
 			return false, fmt.Errorf("user is owner but does not have sufficient permission to %s %s: %s", check, path, info.Mode().String())
 		} else {
 			return true, nil
