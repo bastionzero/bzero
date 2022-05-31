@@ -56,7 +56,7 @@ func (m *ModeParser) Verify(usrGroup UserGroup, mode CheckType) bool {
 			return true
 		}
 	case Open:
-		if m.CanWrite(usrGroup) {
+		if m.CanOpen(usrGroup) {
 			return true
 		}
 	case Create:

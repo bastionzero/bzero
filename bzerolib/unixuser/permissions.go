@@ -21,13 +21,16 @@ and as dictated by Advanced Programming in the Unix Environment Third Edition by
 and Stephen A. Rago (p. 101).
 
 Permission validation process:
-1. if user's uid is 0 (aka "root"), then it can do whatever it wants
-2. if user's uid is the same as the owner of the file, check for access perms, else reject access
-3. if any of the user's gids matches the gid of the file, check for access perms, else reject access
-4. check if any other user is allowed to do what we want, else reject
+1. if user's uid is 0 (aka "root"), they can do whatever they want. If user is not the root, go to step 2.
+2. if user's uid is the same as the owner of the file, check for access perms. If the owner does not have
+correct perms, REJECT. If the user is not the owner of the file, go to step 3.
+3. if any of the user's gids matches the gid of the file, check for access perms. If that group does not
+have correct perms, REJECT. If the user is not in any matching group, go to step 4.
+4. Check access perms for "other" user group.
 
-These steps are taken in sequence, if you're the owner and you don't have the right permissions, we don't
-fall back onto group logic, etc. There are no second chances in unix.
+These steps are taken in sequence, and if any REJECT case is reached, we do not continue to the next step.
+For example, if the owner does not have access, we do not then check groups. There are no second chances in
+unix.
 
 The code seeks help from the modeParser object to abstract away some of the more annoying bit checking logic
 */
