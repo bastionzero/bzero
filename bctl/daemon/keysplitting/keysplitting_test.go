@@ -10,6 +10,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/mocks"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
+	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
@@ -622,70 +623,70 @@ var _ = Describe("Daemon keysplitting", func() {
 		})
 
 		Context("when pipelining is enabled", func() {
-			type sentKeysplittingData struct {
-				sentPayload []byte
-				sentMsg     *ksmsg.KeysplittingMessage
-			}
-			var firstDataMsg *ksmsg.KeysplittingMessage
-			// Holds sent data that is based on predicted DataAcks, i.e. called
-			// with SendDataAndTrack() functions
-			var sentData []*sentKeysplittingData
-			var synAck *ksmsg.KeysplittingMessage
-
-			SendDataAndTrack := func(id int) {
-				By(fmt.Sprintf("Sending Data(%v)", id))
-				payload := []byte(fmt.Sprintf("Data msg - #%v", id))
-				dataMsg := SendDataWithPayload(payload)
-				sentData = append(sentData, &sentKeysplittingData{
-					sentPayload: payload,
-					sentMsg:     dataMsg,
-				})
-			}
-			RepeatSendDataAndTrack := func(count int) {
-				for i := 1; i <= count; i++ {
-					SendDataAndTrack(i)
-				}
-			}
-
-			AssertSendingDataBehavior := func() {
-				It("all Data based on predicted DataAcks are sent and built correctly", func() {
-					prevMsg := firstDataMsg
-					for i := 0; i < len(sentData); i++ {
-						By(fmt.Sprintf("Asserting Data(%v)-->predicted DataAck(Data(%v)) is built correctly", i+1, i))
-
-						// Data points to a predicted DataAck for prevMsg
-						By(fmt.Sprintf("Building predicted DataAck(Data(%v))", i))
-						predictedDataAck := BuildDataAck(prevMsg)
-
-						currMsg := sentData[i]
-						By(fmt.Sprintf("Asserting Data(%v) is correct", i+1))
-						AssertDataMsgIsCorrect(currMsg.sentMsg, currMsg.sentPayload, predictedDataAck)
-
-						// Update pointer
-						prevMsg = currMsg.sentMsg
-					}
-				})
-			}
-
-			BeforeEach(func() {
-				// Initalize slice to prevent specs from leaking into one
-				// another
-				sentData = make([]*sentKeysplittingData, 0)
-
-				// Perform a successful handshake before attempting to send Data
-				synAck = PerformHandshake()
-
-				// Send a single Data-->SynAck, so we can start sending Data
-				// that is built on outstanding DataAcks, starting with the
-				// DataAck for this first Data message
-				By("Sending Data(0)")
-				payload := []byte("Data msg - #0")
-				firstDataMsg = SendDataWithPayload(payload)
-				By("Asserting Data(0) is built correctly")
-				AssertDataMsgIsCorrect(firstDataMsg, payload, synAck)
-			})
-
 			Describe("the happy path", func() {
+				type sentKeysplittingData struct {
+					sentPayload []byte
+					sentMsg     *ksmsg.KeysplittingMessage
+				}
+				var firstDataMsg *ksmsg.KeysplittingMessage
+				// Holds sent data that is based on predicted DataAcks, i.e. called
+				// with SendDataAndTrack() functions
+				var sentData []*sentKeysplittingData
+				var synAck *ksmsg.KeysplittingMessage
+
+				SendDataAndTrack := func(id int) {
+					By(fmt.Sprintf("Sending Data(%v)", id))
+					payload := []byte(fmt.Sprintf("Data msg - #%v", id))
+					dataMsg := SendDataWithPayload(payload)
+					sentData = append(sentData, &sentKeysplittingData{
+						sentPayload: payload,
+						sentMsg:     dataMsg,
+					})
+				}
+				RepeatSendDataAndTrack := func(count int) {
+					for i := 1; i <= count; i++ {
+						SendDataAndTrack(i)
+					}
+				}
+
+				AssertSendingDataBehavior := func() {
+					It("all Data based on predicted DataAcks are sent and built correctly", func() {
+						prevMsg := firstDataMsg
+						for i := 0; i < len(sentData); i++ {
+							By(fmt.Sprintf("Asserting Data(%v)-->predicted DataAck(Data(%v)) is built correctly", i+1, i))
+
+							// Data points to a predicted DataAck for prevMsg
+							By(fmt.Sprintf("Building predicted DataAck(Data(%v))", i))
+							predictedDataAck := BuildDataAck(prevMsg)
+
+							currMsg := sentData[i]
+							By(fmt.Sprintf("Asserting Data(%v) is correct", i+1))
+							AssertDataMsgIsCorrect(currMsg.sentMsg, currMsg.sentPayload, predictedDataAck)
+
+							// Update pointer
+							prevMsg = currMsg.sentMsg
+						}
+					})
+				}
+
+				BeforeEach(func() {
+					// Initalize slice to prevent specs from leaking into one
+					// another
+					sentData = make([]*sentKeysplittingData, 0)
+
+					// Perform a successful handshake before attempting to send Data
+					synAck = PerformHandshake()
+
+					// Send a single Data-->SynAck, so we can start sending Data
+					// that is built on outstanding DataAcks, starting with the
+					// DataAck for this first Data message
+					By("Sending Data(0)")
+					payload := []byte("Data msg - #0")
+					firstDataMsg = SendDataWithPayload(payload)
+					By("Asserting Data(0) is built correctly")
+					AssertDataMsgIsCorrect(firstDataMsg, payload, synAck)
+				})
+
 				Describe("send Data messages when there are outstanding DataAcks", func() {
 					Context("when 1 DataAck is outstanding", func() {
 						BeforeEach(func() {
@@ -750,11 +751,178 @@ var _ = Describe("Daemon keysplitting", func() {
 				// })
 			})
 
-			// Describe("failure modes", func() {
-			// 	Describe("recovery", func() {
+			Describe("failure modes", func() {
+				Describe("recovery", func() {
+					var agentErrorMessage rrr.ErrorMessage
+					var recoverError error
 
-			// 	})
-			// })
+					JustBeforeEach(func() {
+						recoverError = sut.Recover(agentErrorMessage)
+					})
+
+					BuildErrorMessage := func(hPointer string) rrr.ErrorMessage {
+						return rrr.ErrorMessage{
+							SchemaVersion: rrr.CurrentVersion,
+							Timestamp:     time.Now().Unix(),
+							Type:          string(rrr.KeysplittingValidationError),
+							Message:       "agent error message",
+							HPointer:      hPointer,
+						}
+					}
+					SendDataAndBuildErrorMessage := func() rrr.ErrorMessage {
+						By("Sending data and building an agent error message")
+						dataMsg := SendDataWithPayload([]byte("agent fail on this data message"))
+						return BuildErrorMessage(dataMsg.Hash())
+					}
+
+					AssertFailedBehavior := func() {
+						It("no Syn message is sent", func() {
+							Consistently(sut.Outbox(), timeToPollNothingReceivedOnOutbox).ShouldNot(Receive())
+						})
+					}
+
+					Context("when agent error message hpointer is empty", func() {
+						BeforeEach(func() {
+							agentErrorMessage = BuildErrorMessage("")
+						})
+
+						AssertFailedBehavior()
+
+						It("daemon is not recovering", func() {
+							Expect(sut.Recovering()).Should(BeFalse())
+						})
+
+						It("errors", func() {
+							Expect(recoverError).Should(HaveOccurred())
+						})
+					})
+
+					Context("when agent error message hpointer refers to message not sent by daemon", func() {
+						BeforeEach(func() {
+							agentErrorMessage = BuildErrorMessage("unknown")
+						})
+
+						AssertFailedBehavior()
+
+						It("daemon is not recovering", func() {
+							Expect(sut.Recovering()).Should(BeFalse())
+						})
+					})
+
+					Context("when agent error message hpointer refers to Syn message", func() {
+						BeforeEach(func() {
+							synMsg := SendSyn()
+							agentErrorMessage = BuildErrorMessage(synMsg.Hash())
+						})
+
+						AssertFailedBehavior()
+
+						It("daemon is not recovering", func() {
+							Expect(sut.Recovering()).Should(BeFalse())
+						})
+
+						It("errors", func() {
+							Expect(recoverError).Should(HaveOccurred())
+						})
+					})
+
+					Context("when daemon is already recovering", func() {
+						BeforeEach(func() {
+							PerformHandshake()
+							agentErrorMessage = SendDataAndBuildErrorMessage()
+
+							// Recover once before we call Recover again in
+							// JustBeforeEach()
+							err := sut.Recover(agentErrorMessage)
+							Expect(err).ShouldNot(HaveOccurred())
+
+							// Grab the Syn message from the outbox, so that we
+							// can assert no extra Syn is sent in this Context.
+							var synMsg *ksmsg.KeysplittingMessage
+							Eventually(sut.Outbox()).Should(Receive(&synMsg))
+							Expect(synMsg.Type).Should(Equal(ksmsg.Syn))
+						})
+
+						AssertFailedBehavior()
+
+						It("daemon is still recovering", func() {
+							Expect(sut.Recovering()).Should(BeTrue())
+						})
+					})
+
+					Context("when recovery has already failed the max number of times", func() {
+						BeforeEach(func() {
+							PerformHandshake()
+
+							for i := 0; i < MaxErrorRecoveryTries; i++ {
+								By(fmt.Sprintf("Recover() without error: #%v", i))
+								agentErrorMessage := SendDataAndBuildErrorMessage()
+								err := sut.Recover(agentErrorMessage)
+								Expect(err).ShouldNot(HaveOccurred())
+
+								By("Pushing the Syn msg to the outbox")
+								var synMsg *ksmsg.KeysplittingMessage
+								Eventually(sut.Outbox()).Should(Receive(&synMsg))
+								Expect(synMsg.Type).Should(Equal(ksmsg.Syn))
+
+								// Call Validate() with a SynAck to have
+								// recovering boolean reset allowing us to call
+								// Recover() again
+								synAck := BuildSynAck(synMsg)
+								SignAgentMsg(synAck)
+								ValidateAgentMsg(synAck)
+
+								// Each time we valiate a SynAck, resend() is
+								// called and all Data in pipeline map will be
+								// resent. Read from the Outbox() the correct
+								// number of times, so that the output channel
+								// is empty for the next Recover() iteration.
+								for j := 0; j <= i; j++ {
+									var dataMsg *ksmsg.KeysplittingMessage
+									Eventually(sut.Outbox()).Should(Receive(&dataMsg))
+									Expect(dataMsg.Type).Should(Equal(ksmsg.Data))
+								}
+							}
+
+							agentErrorMessage = SendDataAndBuildErrorMessage()
+						})
+
+						AssertFailedBehavior()
+
+						It("errors", func() {
+							Expect(recoverError).Should(HaveOccurred())
+						})
+					})
+
+					Context("when building Syn during recovery fails", func() {
+						var refreshError error
+
+						BeforeEach(func() {
+							PerformHandshake()
+							agentErrorMessage = SendDataAndBuildErrorMessage()
+
+							// Reset the token refresher mock after performing
+							// successful handshake, so that we can return error
+							mockTokenRefresher.ExpectedCalls = nil
+							// Mock the token refresher to return error to cause
+							// error when building Syn during recovery.
+							By("Mocking the token refresher to return an error")
+							refreshError = errors.New("refresh error")
+							mockTokenRefresher.On("Refresh").Return(nil, refreshError)
+						})
+
+						AssertFailedBehavior()
+
+						It("errors", func() {
+							Expect(recoverError).To(MatchError(refreshError))
+						})
+
+						It("daemon is still recovering", func() {
+							Expect(sut.Recovering()).Should(BeTrue())
+						})
+					})
+				})
+			})
 		})
 	})
 })
