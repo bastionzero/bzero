@@ -40,6 +40,9 @@ var (
 	// Shell specific arguments
 	connectionId  string
 	dataChannelId string
+
+	connectionServiceUrl       string
+	connectionServiceAuthToken string
 )
 
 const (
@@ -111,7 +114,7 @@ func reportError(logger *logger.Logger, errorReport error) {
 }
 
 func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
-	logger.Infof("Opening websocket to Bastion: %s for plugin %s", serviceUrl, plugin)
+	logger.Infof("Opening websocket to the Connection Node: %s for plugin %s", serviceUrl, plugin)
 
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Kube:
@@ -135,6 +138,8 @@ func startShellServer(logger *logger.Logger, headers map[string]string, params m
 	subLogger := logger.GetComponentLogger("shellserver")
 
 	params["connection_id"] = connectionId
+	params["connectionServiceUrl"] = connectionServiceUrl
+	params["connectionServiceAuthToken"] = connectionServiceAuthToken
 
 	return shellserver.StartShellServer(
 		subLogger,
@@ -257,6 +262,8 @@ func parseFlags() error {
 	// Shell plugin variables
 	flag.StringVar(&connectionId, "connectionId", "", "The bzero connection id for the shell connection")
 	flag.StringVar(&dataChannelId, "dataChannelId", "", "The datachannel id to attach to an existing shell connection")
+	flag.StringVar(&connectionServiceUrl, "connectionServiceUrl", "", "The bzero connection id for the shell connection")
+	flag.StringVar(&connectionServiceAuthToken, "connectionServiceAuthToken", "", "The bzero connection id for the shell connection")
 
 	flag.Parse()
 
