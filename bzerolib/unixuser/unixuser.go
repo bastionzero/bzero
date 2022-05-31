@@ -149,6 +149,8 @@ func convertToUnixUser(usr *user.User) (*UnixUser, error) {
 		return nil, fmt.Errorf("failed to convert user string UID to int: %s", err)
 	} else if gid, err := strconv.Atoi(usr.Gid); err != nil {
 		return nil, fmt.Errorf("failed to convert user string GID to int: %s", err)
+	} else if err := validateUsername(usr.Username); err != nil {
+		return nil, err
 	} else {
 		return &UnixUser{
 			Uid:      uid,

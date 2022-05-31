@@ -68,12 +68,9 @@ func (u *UnixUser) CanOpen(path string) (bool, error) {
 // create a given file. It loops through the path, searching for the longest path
 // that exists and then checks the user's ability to create in that directory.
 func (u *UnixUser) CanCreate(path string) (bool, error) {
-	if path == "/" {
-		return u.checkPermissions(path, filemode.Create)
-	} else {
-		// slash at end will not give us the proper dir in the .Dir call below
-		// so we remove it, if it exists
-		path = strings.TrimSuffix(path, "/")
+	path, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve sym links in path %s: %s", path, err)
 	}
 
 	// filepath.Dir will return "." if the filepath is empty, but we want to ignore
@@ -115,7 +112,7 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 		return true, nil
 	case fileUid:
 		if ok := perms.Verify(filemode.User, check); !ok {
-			return false, fmt.Errorf("user is owner but does not have sufficient permission to %s %s: %s", check, path, info.Mode().String())
+			return false, fmt.Errorf("%s is owner but does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
 		} else {
 			return true, nil
 		}
@@ -129,7 +126,7 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 		for _, gid := range gids {
 			if uint32(gid) == fileGid {
 				if ok := perms.Verify(filemode.Group, check); !ok {
-					return false, fmt.Errorf("user is a group member but does not have sufficient permission to %s %s: %s", check, path, info.Mode().String())
+					return false, fmt.Errorf("%s is a group member but does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
 				} else {
 					return true, nil
 				}
@@ -139,7 +136,7 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 
 	// check to see if anyone can write to the file
 	if ok := perms.Verify(filemode.Other, check); !ok {
-		return false, fmt.Errorf("user is neither owner nor group member and does not have sufficient permission to %s %s: %s", check, path, info.Mode().String())
+		return false, fmt.Errorf("%s is neither owner nor group member and does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
 	} else {
 		return true, nil
 	}

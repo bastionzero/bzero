@@ -13,6 +13,10 @@ const (
 	executeBitOffset = 2
 )
 
+// Permissions bits are segmented to describe the permissions of 3 different groups: user, group, and other
+// The "user" set is for the owner of the file
+// The "group" set is for those in the same group as the file
+// the "other" set is for those that are neither owners nor group members
 type PrivilegeSet int
 
 const (
