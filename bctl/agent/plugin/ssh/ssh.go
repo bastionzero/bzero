@@ -71,6 +71,9 @@ func New(logger *logger.Logger,
 			}
 
 			subSubLogger := subLogger.GetComponentLogger("authorized_keys")
+
+			// we place the authorized keys lock file inside the user's /home/.ssh/ directory because that is the least bad place for it
+			// source: https://i.stack.imgur.com/BlpRb.png
 			authKeys, err := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan, sshFolder, sshFolder, maxKeyLifetime)
 			if err != nil {
 				rerr = fmt.Errorf("failed to set up authorized_keys file: %s", err)

@@ -19,10 +19,10 @@ import (
 
 func TestDefaultSsh(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Daemon DefaultSsh Suite")
+	RunSpecs(t, "Daemon OpaqueSsh Suite")
 }
 
-var _ = Describe("Daemon DefaultSsh action", func() {
+var _ = Describe("Daemon OpaqueSsh action", func() {
 	logger := logger.MockLogger()
 	identityFile := "testFile"
 	testData := "testData"
