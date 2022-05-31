@@ -41,7 +41,7 @@ func New(logger *logger.Logger,
 	// Unmarshal the Syn payload
 	var synPayload bzssh.SshActionParams
 	if err := json.Unmarshal(payload, &synPayload); err != nil {
-		return nil, fmt.Errorf("malformed SSH plugin SYN payload %v", string(payload))
+		return nil, fmt.Errorf("malformed Ssh plugin SYN payload %v", string(payload))
 	}
 
 	// Create our plugin
@@ -88,20 +88,20 @@ func New(logger *logger.Logger,
 			)
 
 		default:
-			rerr = fmt.Errorf("unhandled SSH action")
+			rerr = fmt.Errorf("unhandled Ssh action")
 		}
 
 		if rerr != nil {
-			return nil, fmt.Errorf("failed to start SSH plugin with action %s: %s", action, rerr)
+			return nil, fmt.Errorf("failed to start Ssh plugin with action %s: %s", action, rerr)
 		} else {
-			plugin.logger.Infof("SSH plugin started with %v action", action)
+			plugin.logger.Infof("Ssh plugin started with %v action", action)
 			return plugin, nil
 		}
 	}
 }
 
 func (s *SshPlugin) Receive(action string, actionPayload []byte) ([]byte, error) {
-	s.logger.Debugf("SSH plugin received message with %s action", action)
+	s.logger.Debugf("Ssh plugin received message with %s action", action)
 
 	if payload, err := s.action.Receive(action, actionPayload); err != nil {
 		s.logger.Error(err)
