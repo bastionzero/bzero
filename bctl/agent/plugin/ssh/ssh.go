@@ -33,10 +33,7 @@ type SshPlugin struct {
 	doneChan chan struct{}
 }
 
-func New(logger *logger.Logger,
-	ch chan smsg.StreamMessage,
-	action string,
-	payload []byte) (*SshPlugin, error) {
+func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, payload []byte) (*SshPlugin, error) {
 
 	// Unmarshal the Syn payload
 	var synPayload bzssh.SshActionParams

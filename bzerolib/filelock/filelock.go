@@ -7,9 +7,13 @@ import (
 	"github.com/gofrs/flock"
 )
 
-// we need to implement a small client layer on top of flock to make sure we manage
-// the proper deletion of the lock file it creates, and so that parent processes can
-// require that all of their children use the same underlying lock file
+/* we need to implement a small client layer on top of flock to make sure we manage
+the proper deletion of the lock file it creates, and so that parent processes can
+require that all of their children use the same underlying lock file
+
+The exact usage pattern of FileLock will depend somewhat on who needs the lock -- for example,
+see the docstring of Cleanup()
+*/
 type FileLock struct {
 	lockFile string
 }
@@ -29,7 +33,9 @@ func (f *FileLock) NewLock() (*flock.Flock, error) {
 	return flock.New(f.lockFile), nil
 }
 
-// you should always call `defer Cleanup()` on your LockService to ensure the underlying lockfile is removed
+// remove the underlying lock file from the OS
+// if a parent process gives locks to its children, it should call Cleanup() when all children are done
+// if a process or class creates its own lock, it should not call Cleanup(), since its siblings may be looking at the same file
 func (f *FileLock) Cleanup() error {
 	if err := os.Remove(f.lockFile); err != nil {
 		return fmt.Errorf("failed to remove lock file: %s", err)

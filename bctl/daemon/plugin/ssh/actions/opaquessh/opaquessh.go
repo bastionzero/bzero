@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
 	"gopkg.in/tomb.v2"
 
@@ -17,10 +16,8 @@ import (
 )
 
 const (
-	InputBufferSize   = int(64 * 1024)
-	InputDebounceTime = 5 * time.Millisecond
-	endedByUser       = "SSH session ended"
-	maxKeyLifetime    = 30 * time.Second
+	InputBufferSize = int(64 * 1024)
+	endedByUser     = "SSH session ended"
 )
 
 type OpaqueSsh struct {
@@ -101,16 +98,6 @@ func (d *OpaqueSsh) Start() error {
 	go func() {
 		defer close(d.doneChan)
 		<-d.tmb.Dying()
-	}()
-
-	// remove the key since it's ephemeral
-	go func() {
-		select {
-		case <-d.doneChan:
-			d.logger.Infof("Detected a closed done chan, removing temporary key file")
-		case <-time.After(maxKeyLifetime):
-			d.logger.Infof("SSH key expired, removing temporary key file")
-		}
 	}()
 
 	d.tmb.Go(func() error {
