@@ -275,7 +275,7 @@ func (a *AuthorizedKeys) setFileLock(homeDir string, lockFileFolder string) erro
 	if err := os.MkdirAll(filepath.Join(homeDir, lockFileFolder), os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create %s/%s/: %s", homeDir, lockFileFolder, err)
 	} else {
-		a.fileLock = filelock.NewLockService(filepath.Join(homeDir, lockFileFolder, lockFileName))
+		a.fileLock = filelock.NewFileLock(filepath.Join(homeDir, lockFileFolder, lockFileName))
 		return nil
 	}
 }

@@ -15,7 +15,7 @@ type FileLock struct {
 }
 
 // create a new FlockLockService using `path` as the underlying lockfile
-func NewLockService(path string) *FileLock {
+func NewFileLock(path string) *FileLock {
 	return &FileLock{
 		lockFile: path,
 	}
@@ -24,7 +24,7 @@ func NewLockService(path string) *FileLock {
 // get a new lock -- you can use its `TryLock` and `Unlock` methods to ensure threadsafe file operation
 func (f *FileLock) NewLock() (*flock.Flock, error) {
 	if f.lockFile == "" {
-		return nil, fmt.Errorf("you must use the NewLockService() constructor and set a file path first")
+		return nil, fmt.Errorf("you must use the NewFileLock() constructor and set a file path first")
 	}
 	return flock.New(f.lockFile), nil
 }
