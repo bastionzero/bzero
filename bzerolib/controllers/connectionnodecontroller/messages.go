@@ -7,6 +7,13 @@ type CreateKubeConnectionRequest struct {
 	TargetId     string   `json:"targetId"`
 }
 
+type CreateSshConnectionRequest struct {
+	TargetId   string `json:"targetId"`
+	TargetUser string `json:"targetUser"`
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+}
+
 type CreateConnectionRequest struct {
 	TargetId string `json:"targetId"`
 }

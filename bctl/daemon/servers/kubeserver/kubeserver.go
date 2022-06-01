@@ -77,7 +77,7 @@ func StartKubeServer(
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
 ) error {
 
-	listener := &KubeServer{
+	server := &KubeServer{
 		logger:              logger,
 		exitMessage:         "",
 		localhostToken:      localhostToken,
@@ -93,8 +93,8 @@ func StartKubeServer(
 	}
 
 	// Create a new websocket
-	if err := listener.newWebsocket(uuid.New().String()); err != nil {
-		listener.logger.Error(err)
+	if err := server.newWebsocket(uuid.New().String()); err != nil {
+		server.logger.Error(err)
 		return err
 	}
 
@@ -102,15 +102,15 @@ func StartKubeServer(
 	go func() {
 		// Define our http handlers
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			listener.rootCallback(logger, w, r)
+			server.rootCallback(logger, w, r)
 		})
 
 		http.HandleFunc("/bastionzero-ready", func(w http.ResponseWriter, r *http.Request) {
-			listener.isReadyCallback(w, r)
+			server.isReadyCallback(w, r)
 		})
 
 		http.HandleFunc("/bastionzero-status", func(w http.ResponseWriter, r *http.Request) {
-			listener.statusCallback(w, r)
+			server.statusCallback(w, r)
 		})
 
 		if err := http.ListenAndServeTLS(localHost+":"+localPort, certPath, keyPath, nil); err != nil {

@@ -58,6 +58,7 @@ type DefaultShell struct {
 	doneChan             chan struct{}
 	streamOutputChan     chan smsg.StreamMessage
 	streamSequenceNumber int
+	streamMessageVersion smsg.SchemaVersion
 
 	// stdout circular buffer
 	ringBuffer *ringbuffer.RingBuffer
@@ -101,6 +102,15 @@ func (d *DefaultShell) Receive(action string, actionPayload []byte) ([]byte, err
 		// the plugin when it processes the SYN message. This is important
 		// because the RunAsUser is part of policy and the policy check happens
 		// based on the SYN message when the datachannel is first opened.
+
+		var shellOpen bzshell.ShellOpenMessage
+		if err := json.Unmarshal(actionPayload, &shellOpen); err != nil {
+			rerr := fmt.Errorf("malformed shell open payload: %s %+v", err, actionPayload)
+			d.logger.Error(rerr)
+			return []byte{}, rerr
+		}
+		d.streamMessageVersion = shellOpen.StreamMessageVersion
+
 		if err := d.open(); err != nil {
 			d.logger.Error(err)
 			return []byte{}, err
@@ -229,6 +239,7 @@ func (d *DefaultShell) writePump() {
 
 func (d *DefaultShell) sendStreamMessage(streamType smsg.StreamType, content []byte) {
 	message := smsg.StreamMessage{
+		SchemaVersion:  d.streamMessageVersion,
 		Action:         "shell/default",
 		Type:           streamType,
 		SequenceNumber: d.streamSequenceNumber,

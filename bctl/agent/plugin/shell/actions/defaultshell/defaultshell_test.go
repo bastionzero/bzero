@@ -74,10 +74,10 @@ func createPseudoTerminal() MockPseudoTerminal {
 
 func shellOpen(t *testing.T, dshell *DefaultShell) {
 	action := string(bzshell.ShellOpen)
-	actionPayload := []byte{}
+	actionPayload, _ := json.Marshal(bzshell.ShellOpenMessage{})
 	retActionPayload, err := dshell.Receive(action, actionPayload)
 	assert.Nil(t, err)
-	assert.Equal(t, retActionPayload, actionPayload)
+	assert.Equal(t, []byte{}, retActionPayload)
 	assert.NotNil(t, dshell.terminal)
 }
 
