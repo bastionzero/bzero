@@ -32,10 +32,10 @@ func (b *BZCert) Verify(idpProvider string, idpOrgId string) (string, time.Time,
 	}
 
 	if _, err := verifier.VerifyIdToken(b.InitialIdToken, true, true); err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, fmt.Errorf("error verifying initial id token: %w", err)
 	}
 	if exp, err := verifier.VerifyIdToken(b.CurrentIdToken, false, false); err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, fmt.Errorf("error verifying current id token: %w", err)
 	} else {
 		if hash, ok := b.Hash(); ok {
 			return hash, exp, err
