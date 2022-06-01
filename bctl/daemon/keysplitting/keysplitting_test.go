@@ -572,6 +572,16 @@ var _ = Describe("Daemon keysplitting", func() {
 			Expect(dataPayload.ActionPayload).To(Equal(expectedPayload), "The Data's payload should match the expected payload")
 		}
 
+		BuildErrorMessage := func(hPointer string) rrr.ErrorMessage {
+			return rrr.ErrorMessage{
+				SchemaVersion: rrr.CurrentVersion,
+				Timestamp:     time.Now().Unix(),
+				Type:          string(rrr.KeysplittingValidationError),
+				Message:       "agent error message",
+				HPointer:      hPointer,
+			}
+		}
+
 		// Remove this context when CWC-1820 is resolved
 		Context("when pipelining is disabled (CWC-1820)", func() {
 			var dataMsg *ksmsg.KeysplittingMessage
@@ -756,24 +766,15 @@ var _ = Describe("Daemon keysplitting", func() {
 					var agentErrorMessage rrr.ErrorMessage
 					var recoverError error
 
-					JustBeforeEach(func() {
-						recoverError = sut.Recover(agentErrorMessage)
-					})
-
-					BuildErrorMessage := func(hPointer string) rrr.ErrorMessage {
-						return rrr.ErrorMessage{
-							SchemaVersion: rrr.CurrentVersion,
-							Timestamp:     time.Now().Unix(),
-							Type:          string(rrr.KeysplittingValidationError),
-							Message:       "agent error message",
-							HPointer:      hPointer,
-						}
-					}
 					SendDataAndBuildErrorMessage := func() rrr.ErrorMessage {
 						By("Sending data and building an agent error message")
 						dataMsg := SendDataWithPayload([]byte("agent fail on this data message"))
 						return BuildErrorMessage(dataMsg.Hash())
 					}
+
+					JustBeforeEach(func() {
+						recoverError = sut.Recover(agentErrorMessage)
+					})
 
 					AssertFailedBehavior := func() {
 						It("no Syn message is sent", func() {
