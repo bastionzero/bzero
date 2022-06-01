@@ -68,10 +68,7 @@ func (u *UnixUser) CanOpen(path string) (bool, error) {
 // create a given file. It loops through the path, searching for the longest path
 // that exists and then checks the user's ability to create in that directory.
 func (u *UnixUser) CanCreate(path string) (bool, error) {
-	path, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return false, fmt.Errorf("failed to resolve sym links in path %s: %s", path, err)
-	}
+	path = filepath.Clean(path)
 
 	// filepath.Dir will return "." if the filepath is empty, but we want to ignore
 	// that if it was not in the original path
@@ -84,6 +81,8 @@ func (u *UnixUser) CanCreate(path string) (bool, error) {
 			continue
 		} else if err != nil {
 			return false, fmt.Errorf("failed to read file path: %s", err)
+		} else if path, err = filepath.EvalSymlinks(path); err != nil {
+			return false, fmt.Errorf("failed to resolve sym links in path %s: %s", path, err)
 		} else {
 			return u.checkPermissions(path, filemode.Create)
 		}
@@ -98,7 +97,7 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 	} else if err != nil {
 		return false, fmt.Errorf("error grabbing file %s info: %s", path, err)
 	} else if info.Sys() == nil {
-		return false, fmt.Errorf("unable to retrieve owner or group")
+		return false, fmt.Errorf("unable to retrieve associated uid and gid of file: %s", path)
 	}
 
 	// create our parser so we can abstract annoying bit checks
