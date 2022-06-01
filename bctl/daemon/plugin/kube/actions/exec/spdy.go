@@ -136,7 +136,7 @@ WaitForStreams:
 				s.resizeStream = stream
 				go waitStreamReply(stopCtx, stream.replySent, replyChan)
 			default:
-				fmt.Printf("Ignoring unexpected stream type: %q", streamType)
+				s.logger.Infof("Ignoring unexpected stream type: %q", streamType)
 			}
 		case <-replyChan:
 			receivedStreams++

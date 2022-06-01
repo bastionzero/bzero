@@ -66,7 +66,7 @@ func (k *KubeDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
 	if k.action != nil {
 		k.action.ReceiveStream(smessage)
 	} else {
-		k.logger.Debugf("db plugin received a stream message before an action was created. Ignoring")
+		k.logger.Debugf("Kube plugin received a stream message before an action was created. Ignoring")
 	}
 }
 
