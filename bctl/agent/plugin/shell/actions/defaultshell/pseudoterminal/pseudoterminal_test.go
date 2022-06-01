@@ -2,12 +2,11 @@ package pseudoterminal
 
 import (
 	"fmt"
-	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -78,48 +77,15 @@ func TestSetSize(t *testing.T) {
 	}
 }
 
-func TestDoesUserExist(t *testing.T) {
-	shellCommand := defaultShellCommand
-	shellCommandArgs := []string{"-c"}
-
-	realUser, err := whoAmI()
-	if err != nil {
-		t.Error("failed to grab current user")
-	}
-	assert.Nil(t, doesUserExist(realUser, shellCommand, shellCommandArgs))
-
-	fakeUser := "MonsieurFake"
-	assert.NotNil(t, doesUserExist(fakeUser, shellCommand, shellCommandArgs))
-}
-
 func getPseudoTerminal() (*PseudoTerminal, error) {
-	logger := logger.MockLogger()
-	runAsUser, err := whoAmI()
-	if err != nil {
-		return nil, fmt.Errorf("failed to grab current user")
-	}
 	commandstr := ""
-
-	if terminal, err := New(logger, runAsUser, commandstr); err != nil {
+	logger := logger.MockLogger()
+	if usr, err := unixuser.Current(); err != nil {
+		return nil, err
+	} else if terminal, err := New(logger, usr, commandstr); err != nil {
 		return nil, fmt.Errorf("failed to create new pseudo terminal: %s", err)
 	} else {
 		return terminal, nil
 	}
-}
 
-// whoAmI returns the current username that the agent is running under
-func whoAmI() (string, error) {
-	cmdstr := "whoami"
-	shellCmdArgs := append([]string{"-c"}, cmdstr)
-	cmd := exec.Command(defaultShellCommand, shellCmdArgs...)
-	stdout, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			// The program has exited with an exit code != 0
-			return "", fmt.Errorf("encountered an error while running command %v : %s", cmdstr, exitErr)
-		}
-		return "", nil
-	}
-
-	return strings.TrimSpace(string(stdout)), nil
 }

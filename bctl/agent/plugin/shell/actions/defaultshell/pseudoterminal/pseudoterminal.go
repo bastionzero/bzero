@@ -18,18 +18,16 @@
 package pseudoterminal
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"os/user"
 	"path"
-	"strconv"
 	"strings"
 	"syscall"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 	"github.com/creack/pty"
 )
 
@@ -37,9 +35,8 @@ const (
 	termEnvVariable     = "TERM=xterm-256color"
 	langEnvVariable     = "LANG=C.UTF-8"
 	langEnvVariableKey  = "LANG"
-	homeEnvVariable     = "HOME=/home/"
-	groupsIdentifier    = "groups="
 	defaultShellCommand = "sh"
+	homeEnvVariableName = "HOME="
 )
 
 type PseudoTerminal struct {
@@ -49,14 +46,9 @@ type PseudoTerminal struct {
 	doneChan chan struct{}
 }
 
-// StartPty starts pty and provides handles to stdin and stdout
-func New(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTerminal, error) {
+// New starts pty and provides handles to stdin and stdout
+func New(logger *logger.Logger, runAsUser *unixuser.UnixUser, commandstr string) (*PseudoTerminal, error) {
 	logger.Info("Starting up pseudo terminal")
-
-	// Check if runAsUser is valid and exists
-	if strings.TrimSpace(runAsUser) == "" {
-		return nil, errors.New("no RunAsUser provided")
-	}
 
 	// Attempt to get default shell to use for the runAsUser
 	logger.Debugf("Trying to get default shell to use for user %s", runAsUser)
@@ -65,15 +57,10 @@ func New(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTer
 		logger.Errorf("Failed getting default shell for user %s: %s", runAsUser, err)
 	}
 
-	shellCommandArgs := []string{"-c"}
-	if err := doesUserExist(runAsUser, shellCommand, shellCommandArgs); err != nil {
-		// if user does not exist, fail the session
-		return nil, err
-	}
-
 	logger.Debugf("Using default shell %s", shellCommand)
 
-	if cmd, err := buildCommand(commandstr, shellCommand, shellCommandArgs, runAsUser); err != nil {
+	shellCommandArgs := []string{"-c"}
+	if cmd, err := buildCommand(runAsUser, commandstr, shellCommand, shellCommandArgs); err != nil {
 		return nil, err
 	} else if ptyFile, err := pty.Start(cmd); err != nil {
 		logger.Errorf("Failed to start pty: %s\n", err)
@@ -104,9 +91,8 @@ func New(logger *logger.Logger, runAsUser string, commandstr string) (*PseudoTer
 	}
 }
 
-func buildCommand(commandstr string, shellCommand string, shellCommandArgs []string, runAsUser string) (*exec.Cmd, error) {
+func buildCommand(runAsUser *unixuser.UnixUser, commandstr string, shellCommand string, shellCommandArgs []string) (*exec.Cmd, error) {
 	var cmd *exec.Cmd
-
 	if strings.TrimSpace(commandstr) == "" {
 		cmd = exec.Command(shellCommand)
 	} else {
@@ -125,26 +111,26 @@ func buildCommand(commandstr string, shellCommand string, shellCommandArgs []str
 		cmd.Env = append(cmd.Env, langEnvVariable)
 	}
 
-	// Get the uid and gid of the runas user.
-	uid, gid, groups, err := getUserCredentials(runAsUser, shellCommand, shellCommandArgs)
+	gids, err := runAsUser.GroupIds()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to retrieve users group ids: %s", err)
 	}
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{}
-	// Changed NoSetGroups = true (was NoSetGroups = false) because it doesn't work when set to true
-	cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uid, Gid: gid, Groups: groups, NoSetGroups: true}
+	// run command as user
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid:         runAsUser.Uid,
+			Gid:         runAsUser.Gid,
+			Groups:      gids,
+			NoSetGroups: true,
+		},
+	}
 
 	// Setting home environment variable for RunAs user
-	runAsUserHomeEnvVariable := homeEnvVariable + runAsUser
-	cmd.Env = append(cmd.Env, runAsUserHomeEnvVariable)
+	cmd.Env = append(cmd.Env, homeEnvVariableName+runAsUser.HomeDir)
 
 	// Setting cwd of the command to be the user's home directory
-	if currentUser, err := user.Lookup(runAsUser); err != nil {
-		return nil, fmt.Errorf("failed to lookup user: %s", runAsUser)
-	} else {
-		cmd.Dir = currentUser.HomeDir
-	}
+	cmd.Dir = runAsUser.HomeDir
 
 	return cmd, nil
 }
@@ -194,93 +180,15 @@ func (p *PseudoTerminal) SetSize(cols, rows uint32) error {
 	return nil
 }
 
-// DoesUserExist checks if given user already exists
-func doesUserExist(username string, shellCommand string, shellCommandArgs []string) error {
-	shellCmdArgs := append(shellCommandArgs, fmt.Sprintf("id %s", username))
-	cmd := exec.Command(shellCommand, shellCmdArgs...)
-	if err := cmd.Run(); err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
-			// The program has exited with an exit code != 0
-			return fmt.Errorf("%s user does not exist", username)
-		} else {
-			return fmt.Errorf("failed to check if user already exists")
-		}
-	}
-	return nil
-}
-
 // Get the default shell for the user based on configuration in /etc/passwd file.
 // https://unix.stackexchange.com/a/352320
-func getDefaultShellForUser(user string) (string, error) {
-	defaultShell := defaultShellCommand
-	defaultShellCmd := exec.Command(defaultShell, "-c", fmt.Sprintf("getent passwd %s | awk -F: '{print $NF}'", user))
-
-	if out, err := defaultShellCmd.Output(); err != nil {
-		return defaultShell, fmt.Errorf("failed to get default shell for user %s: %s", user, err)
-	} else if len(out) == 0 {
-		return defaultShell, nil
+func getDefaultShellForUser(usr *unixuser.UnixUser) (string, error) {
+	if defaultShell, err := usr.DefaultShell(); err != nil {
+		return "", err
 	} else {
-		shellCmdPath := strings.TrimSpace(string(out))
 		// Use just the shell command and not full path because exec.Command()
 		// will find the correct path to use by searching for the command in $PATH
-		defaultShell = path.Base(shellCmdPath) // /bin/bash -> bash
+		defaultShell = path.Base(defaultShell) // /bin/bash -> bash
 		return defaultShell, nil
 	}
-}
-
-// getUserCredentials returns the uid, gid and groups associated to the runas user.
-func getUserCredentials(sessionUser string, shellCommand string, shellCommandArgs []string) (uint32, uint32, []uint32, error) {
-	uidCmdArgs := append(shellCommandArgs, fmt.Sprintf("id -u %s", sessionUser))
-	cmd := exec.Command(shellCommand, uidCmdArgs...)
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, 0, nil, fmt.Errorf("failed to retrieve uid for %s: %v", sessionUser, err)
-	}
-
-	uid, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, 0, nil, fmt.Errorf("%s not found: %v", sessionUser, err)
-	}
-
-	gidCmdArgs := append(shellCommandArgs, fmt.Sprintf("id -g %s", sessionUser))
-	cmd = exec.Command(shellCommand, gidCmdArgs...)
-	out, err = cmd.Output()
-	if err != nil {
-		return 0, 0, nil, fmt.Errorf("failed to retrieve gid for %s: %v", sessionUser, err)
-	}
-
-	gid, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, 0, nil, fmt.Errorf("%s not found: %v", sessionUser, err)
-	}
-
-	// Get the list of associated groups
-	groupNamesCmdArgs := append(shellCommandArgs, fmt.Sprintf("id %s", sessionUser))
-	cmd = exec.Command(shellCommand, groupNamesCmdArgs...)
-	out, err = cmd.Output()
-	if err != nil {
-		return 0, 0, nil, fmt.Errorf("failed to retrieve groups for %s: %v", sessionUser, err)
-	}
-
-	// Example format of output: uid=1873601143(ssm-user) gid=1873600513(domain users) groups=1873600513(domain users),1873601620(joiners),1873601125(aws delegated add workstations to domain users)
-	// Extract groups from the output
-	groupsIndex := strings.Index(string(out), groupsIdentifier)
-	var groupIds []uint32
-
-	if groupsIndex > 0 {
-		// Extract groups names and ids from the output
-		groupNamesAndIds := strings.Split(string(out)[groupsIndex+len(groupsIdentifier):], ",")
-
-		// Extract group ids from the output
-		for _, value := range groupNamesAndIds {
-			groupId, err := strconv.Atoi(strings.TrimSpace(value[:strings.Index(value, "(")]))
-			if err != nil {
-				return 0, 0, nil, fmt.Errorf("failed to retrieve group id from %s: %v", value, err)
-			}
-
-			groupIds = append(groupIds, uint32(groupId))
-		}
-	}
-
-	return uint32(uid), uint32(gid), groupIds, nil
 }
