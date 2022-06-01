@@ -13,7 +13,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/filelock"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/unixuser"
+	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 )
 
 const (
@@ -21,6 +21,7 @@ const (
 	lockFileName                 = ".bzero.lock"
 	authorizedKeyFileName        = "authorized_keys"
 	authorizedKeysFilePermission = 0600 // only owner (user) can read/write
+	authorizedKeysDirPermission  = 0700 // only owner (user) can read/read/execute
 )
 
 type AuthorizedKeys struct {
@@ -215,7 +216,7 @@ func (a *AuthorizedKeys) cleanAuthorizedKeys(currentKey string) error {
 func (a *AuthorizedKeys) setKeyFilePath(keyFolder string) error {
 	path := filepath.Join(a.usr.HomeDir, keyFolder)
 
-	if err := a.usr.Mkdir(path, 0700); err != nil {
+	if err := a.usr.Mkdir(path, authorizedKeysDirPermission); err != nil {
 		return err
 	} else {
 		a.keyFilePath = filepath.Join(path, authorizedKeyFileName)
