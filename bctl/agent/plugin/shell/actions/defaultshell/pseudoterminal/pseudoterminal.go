@@ -22,7 +22,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path"
 	"strings"
 	"syscall"
 
@@ -51,10 +50,10 @@ func New(logger *logger.Logger, runAsUser *unixuser.UnixUser, commandstr string)
 	logger.Info("Starting up pseudo terminal")
 
 	// Attempt to get default shell to use for the runAsUser
-	logger.Debugf("Trying to get default shell to use for user %s", runAsUser)
-	shellCommand, err := getDefaultShellForUser(runAsUser)
-	if err != nil {
-		logger.Errorf("Failed getting default shell for user %s: %s", runAsUser, err)
+	logger.Debugf("Getting user's default shell: %s", runAsUser.Username)
+	shellCommand := defaultShellCommand
+	if runAsUser.Shell != "" {
+		shellCommand = runAsUser.Shell
 	}
 
 	logger.Debugf("Using default shell %s", shellCommand)
@@ -63,7 +62,6 @@ func New(logger *logger.Logger, runAsUser *unixuser.UnixUser, commandstr string)
 	if cmd, err := buildCommand(runAsUser, commandstr, shellCommand, shellCommandArgs); err != nil {
 		return nil, err
 	} else if ptyFile, err := pty.Start(cmd); err != nil {
-		logger.Errorf("Failed to start pty: %s\n", err)
 		return nil, fmt.Errorf("failed to start pty: %s", err)
 	} else {
 
@@ -178,17 +176,4 @@ func (p *PseudoTerminal) SetSize(cols, rows uint32) error {
 		return fmt.Errorf("set terminal window size failed: %s", err)
 	}
 	return nil
-}
-
-// Get the default shell for the user based on configuration in /etc/passwd file.
-// https://unix.stackexchange.com/a/352320
-func getDefaultShellForUser(usr *unixuser.UnixUser) (string, error) {
-	if defaultShell, err := usr.DefaultShell(); err != nil {
-		return "", err
-	} else {
-		// Use just the shell command and not full path because exec.Command()
-		// will find the correct path to use by searching for the command in $PATH
-		defaultShell = path.Base(defaultShell) // /bin/bash -> bash
-		return defaultShell, nil
-	}
 }

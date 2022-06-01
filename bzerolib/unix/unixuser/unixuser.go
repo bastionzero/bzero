@@ -44,6 +44,7 @@ type UnixUser struct {
 	Username string
 	Name     string
 	HomeDir  string
+	Shell    string
 	usr      *user.User
 }
 
@@ -79,31 +80,6 @@ func (u *UnixUser) GroupIds() ([]uint32, error) {
 		}
 		return gidInts, nil
 	}
-}
-
-// Get the default shell for the user based on configuration in /etc/passwd file.
-func (u *UnixUser) DefaultShell() (string, error) {
-	// read the authorized key file
-	fileBytes, err := os.ReadFile(passwdFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to read from %s file: %s", passwdFile, err)
-	}
-
-	// iterate through file lines until we find the entry for our user
-	scanner := bufio.NewScanner(bytes.NewReader(fileBytes))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, u.Username) {
-			entries := strings.Split(line, ":")
-			return strings.TrimSpace(entries[len(entries)-1]), nil
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("failed to iterate through file %s: %s", passwdFile, err)
-	}
-
-	return "", fmt.Errorf("%s does not exist in %s", u.Username, passwdFile)
 }
 
 // this function creates a directory as a user. First it checks user permissions against
@@ -165,6 +141,27 @@ func (u *UnixUser) OpenFile(path string, flag int, perm fs.FileMode) (*os.File, 
 	return os.OpenFile(path, flag, perm)
 }
 
+// Get the default shell for the user based on configuration in /etc/passwd file.
+func getDefaultShell(usrName string) string {
+	// read the authorized key file
+	fileBytes, err := os.ReadFile(passwdFile)
+	if err != nil {
+		return ""
+	}
+
+	// iterate through file lines until we find the entry for our user
+	scanner := bufio.NewScanner(bytes.NewReader(fileBytes))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, usrName) {
+			entries := strings.Split(line, ":")
+			return strings.TrimSpace(entries[len(entries)-1])
+		}
+	}
+
+	return ""
+}
+
 // test that the provided username is valid unix user name
 // source: https://unix.stackexchange.com/a/435120
 func validateUsername(username string) error {
@@ -190,6 +187,7 @@ func convertToUnixUser(usr *user.User) (*UnixUser, error) {
 			Username: usr.Username,
 			Name:     usr.Name,
 			HomeDir:  usr.HomeDir,
+			Shell:    getDefaultShell(usr.Username),
 			usr:      usr,
 		}, nil
 	}
