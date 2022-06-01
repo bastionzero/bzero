@@ -10,6 +10,7 @@ require (
 	bastionzero.com/bctl/v1/bctl v0.0.0-00010101000000-000000000000
 	github.com/cenkalti/backoff/v4 v4.1.1
 	github.com/coreos/go-oidc/v3 v3.0.0
+	github.com/gofrs/flock v0.8.1
 	github.com/gorilla/websocket v1.4.2
 	github.com/onsi/gomega v1.19.0
 	github.com/rs/zerolog v1.24.0

@@ -30,6 +30,7 @@ const (
 	Db      = 3
 	Web     = 4
 	Shell   = 5
+	Ssh     = 6
 
 	// Enum target types for agent side connections
 	AgentWebsocket = -1
@@ -445,6 +446,7 @@ func (w *Websocket) connect() error {
 			case Db:
 			case Web:
 			case Shell:
+			case Ssh:
 				return w.connectDaemonWebsocket()
 			case AgentWebsocket:
 				if err := w.connectAgentWebsocket(); err != nil {

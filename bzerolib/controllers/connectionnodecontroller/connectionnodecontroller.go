@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
@@ -19,11 +20,14 @@ type ConnectionNodeController struct {
 }
 
 const (
+	// Db related
+	createDbConnectionEndpoint = "/api/v2/connections/db"
+
 	// Kube related
 	createKubeConnectionEndpoint = "/api/v2/connections/kube"
 
-	// Db related
-	createDbConnectionEndpoint = "/api/v2/connections/db"
+	// Ssh related
+	createSshConnectionEndpoint = "/api/v2/connections/ssh"
 
 	// Web related
 	createWebConnectionEndpoint = "/api/v2/connections/web"
@@ -61,6 +65,15 @@ func (c *ConnectionNodeController) CloseConnection(connectionId string) error {
 	return nil
 }
 
+func (c *ConnectionNodeController) CreateDbConnection(targetId string) (ConnectionDetailsResponse, error) {
+	// Create our request
+	createDbConnectionRequest := CreateConnectionRequest{
+		TargetId: targetId,
+	}
+
+	return c.createConnection(createDbConnectionRequest, "db")
+}
+
 func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targetGroups []string, targetId string) (ConnectionDetailsResponse, error) {
 	// Create our request
 	createKubeConnectionRequest := CreateKubeConnectionRequest{
@@ -72,13 +85,24 @@ func (c *ConnectionNodeController) CreateKubeConnection(targetUser string, targe
 	return c.createConnection(createKubeConnectionRequest, "kube")
 }
 
-func (c *ConnectionNodeController) CreateDbConnection(targetId string) (ConnectionDetailsResponse, error) {
+func (c *ConnectionNodeController) CreateShellConnection(connectionId string) (ConnectionDetailsResponse, error) {
+	// Currently shell connections are still created by the zli before starting
+	// the daemon. So here we just need to directly query for the connection
+	// auth details
+	return c.createCnConnection(connectionId)
+}
+
+func (c *ConnectionNodeController) CreateSshConnection(targetId string, targetUser string, remoteHost string, remotePort string) (ConnectionDetailsResponse, error) {
 	// Create our request
-	createDbConnectionRequest := CreateConnectionRequest{
-		TargetId: targetId,
+	portInt, _ := strconv.Atoi(remotePort)
+	createSshConnectionRequest := CreateSshConnectionRequest{
+		TargetId:   targetId,
+		TargetUser: targetUser,
+		RemoteHost: remoteHost,
+		RemotePort: portInt,
 	}
 
-	return c.createConnection(createDbConnectionRequest, "db")
+	return c.createConnection(createSshConnectionRequest, "ssh")
 }
 
 func (c *ConnectionNodeController) CreateWebConnection(targetId string) (ConnectionDetailsResponse, error) {
@@ -90,23 +114,18 @@ func (c *ConnectionNodeController) CreateWebConnection(targetId string) (Connect
 	return c.createConnection(createWebConnectionRequest, "web")
 }
 
-func (c *ConnectionNodeController) CreateShellConnection(connectionId string) (ConnectionDetailsResponse, error) {
-	// Currently shell connections are still created by the zli before starting
-	// the daemon. So here we just need to directly query for the connection
-	// auth details
-	return c.createCnConnection(connectionId)
-}
-
 func (c *ConnectionNodeController) createConnection(request interface{}, connectionType string) (ConnectionDetailsResponse, error) {
 	// Build the endpoint we want to hit
 	endpoint := ""
 	switch connectionType {
-	case "kube":
-		endpoint = createKubeConnectionEndpoint
-	case "web":
-		endpoint = createWebConnectionEndpoint
 	case "db":
 		endpoint = createDbConnectionEndpoint
+	case "kube":
+		endpoint = createKubeConnectionEndpoint
+	case "ssh":
+		endpoint = createSshConnectionEndpoint
+	case "web":
+		endpoint = createWebConnectionEndpoint
 	default:
 		return ConnectionDetailsResponse{}, fmt.Errorf("attempting to make an unrecognized connection: %s", connectionType)
 	}

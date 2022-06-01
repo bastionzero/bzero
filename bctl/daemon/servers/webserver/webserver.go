@@ -66,7 +66,7 @@ func StartWebServer(logger *logger.Logger,
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
-	listener := &WebServer{
+	server := &WebServer{
 		logger:              logger,
 		serviceUrl:          serviceUrl,
 		params:              params,
@@ -82,8 +82,8 @@ func StartWebServer(logger *logger.Logger,
 	}
 
 	// Create a new websocket
-	if err := listener.newWebsocket(uuid.New().String()); err != nil {
-		listener.logger.Error(err)
+	if err := server.newWebsocket(uuid.New().String()); err != nil {
+		server.logger.Error(err)
 		return err
 	}
 
@@ -91,7 +91,7 @@ func StartWebServer(logger *logger.Logger,
 	go func() {
 		// Define our http handlers
 		// library will automatically put each call in its own thread
-		http.HandleFunc("/", listener.capRequestSize(listener.handleHttp))
+		http.HandleFunc("/", server.capRequestSize(server.handleHttp))
 
 		if err := http.ListenAndServe(fmt.Sprintf("%s:%s", localHost, localPort), nil); err != nil {
 			logger.Error(err)

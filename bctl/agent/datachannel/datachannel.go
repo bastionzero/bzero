@@ -14,6 +14,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -294,14 +295,16 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 	switch pluginName {
 	case bzplugin.Kube:
 		d.plugin, err = kube.New(subLogger, streamOutputChan, action, payload)
-	case bzplugin.Db:
-		d.plugin, err = db.New(subLogger, streamOutputChan, action, payload)
-	case bzplugin.Web:
-		d.plugin, err = web.New(subLogger, streamOutputChan, action, payload)
 	case bzplugin.Shell:
 		d.plugin, err = shell.New(subLogger, streamOutputChan, action, payload)
+	case bzplugin.Ssh:
+		d.plugin, err = ssh.New(subLogger, streamOutputChan, action, payload)
+	case bzplugin.Web:
+		d.plugin, err = web.New(subLogger, streamOutputChan, action, payload)
+	case bzplugin.Db:
+		d.plugin, err = db.New(subLogger, streamOutputChan, action, payload)
 	default:
-		return fmt.Errorf("unrecognized plugin name")
+		return fmt.Errorf("unrecognized plugin name %s", string(pluginName))
 	}
 
 	if err != nil {

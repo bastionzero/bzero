@@ -61,7 +61,7 @@ func StartDbServer(logger *logger.Logger,
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 
-	listener := &DbServer{
+	server := &DbServer{
 		logger:              logger,
 		serviceUrl:          serviceUrl,
 		params:              params,
@@ -77,8 +77,8 @@ func StartDbServer(logger *logger.Logger,
 	}
 
 	// Create a new websocket
-	if err := listener.newWebsocket(uuid.New().String()); err != nil {
-		listener.logger.Error(err)
+	if err := server.newWebsocket(uuid.New().String()); err != nil {
+		server.logger.Error(err)
 		return err
 	}
 
@@ -123,7 +123,7 @@ func StartDbServer(logger *logger.Logger,
 			plugin := db.New(pluginLogger)
 			if err := plugin.StartAction(bzdb.Dial, conn); err != nil {
 				logger.Errorf("error starting action: %s", err)
-			} else if err := listener.newDataChannel(dcId, string(bzdb.Dial), listener.websocket, plugin); err != nil {
+			} else if err := server.newDataChannel(dcId, string(bzdb.Dial), server.websocket, plugin); err != nil {
 				logger.Errorf("error starting datachannel: %s", err)
 			}
 		}()

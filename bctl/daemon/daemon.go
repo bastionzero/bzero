@@ -11,6 +11,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/shellserver"
+	"bastionzero.com/bctl/v1/bctl/daemon/servers/sshserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -26,23 +27,25 @@ var (
 	agentPubKey                                                      string
 
 	// Common/shared plugin arguments
-	targetUser string
+	targetUser                 string
+	remotePort                 int
+	connectionServiceUrl       string
+	connectionServiceAuthToken string
 
 	// Kube server specifc arguments
 	targetGroupsRaw, certPath, keyPath string
 	localhostToken, configPath         string
 	targetGroups                       []string
 
-	// Db and web specifc arguments
+	// Db, web, and ssh specifc arguments
 	remoteHost string
-	remotePort int
 
 	// Shell specific arguments
 	connectionId  string
 	dataChannelId string
 
-	connectionServiceUrl       string
-	connectionServiceAuthToken string
+	// SSH specific arguments
+	identityFile string
 )
 
 const (
@@ -58,7 +61,7 @@ func main() {
 
 	// For shell plugin we read/write directly from Stdin/Stdout so we dont want
 	// our logs to show up there
-	if plugin == "shell" {
+	if plugin == string(bzplugin.Shell) || plugin == string(bzplugin.Ssh) {
 		writeToConsole = false
 	}
 
@@ -117,21 +120,49 @@ func startServer(logger *logger.Logger, headers map[string]string, params map[st
 	logger.Infof("Opening websocket to the Connection Node: %s for plugin %s", serviceUrl, plugin)
 
 	switch bzplugin.PluginName(plugin) {
-	case bzplugin.Kube:
-		params["websocketType"] = "cluster"
-		return startKubeServer(logger, headers, params)
 	case bzplugin.Db:
 		params["websocketType"] = "db"
 		return startDbServer(logger, headers, params)
-	case bzplugin.Web:
-		params["websocketType"] = "web"
-		return startWebServer(logger, headers, params)
+	case bzplugin.Kube:
+		params["websocketType"] = "cluster"
+		return startKubeServer(logger, headers, params)
 	case bzplugin.Shell:
 		params["websocketType"] = "shell"
 		return startShellServer(logger, headers, params)
+	case bzplugin.Ssh:
+		params["websocketType"] = "ssh"
+		return startSshServer(logger, headers, params)
+	case bzplugin.Web:
+		params["websocketType"] = "web"
+		return startWebServer(logger, headers, params)
 	default:
 		return fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
+}
+
+func startSshServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+	subLogger := logger.GetComponentLogger("sshserver")
+
+	params["target_id"] = targetId
+	params["target_user"] = targetUser
+	params["remote_host"] = remoteHost
+	params["remote_port"] = fmt.Sprintf("%d", remotePort)
+
+	return sshserver.StartSshServer(
+		subLogger,
+		targetUser,
+		dataChannelId,
+		refreshTokenCommand,
+		configPath,
+		serviceUrl,
+		params,
+		headers,
+		agentPubKey,
+		targetSelectHandler,
+		identityFile,
+		remoteHost,
+		remotePort,
+	)
 }
 
 func startShellServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
@@ -247,7 +278,7 @@ func parseFlags() error {
 
 	// Kube plugin variables
 	flag.StringVar(&targetGroupsRaw, "targetGroups", "", "Kube Group to Assume")
-	flag.StringVar(&targetUser, "targetUser", "", "Kube Role to Assume")
+	flag.StringVar(&targetUser, "targetUser", "", "Kube Role or OS user to Assume")
 	flag.StringVar(&localhostToken, "localhostToken", "", "Localhost Token to Validate Kubectl commands")
 	flag.StringVar(&certPath, "certPath", "", "Path to cert to use for our localhost server")
 	flag.StringVar(&keyPath, "keyPath", "", "Path to key to use for our localhost server")
@@ -265,6 +296,9 @@ func parseFlags() error {
 	flag.StringVar(&connectionServiceUrl, "connectionServiceUrl", "", "The bzero connection id for the shell connection")
 	flag.StringVar(&connectionServiceAuthToken, "connectionServiceAuthToken", "", "The bzero connection id for the shell connection")
 
+	// SSH plugin variables
+	flag.StringVar(&identityFile, "identityFile", "", "Path to an SSH IdentityFile")
+
 	flag.Parse()
 
 	// Make sure our service url is correctly formatted
@@ -279,14 +313,17 @@ func parseFlags() error {
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
 	requiredFlags := []string{"sessionId", "sessionToken", "authHeader", "logPath", "configPath", "agentPubKey"}
-	switch plugin {
-	case "kube":
+	switch bzplugin.PluginName(plugin) {
+	case bzplugin.Kube:
 		requiredFlags = append(requiredFlags, "localPort", "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
-	case "db":
-	case "web":
+	case bzplugin.Db:
+		fallthrough
+	case bzplugin.Web:
 		requiredFlags = append(requiredFlags, "localPort", "remoteHost", "remotePort")
-	case "shell":
+	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
+	case bzplugin.Ssh:
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "remoteHost", "remotePort")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}
