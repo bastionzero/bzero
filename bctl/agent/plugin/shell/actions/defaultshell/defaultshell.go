@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/actions/defaultshell/pseudoterminal"
-
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	"bastionzero.com/bctl/v1/bzerolib/ringbuffer"
@@ -78,14 +77,14 @@ func New(
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	doneChan chan struct{},
-	runAsUser string) (*DefaultShell, error) {
+	runAsUser string) *DefaultShell {
 	return &DefaultShell{
 		logger:               logger,
 		runAsUser:            runAsUser,
 		doneChan:             doneChan,
 		streamOutputChan:     ch,
 		streamSequenceNumber: 1,
-	}, nil
+	}
 }
 
 func (d *DefaultShell) Kill() {

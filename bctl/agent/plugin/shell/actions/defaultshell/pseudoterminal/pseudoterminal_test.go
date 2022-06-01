@@ -11,7 +11,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 )
 
-func TestDefaultSsh(t *testing.T) {
+func TestPseudoTerminal(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Pseudo Terminal Suite")
 }
