@@ -117,7 +117,10 @@ func reportError(logger *logger.Logger, errorReport error) {
 }
 
 func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
-	logger.Infof("Opening websocket to the Connection Node: %s for plugin %s", serviceUrl, plugin)
+	logger.Infof("Opening websocket to the Connection Node: %s for plugin %s", connectionServiceUrl, plugin)
+
+	params["connectionServiceUrl"] = connectionServiceUrl
+	params["connectionServiceAuthToken"] = connectionServiceAuthToken
 
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Db:
@@ -169,8 +172,6 @@ func startShellServer(logger *logger.Logger, headers map[string]string, params m
 	subLogger := logger.GetComponentLogger("shellserver")
 
 	params["connection_id"] = connectionId
-	params["connectionServiceUrl"] = connectionServiceUrl
-	params["connectionServiceAuthToken"] = connectionServiceAuthToken
 
 	return shellserver.StartShellServer(
 		subLogger,

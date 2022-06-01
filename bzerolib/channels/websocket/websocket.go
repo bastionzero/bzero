@@ -439,15 +439,11 @@ func (w *Websocket) connect() error {
 			}
 
 			// Switch based on the targetType
-			// NOTE: the following connectX() functions have their own exponential backoff
-			// which is why we fail on their errors instead of retrying
 			switch w.targetType {
-			case Cluster:
-			case Db:
-			case Web:
-			case Shell:
-			case Ssh:
-				return w.connectDaemonWebsocket()
+			case Cluster, Db, Web, Shell, Ssh:
+				if err := w.connectDaemonWebsocket(); err != nil {
+					return fmt.Errorf("error making daemon websocket connection")
+				}
 			case AgentWebsocket:
 				if err := w.connectAgentWebsocket(); err != nil {
 					return fmt.Errorf("error making agent websocket connection: %s", err)
