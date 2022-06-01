@@ -8,7 +8,7 @@ Possible permissions checks:
     - execute: whether the user can execute a file
 
 The following two permissions types are abstractions that I've found helpful. They're not explicitly
-stated (the only permissions we ever get defined for a given user group are the previous 3), but
+stated (the only permissions we ever get defined for a given privilege set are the previous 3), but
 they might still be interesting for the code to check and understand especially if the code writer
 doesn't want to go read a whole bunch on unix file permissions.
     - open: whether the user can open a file (aka execute)
@@ -22,17 +22,18 @@ and Stephen A. Rago (p. 101).
 
 Permission validation process:
 1. if user's uid is 0 (aka "root"), they can do whatever they want. If user is not the root, go to step 2.
-2. if user's uid is the same as the owner of the file, check for access perms. If the owner does not have
-correct perms, REJECT. If the user is not the owner of the file, go to step 3.
-3. if any of the user's gids matches the gid of the file, check for access perms. If that group does not
-have correct perms, REJECT. If the user is not in any matching group, go to step 4.
-4. Check access perms for "other" user group.
+2. if user's uid is the same as the owner of the file, check for access perms. If the owner does not
+have correct perms, REJECT. If the user is not the owner of the file, go to step 3.
+3. if any of the user's gids matches the gid of the file, check for access perms. If that group does
+not have correct perms, REJECT. If the user is not in any matching group, go to step 4.
+4. Check access perms for "other" privilege set.
 
-These steps are taken in sequence, and if any REJECT case is reached, we do not continue to the next step.
-For example, if the owner does not have access, we do not then check groups. There are no second chances in
-unix.
+These steps are taken in sequence, and if any REJECT case is reached, we do not continue to the next
+step. For example, if the owner does not have access, we do not then check groups. There are no second
+chances in unix.
 
-The code seeks help from the modeParser object to abstract away some of the more annoying bit checking logic
+The code seeks help from the ModeParser object to abstract away some of the more annoying bit checking
+logic. For more information on permission bits and privilege sets, see filemode package
 */
 package unixuser
 
@@ -45,7 +46,7 @@ import (
 	"strings"
 	"syscall"
 
-	"bastionzero.com/bctl/v1/bzerolib/unixuser/filemode"
+	"bastionzero.com/bctl/v1/bzerolib/unix/filemode"
 )
 
 func (u *UnixUser) CanRead(path string) (bool, error) {
