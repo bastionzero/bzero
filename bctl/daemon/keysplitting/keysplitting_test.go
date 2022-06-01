@@ -114,6 +114,7 @@ var _ = Describe("Daemon keysplitting", func() {
 
 		By("Pushing the Syn msg to the outbox")
 		Expect(sut.Outbox()).Should(Receive(Equal(synMsg)))
+		Expect(synMsg.Type).To(Equal(ksmsg.Syn))
 
 		return synMsg
 	}
@@ -127,7 +128,8 @@ var _ = Describe("Daemon keysplitting", func() {
 
 		By("Pushing the Data msg to the outbox")
 		var dataMsg *ksmsg.KeysplittingMessage
-		Eventually(sut.Outbox()).Should(Receive(&dataMsg))
+		Expect(sut.Outbox()).Should(Receive(&dataMsg))
+		Expect(dataMsg.Type).To(Equal(ksmsg.Data))
 
 		return dataMsg
 	}
@@ -638,66 +640,68 @@ var _ = Describe("Daemon keysplitting", func() {
 					sentPayload []byte
 					sentMsg     *ksmsg.KeysplittingMessage
 				}
-				var firstDataMsg *ksmsg.KeysplittingMessage
-				// Holds sent data that is based on predicted DataAcks, i.e. called
-				// with SendDataAndTrack() functions
-				var sentData []*sentKeysplittingData
-				var synAck *ksmsg.KeysplittingMessage
-
-				SendDataAndTrack := func(id int) {
-					By(fmt.Sprintf("Sending Data(%v)", id))
-					payload := []byte(fmt.Sprintf("Data msg - #%v", id))
-					dataMsg := SendDataWithPayload(payload)
-					sentData = append(sentData, &sentKeysplittingData{
-						sentPayload: payload,
-						sentMsg:     dataMsg,
-					})
-				}
-				RepeatSendDataAndTrack := func(count int) {
-					for i := 1; i <= count; i++ {
-						SendDataAndTrack(i)
-					}
-				}
-
-				AssertSendingDataBehavior := func() {
-					It("all Data based on predicted DataAcks are sent and built correctly", func() {
-						prevMsg := firstDataMsg
-						for i := 0; i < len(sentData); i++ {
-							By(fmt.Sprintf("Asserting Data(%v)-->predicted DataAck(Data(%v)) is built correctly", i+1, i))
-
-							// Data points to a predicted DataAck for prevMsg
-							By(fmt.Sprintf("Building predicted DataAck(Data(%v))", i))
-							predictedDataAck := BuildDataAck(prevMsg)
-
-							currMsg := sentData[i]
-							By(fmt.Sprintf("Asserting Data(%v) is correct", i+1))
-							AssertDataMsgIsCorrect(currMsg.sentMsg, currMsg.sentPayload, predictedDataAck)
-
-							// Update pointer
-							prevMsg = currMsg.sentMsg
-						}
-					})
-				}
-
-				BeforeEach(func() {
-					// Initalize slice to prevent specs from leaking into one
-					// another
-					sentData = make([]*sentKeysplittingData, 0)
-
-					// Perform a successful handshake before attempting to send Data
-					synAck = PerformHandshake()
-
-					// Send a single Data-->SynAck, so we can start sending Data
-					// that is built on outstanding DataAcks, starting with the
-					// DataAck for this first Data message
-					By("Sending Data(0)")
-					payload := []byte("Data msg - #0")
-					firstDataMsg = SendDataWithPayload(payload)
-					By("Asserting Data(0) is built correctly")
-					AssertDataMsgIsCorrect(firstDataMsg, payload, synAck)
-				})
 
 				Describe("send Data messages when there are outstanding DataAcks", func() {
+					var firstDataMsg *ksmsg.KeysplittingMessage
+					// Holds sent data that is based on predicted DataAcks, i.e.
+					// called with SendDataAndTrack() functions
+					var sentData []*sentKeysplittingData
+
+					SendDataAndTrack := func(id int) {
+						By(fmt.Sprintf("Sending Data(%v)", id))
+						payload := []byte(fmt.Sprintf("Data msg - #%v", id))
+						dataMsg := SendDataWithPayload(payload)
+						sentData = append(sentData, &sentKeysplittingData{
+							sentPayload: payload,
+							sentMsg:     dataMsg,
+						})
+					}
+					RepeatSendDataAndTrack := func(count int) {
+						for i := 1; i <= count; i++ {
+							SendDataAndTrack(i)
+						}
+					}
+
+					AssertSendingDataBehavior := func() {
+						It("all Data based on predicted DataAcks are sent and built correctly", func() {
+							prevMsg := firstDataMsg
+							for i := 0; i < len(sentData); i++ {
+								By(fmt.Sprintf("Asserting Data(%v)-->predicted DataAck(Data(%v)) is built correctly", i+1, i))
+
+								// Data points to a predicted DataAck for
+								// prevMsg
+								By(fmt.Sprintf("Building predicted DataAck(Data(%v))", i))
+								predictedDataAck := BuildDataAck(prevMsg)
+
+								currMsg := sentData[i]
+								By(fmt.Sprintf("Asserting Data(%v) is correct", i+1))
+								AssertDataMsgIsCorrect(currMsg.sentMsg, currMsg.sentPayload, predictedDataAck)
+
+								// Update pointer
+								prevMsg = currMsg.sentMsg
+							}
+						})
+					}
+
+					BeforeEach(func() {
+						// Initalize slice to prevent specs from leaking into
+						// one another
+						sentData = make([]*sentKeysplittingData, 0)
+
+						// Perform a successful handshake before attempting to
+						// send Data
+						synAck := PerformHandshake()
+
+						// Send a single Data-->SynAck, so we can start sending
+						// Data that is built on outstanding DataAcks, starting
+						// with the DataAck for this first Data message
+						By("Sending Data(0)")
+						payload := []byte("Data msg - #0")
+						firstDataMsg = SendDataWithPayload(payload)
+						By("Asserting Data(0) is built correctly")
+						AssertDataMsgIsCorrect(firstDataMsg, payload, synAck)
+					})
+
 					Context("when 1 DataAck is outstanding", func() {
 						BeforeEach(func() {
 							RepeatSendDataAndTrack(1)
@@ -716,12 +720,14 @@ var _ = Describe("Daemon keysplitting", func() {
 
 					Context("when the max pipelining limit is reached", func() {
 						BeforeEach(func() {
-							// Send enough Data to fill the pipeline to its max capacity
+							// Send enough Data to fill the pipeline to its max
+							// capacity
 							RepeatSendDataAndTrack(PipelineLimit - 1)
 
-							// Send the message that causes Inbox() to block (because
-							// pipeline is full) on a separate goroutine, so we can
-							// unblock it on the main thread
+							// Send the message that causes Inbox() to block
+							// (because pipeline is full) on a separate
+							// goroutine, so we can unblock it on the main
+							// thread
 							done := make(chan interface{})
 							go func() {
 								defer GinkgoRecover()
@@ -757,8 +763,151 @@ var _ = Describe("Daemon keysplitting", func() {
 					})
 				})
 
-				// Describe("recovery", func() {
-				// })
+				Describe("recovery", func() {
+					// Holds *all* payloads and Data messages sent prior to
+					// recovery
+					var sentData []*sentKeysplittingData
+					var amountOfDataMsgsToSend int = 3
+					GetSentPayloads := func() [][]byte {
+						sentPayloads := make([][]byte, 0)
+						for _, sentDataMsg := range sentData {
+							sentPayloads = append(sentPayloads, sentDataMsg.sentPayload)
+						}
+						return sentPayloads
+					}
+
+					var synMsgSentDuringRecovery *ksmsg.KeysplittingMessage
+					// synAck to the synMsg sent during recovery
+					var recoverySynAck *ksmsg.KeysplittingMessage
+
+					AssertBehavior := func(sliceFromIndex int) {
+						It(fmt.Sprintf("payloads ranging from [%v:%v) are resent in new Data messages", sliceFromIndex, amountOfDataMsgsToSend), func() {
+							// prevMsg is set after first iteration of for loop
+							// below
+							var prevMsg *ksmsg.KeysplittingMessage
+							for i, payload := range GetSentPayloads()[sliceFromIndex:] {
+								var dataMsg *ksmsg.KeysplittingMessage
+								Expect(sut.Outbox()).Should(Receive(&dataMsg))
+								Expect(dataMsg.Type).Should(Equal(ksmsg.Data))
+
+								By(fmt.Sprintf("Asserting Data msg containing payload %q is resent", payload))
+								if i == 0 {
+									// The first data message points to the recovery
+									// syn ack
+									AssertDataMsgIsCorrect(dataMsg, payload, recoverySynAck)
+								} else {
+									// All other data messages point to predicted
+									// DataAck for prevMsg
+									predictedDataAck := BuildDataAck(prevMsg)
+									AssertDataMsgIsCorrect(dataMsg, payload, predictedDataAck)
+								}
+
+								// Update pointer
+								prevMsg = dataMsg
+							}
+
+							// There should be no more Data on the outbox
+							// because we should have read them all in the for
+							// loop above. If there are extra Data messages, it
+							// means recovery sent extra payloads that should
+							// not have been resent.
+							By("Asserting no other Data messages are pushed to the outbox")
+							Consistently(sut.Outbox(), timeToPollNothingReceivedOnOutbox).ShouldNot(Receive())
+						})
+					}
+
+					BeforeEach(func() {
+						// Initalize slice to prevent specs from leaking into
+						// one another
+						sentData = make([]*sentKeysplittingData, 0)
+
+						// Perform a successful handshake before attempting to
+						// send Data
+						PerformHandshake()
+
+						// Send some Data, so that recovery procedure has
+						// something to resend
+						for i := 0; i < amountOfDataMsgsToSend; i++ {
+							payload := []byte(fmt.Sprintf("Data msg - #%v", i))
+							By(fmt.Sprintf("Sending Data(%v)", i))
+							dataMsg := SendDataWithPayload(payload)
+							sentData = append(sentData, &sentKeysplittingData{
+								sentPayload: payload,
+								sentMsg:     dataMsg,
+							})
+						}
+
+						// Build error message that refers to first Data msg
+						// sent. There is *no* requirement to have the error
+						// message refer to a specific Data message because we
+						// also control the SynAck (and nonce) which governs
+						// which Data message to resend. We only need the error
+						// message to refer to some Data message that still
+						// exists in pipelineMap, so that calling Recover()
+						// succeeds without error.
+						agentErrorMessage := BuildErrorMessage(sentData[0].sentMsg.Hash())
+						By("Starting recovery procedure without error")
+						err := sut.Recover(agentErrorMessage)
+						Expect(err).ShouldNot(HaveOccurred())
+
+						// Recover() sends a Syn
+						By("Pushing the Syn message created during recovery to the outbox")
+						Expect(sut.Outbox()).Should(Receive(&synMsgSentDuringRecovery))
+						Expect(synMsgSentDuringRecovery.Type).Should(Equal(ksmsg.Syn))
+					})
+
+					JustBeforeEach(func() {
+						By("Signing agent's recovery SynAck without error")
+						SignAgentMsg(recoverySynAck)
+						By("Validating agent's recovery SynAck without error")
+						// Completes the recovery procedure by triggering
+						// resend() of all previously sent Data messages
+						ValidateAgentMsg(recoverySynAck)
+					})
+
+					Context("when recovery SynAck's nonce references message not known by daemon", func() {
+						BeforeEach(func() {
+							By("Building agent's recovery SynAck without error")
+							// The default SynAck created by BuildSynAck() uses
+							// a random nonce
+							recoverySynAck = BuildSynAck(synMsgSentDuringRecovery)
+						})
+
+						AssertBehavior(0)
+					})
+
+					Context("when recovery SynAck's nonce references message known by daemon", func() {
+						BeforeEach(func() {
+							By("Building agent's recovery SynAck without error")
+							recoverySynAck = BuildSynAck(synMsgSentDuringRecovery)
+						})
+
+						Context("when referenced message is first Data sent", func() {
+							BeforeEach(func() {
+								By("Modifying recovery SynAck's nonce to refer to first Data message sent")
+								recoverySynAckPayload, _ := recoverySynAck.KeysplittingPayload.(ksmsg.SynAckPayload)
+								recoverySynAckPayload.Nonce = sentData[0].sentMsg.Hash()
+								recoverySynAck.KeysplittingPayload = recoverySynAckPayload
+							})
+
+							// Pass index 1 because the first payload sent should not be resent
+							AssertBehavior(1)
+						})
+
+						Context("when referenced message is last Data sent", func() {
+							BeforeEach(func() {
+								By("Modifying recovery SynAck's nonce to refer to last Data message sent")
+								recoverySynAckPayload, _ := recoverySynAck.KeysplittingPayload.(ksmsg.SynAckPayload)
+								recoverySynAckPayload.Nonce = sentData[len(sentData)-1].sentMsg.Hash()
+								recoverySynAck.KeysplittingPayload = recoverySynAckPayload
+							})
+
+							It("no Data is resent", func() {
+								Consistently(sut.Outbox(), timeToPollNothingReceivedOnOutbox).ShouldNot(Receive(), "because we resend messages starting with the one immediately after the referenced one")
+							})
+						})
+					})
+				})
 			})
 
 			Describe("failure modes", func() {
@@ -840,7 +989,7 @@ var _ = Describe("Daemon keysplitting", func() {
 							// Grab the Syn message from the outbox, so that we
 							// can assert no extra Syn is sent in this Context.
 							var synMsg *ksmsg.KeysplittingMessage
-							Eventually(sut.Outbox()).Should(Receive(&synMsg))
+							Expect(sut.Outbox()).Should(Receive(&synMsg))
 							Expect(synMsg.Type).Should(Equal(ksmsg.Syn))
 						})
 
@@ -863,7 +1012,7 @@ var _ = Describe("Daemon keysplitting", func() {
 
 								By("Pushing the Syn msg to the outbox")
 								var synMsg *ksmsg.KeysplittingMessage
-								Eventually(sut.Outbox()).Should(Receive(&synMsg))
+								Expect(sut.Outbox()).Should(Receive(&synMsg))
 								Expect(synMsg.Type).Should(Equal(ksmsg.Syn))
 
 								// Call Validate() with a SynAck to have
@@ -880,7 +1029,7 @@ var _ = Describe("Daemon keysplitting", func() {
 								// is empty for the next Recover() iteration.
 								for j := 0; j <= i; j++ {
 									var dataMsg *ksmsg.KeysplittingMessage
-									Eventually(sut.Outbox()).Should(Receive(&dataMsg))
+									Expect(sut.Outbox()).Should(Receive(&dataMsg))
 									Expect(dataMsg.Type).Should(Equal(ksmsg.Data))
 								}
 							}
