@@ -49,9 +49,9 @@ type Keysplitting struct {
 	// a channel for all the messages we give the datachannel to send
 	outboxQueue chan *ksmsg.KeysplittingMessage
 
-	// not the last ack we've received but the last ack we've received *in order*
-	lastAck        *ksmsg.KeysplittingMessage
-	outOfOrderAcks map[string]*ksmsg.KeysplittingMessage
+	// not the last ack we've received but the last ack we've received *in
+	// order*
+	lastAck *ksmsg.KeysplittingMessage
 
 	// bool variable for letting the datachannel know when to start processing incoming messages again
 	recovering bool
@@ -81,7 +81,6 @@ func New(
 		ackPublicKey:         "",
 		pipelineMap:          orderedmap.New(),
 		outboxQueue:          make(chan *ksmsg.KeysplittingMessage, PipelineLimit),
-		outOfOrderAcks:       make(map[string]*ksmsg.KeysplittingMessage),
 		recovering:           false,
 		synAction:            "initial",
 		errorRecoveryAttempt: 0,
@@ -218,48 +217,20 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				}
 			}
 		case ksmsg.DataAck:
-			// check if incoming message corresponds to our most recently sent data
-			if pair := k.pipelineMap.Oldest(); pair == nil {
-				return fmt.Errorf("we received an ack but we're not waiting for a response to any messages")
-			} else if pair.Key != hpointer {
-				k.logger.Info("Received an out-of-order ack message")
-				if len(k.outOfOrderAcks) > k.pipelineLimit {
-					// we're missing an ack sometime in the past, let's try to recover
-					if _, err := k.BuildSyn("", []byte{}, true); err != nil {
-						k.recovering = true
-						return fmt.Errorf("could not recover from missing ack: %s", err)
-					} else {
-						return fmt.Errorf("hold up, we're missing an ack. Going into recovery")
-					}
-				}
-				k.outOfOrderAcks[hpointer] = ksMessage
-			} else {
-				k.lastAck = ksMessage
-				k.pipelineMap.Delete(hpointer)
-				k.processOutOfOrderAcks()
+			k.lastAck = ksMessage
+			k.pipelineMap.Delete(hpointer)
 
-				// If we're here, it means that the previous data message that caused the error was accepted
-				k.errorRecoveryAttempt = 0
+			// If we're here, it means that the previous data message that
+			// caused the error was accepted
+			k.errorRecoveryAttempt = 0
 
-				k.pipelineOpen.Broadcast()
-			}
+			k.pipelineOpen.Broadcast()
 		}
 	} else {
 		return fmt.Errorf("%w: %T message did not correspond to a previously sent message", ErrUnknownHPointer, ksMessage.KeysplittingPayload)
 	}
 
 	return nil
-}
-
-func (k *Keysplitting) processOutOfOrderAcks() {
-	for pair := k.pipelineMap.Oldest(); pair != nil; pair = pair.Next() {
-		if ack, ok := k.outOfOrderAcks[pair.Key.(string)]; !ok {
-			return
-		} else {
-			k.lastAck = ack
-			k.pipelineMap.Delete(pair.Key)
-		}
-	}
 }
 
 func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
