@@ -6,52 +6,104 @@ import (
 	"io"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/actions/defaultshell/pseudoterminal"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
-var runAsUser = "Bojji"
-
-type MockPseudoTerminal struct {
-	mock.Mock
-	IPseudoTerminal
+func TestDefaultShell(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Agent Default Shell Suite")
 }
 
-func (m MockPseudoTerminal) StdIn() io.Writer {
-	args := m.Called() // <- empty because StdIn takes no args
-	return args.Get(0).(io.Writer)
-}
+var _ = Describe("Default Shell", Ordered, func() {
+	runAsUser := "test"
+	testContent := "BastionZero"
 
-func (m MockPseudoTerminal) StdOut() io.Reader {
-	args := m.Called()
-	return args.Get(0).(io.Reader)
-}
+	logger := logger.MockLogger()
+	streamMessageChan := make(chan smsg.StreamMessage)
+	doneChan := make(chan struct{})
 
-func (m MockPseudoTerminal) SetSize(cols, rows uint32) error {
-	args := m.Called(cols, rows)
-	return args.Error(0)
-}
+	mockPT := createPseudoTerminal()
 
-func (m MockPseudoTerminal) Done() <-chan struct{} {
-	args := m.Called()
-	return args.Get(0).(chan struct{})
-}
+	shell := New(logger, streamMessageChan, doneChan, runAsUser)
 
-func (m MockPseudoTerminal) Kill() {
-	m.Called()
-}
+	Context("Happy Path", func() {
 
-func setMakePseudoTerminal(mockPT MockPseudoTerminal) {
+		It("relays messages between the Daemon and a local pseudo terminal", func() {
+			By("starting without error")
+			action := string(bzshell.ShellOpen)
+			actionPayload, _ := json.Marshal(bzshell.ShellOpenMessage{})
+
+			retActionPayload, err := shell.Receive(action, actionPayload)
+			Expect(err).To(BeNil())
+			Expect(retActionPayload).To(Equal([]byte{}))
+
+			By("passing Daemon input to pseudo terminal")
+			action = string(bzshell.ShellInput)
+			inputMessage := bzshell.ShellInputMessage{
+				Data: []byte(testContent),
+			}
+
+			actionPayload, _ = json.Marshal(inputMessage)
+			retActionPayload, err = shell.Receive(action, actionPayload)
+			Expect(err).To(BeNil())
+			Expect(retActionPayload).To(Equal([]byte{}))
+
+			By("relaying previous output to the daemon")
+			// check to see if our output is the same as our input
+			msg := <-streamMessageChan
+			content, err := base64.StdEncoding.DecodeString(string(msg.Content))
+			Expect(err).To(BeNil())
+			Expect(string(content)).To(Equal(testContent))
+
+			// request shell replay
+			action = string(bzshell.ShellReplay)
+			actionPayload = []byte{}
+			retActionPayload, err = shell.Receive(action, actionPayload)
+			Expect(err).To(BeNil())
+			Expect(string(retActionPayload)).To(Equal(testContent))
+
+			By("passing Daemon resize to pseudo terminal")
+			// create our shell resize payloads
+			action = string(bzshell.ShellResize)
+			resizeMessage := bzshell.ShellResizeMessage{
+				Cols: 2,
+				Rows: 3,
+			}
+			actionPayload, _ = json.Marshal(resizeMessage)
+
+			// send our shell resize message
+			retActionPayload, err = shell.Receive(action, actionPayload)
+			Expect(err).To(BeNil())
+			Expect(retActionPayload).To(Equal([]byte{}))
+
+			By("closing when it's told to")
+			action = string(bzshell.ShellClose)
+			actionPayload = []byte{}
+			retActionPayload, err = shell.Receive(action, actionPayload)
+			Expect(err).To(BeNil())
+			Expect(retActionPayload).To(Equal(actionPayload))
+
+			<-mockPT.Done()
+		})
+	})
+})
+
+func setMakePseudoTerminal(mockPT pseudoterminal.MockPseudoTerminal) {
 	NewPseudoTerminal = func(logger *logger.Logger, runAsUser string, command string) (IPseudoTerminal, error) {
 		return mockPT, nil
 	}
 }
 
-func createPseudoTerminal() MockPseudoTerminal {
-	mockPT := MockPseudoTerminal{}
+func createPseudoTerminal() pseudoterminal.MockPseudoTerminal {
+	mockPT := pseudoterminal.MockPseudoTerminal{}
 
 	// pipe takes anything that's written to the writer and outputs it via the reader
 	// writer.Write("genius") -> reader.Read() => "genius"
@@ -70,129 +122,4 @@ func createPseudoTerminal() MockPseudoTerminal {
 
 	setMakePseudoTerminal(mockPT)
 	return mockPT
-}
-
-func shellOpen(t *testing.T, dshell *DefaultShell) {
-	action := string(bzshell.ShellOpen)
-	actionPayload, _ := json.Marshal(bzshell.ShellOpenMessage{})
-	retActionPayload, err := dshell.Receive(action, actionPayload)
-	assert.Nil(t, err)
-	assert.Equal(t, []byte{}, retActionPayload)
-	assert.NotNil(t, dshell.terminal)
-}
-
-func shellInput(t *testing.T, dshell *DefaultShell, testContent string) {
-	action := string(bzshell.ShellInput)
-	inputMessage := bzshell.ShellInputMessage{
-		Data: []byte(testContent),
-	}
-	actionPayload, err := json.Marshal(inputMessage)
-	assert.Nil(t, err)
-
-	retActionPayload, err := dshell.Receive(action, actionPayload)
-	assert.Nil(t, err)
-	assert.Equal(t, retActionPayload, []byte{})
-}
-
-func TestShellOpen(t *testing.T) {
-	createPseudoTerminal()
-
-	streamMessageChan := make(chan smsg.StreamMessage)
-	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
-	assert.Nil(t, err)
-
-	shellOpen(t, dshell)
-}
-
-func TestShellClose(t *testing.T) {
-	mockPT := createPseudoTerminal()
-
-	streamMessageChan := make(chan smsg.StreamMessage)
-	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
-	assert.Nil(t, err)
-
-	shellOpen(t, dshell)
-
-	action := string(bzshell.ShellClose)
-	actionPayload := []byte{}
-	retActionPayload, err := dshell.Receive(action, actionPayload)
-	assert.Nil(t, err)
-	assert.Equal(t, retActionPayload, actionPayload)
-
-	<-mockPT.Done()
-}
-
-func TestShellInput(t *testing.T) {
-	createPseudoTerminal()
-
-	streamMessageChan := make(chan smsg.StreamMessage)
-	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
-	assert.Nil(t, err)
-
-	shellOpen(t, dshell)
-
-	testContent := "BastionZero"
-	shellInput(t, dshell, testContent)
-
-	// check to see if our output is the same as our input
-	msg := <-streamMessageChan
-	content, err := base64.StdEncoding.DecodeString(string(msg.Content))
-	assert.Nil(t, err)
-	assert.Equal(t, testContent, string(content))
-}
-
-func TestShellResize(t *testing.T) {
-	createPseudoTerminal()
-
-	streamMessageChan := make(chan smsg.StreamMessage)
-	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
-	assert.Nil(t, err)
-
-	shellOpen(t, dshell)
-
-	// create our shell resize payloads
-	action := string(bzshell.ShellResize)
-	inputMessage := bzshell.ShellResizeMessage{
-		Cols: 2,
-		Rows: 3,
-	}
-	actionPayload, err := json.Marshal(inputMessage)
-	assert.Nil(t, err)
-
-	// send our shell resize message
-	retActionPayload, err := dshell.Receive(action, actionPayload)
-	assert.Nil(t, err)
-	assert.Equal(t, retActionPayload, []byte{})
-}
-
-func TestShellReplay(t *testing.T) {
-	createPseudoTerminal()
-
-	// init shell
-	streamMessageChan := make(chan smsg.StreamMessage)
-	doneChan := make(chan struct{})
-	dshell, err := New(logger.MockLogger(), streamMessageChan, doneChan, runAsUser)
-	assert.Nil(t, err)
-
-	shellOpen(t, dshell)
-
-	testContent := "BastionZero"
-	shellInput(t, dshell, testContent)
-
-	// check to see if our output is the same as our input
-	msg := <-streamMessageChan
-	content, err := base64.StdEncoding.DecodeString(string(msg.Content))
-	assert.Nil(t, err)
-	assert.Equal(t, testContent, string(content))
-
-	// request shell replay
-	action := string(bzshell.ShellReplay)
-	actionPayload := []byte{}
-	retActionPayload, err := dshell.Receive(action, actionPayload)
-	assert.Nil(t, err)
-	assert.Equal(t, string(retActionPayload), testContent)
 }

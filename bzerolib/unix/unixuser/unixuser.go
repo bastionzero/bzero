@@ -22,6 +22,8 @@ any creation, they will set the owner of the created file to the user
 package unixuser
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -29,14 +31,20 @@ import (
 	"os/user"
 	"regexp"
 	"strconv"
+	"strings"
+)
+
+const (
+	passwdFile = "/etc/passwd"
 )
 
 type UnixUser struct {
-	Uid      int
-	Gid      int
+	Uid      uint32
+	Gid      uint32
 	Username string
 	Name     string
 	HomeDir  string
+	Shell    string
 	usr      *user.User
 }
 
@@ -58,16 +66,16 @@ func Current() (*UnixUser, error) {
 	}
 }
 
-func (u *UnixUser) GroupIds() ([]int, error) {
+func (u *UnixUser) GroupIds() ([]uint32, error) {
 	if gids, err := u.usr.GroupIds(); err != nil {
 		return nil, err
 	} else {
-		gidInts := []int{}
+		gidInts := []uint32{}
 		for _, gid := range gids {
 			if gidInt, err := strconv.Atoi(gid); err != nil {
 				return gidInts, fmt.Errorf("failed to convert string GID %s to int: %s", gid, err)
 			} else {
-				gidInts = append(gidInts, gidInt)
+				gidInts = append(gidInts, uint32(gidInt))
 			}
 		}
 		return gidInts, nil
@@ -82,7 +90,7 @@ func (u *UnixUser) Mkdir(path string, perm fs.FileMode) error {
 			return fmt.Errorf("user %s cannot create %s: %s", u.Username, path, err)
 		} else if err := os.Mkdir(path, perm); err != nil { // create dir
 			return fmt.Errorf("failed to create %s: %s", path, err)
-		} else if err := os.Chown(path, u.Uid, u.Gid); err != nil { // change owner of dir to user
+		} else if err := os.Chown(path, int(u.Uid), int(u.Gid)); err != nil { // change owner of dir to user
 			return fmt.Errorf("failed to set user %s as directory %s owner", u.Username, path)
 		}
 	} else if err != nil {
@@ -104,7 +112,7 @@ func (u *UnixUser) OpenFile(path string, flag int, perm fs.FileMode) (*os.File, 
 			return nil, fmt.Errorf("user %s cannot create %s: %s", u.Username, path, err)
 		} else if err := os.WriteFile(path, []byte{}, perm); err != nil { // create file
 			return nil, fmt.Errorf("failed to create %s: %s", path, err)
-		} else if err := os.Chown(path, u.Uid, u.Gid); err != nil { // change owner of file to user
+		} else if err := os.Chown(path, int(u.Uid), int(u.Gid)); err != nil { // change owner of file to user
 			return nil, fmt.Errorf("failed to set user %s as owner of file %s: %s", u.Username, path, err)
 		}
 	} else if err != nil {
@@ -133,6 +141,29 @@ func (u *UnixUser) OpenFile(path string, flag int, perm fs.FileMode) (*os.File, 
 	return os.OpenFile(path, flag, perm)
 }
 
+// Get the default shell for the user based on configuration in /etc/passwd file.
+func getDefaultShell(usrName string) string {
+	// read the passwd file file
+	fileBytes, err := os.ReadFile(passwdFile)
+	if err != nil {
+		return ""
+	}
+
+	// iterate through file lines until we find the entry for our user
+	scanner := bufio.NewScanner(bytes.NewReader(fileBytes))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, usrName) {
+			// passwd file entries come in the form of
+			// username:password:uid:gid:GECOS(user id info):home:shell
+			entries := strings.Split(line, ":")
+			return strings.TrimSpace(entries[len(entries)-1])
+		}
+	}
+
+	return ""
+}
+
 // test that the provided username is valid unix user name
 // source: https://unix.stackexchange.com/a/435120
 func validateUsername(username string) error {
@@ -153,11 +184,12 @@ func convertToUnixUser(usr *user.User) (*UnixUser, error) {
 		return nil, err
 	} else {
 		return &UnixUser{
-			Uid:      uid,
-			Gid:      gid,
+			Uid:      uint32(uid),
+			Gid:      uint32(gid),
 			Username: usr.Username,
 			Name:     usr.Name,
 			HomeDir:  usr.HomeDir,
+			Shell:    getDefaultShell(usr.Username),
 			usr:      usr,
 		}, nil
 	}

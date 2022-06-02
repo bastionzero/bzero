@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell/actions/defaultshell/pseudoterminal"
-
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
 	"bastionzero.com/bctl/v1/bzerolib/ringbuffer"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 )
 
 // DefaultShell - Allows launching an interactive shell on the host which the agent is running on. Implements IShellAction.
@@ -33,7 +33,12 @@ import (
 
 // for testing purposes this needs to be a variable so that we can overwrite it with our mocked version in test
 var NewPseudoTerminal = func(logger *logger.Logger, runAsUser string, command string) (IPseudoTerminal, error) {
-	return pseudoterminal.New(logger, runAsUser, command)
+	// grab our runAs user's information
+	if usr, err := unixuser.Lookup(runAsUser); err != nil {
+		return nil, err
+	} else {
+		return pseudoterminal.New(logger, usr, command)
+	}
 }
 
 const (
@@ -72,14 +77,14 @@ func New(
 	logger *logger.Logger,
 	ch chan smsg.StreamMessage,
 	doneChan chan struct{},
-	runAsUser string) (*DefaultShell, error) {
+	runAsUser string) *DefaultShell {
 	return &DefaultShell{
 		logger:               logger,
 		runAsUser:            runAsUser,
 		doneChan:             doneChan,
 		streamOutputChan:     ch,
 		streamSequenceNumber: 1,
-	}, nil
+	}
 }
 
 func (d *DefaultShell) Kill() {

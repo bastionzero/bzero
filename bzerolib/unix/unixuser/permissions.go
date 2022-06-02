@@ -106,7 +106,7 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 
 	// check if user is root or the file owner
 	fileUid := info.Sys().(*syscall.Stat_t).Uid
-	switch uint32(u.Uid) {
+	switch u.Uid {
 	case 0:
 		// if you're root, you can do anything
 		return true, nil
@@ -124,7 +124,7 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 		return false, fmt.Errorf("failed to get user groups: %s", err)
 	} else {
 		for _, gid := range gids {
-			if uint32(gid) == fileGid {
+			if gid == fileGid {
 				if ok := perms.Verify(filemode.Group, check); !ok {
 					return false, fmt.Errorf("%s is a group member but does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
 				} else {
