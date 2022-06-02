@@ -119,6 +119,7 @@ func reportError(logger *logger.Logger, errorReport error) {
 func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	logger.Infof("Opening websocket to the Connection Node: %s for plugin %s", connectionServiceUrl, plugin)
 
+	params["connection_id"] = connectionId
 	params["connectionServiceUrl"] = connectionServiceUrl
 	params["connectionServiceAuthToken"] = connectionServiceAuthToken
 
@@ -170,8 +171,6 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 
 func startShellServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
 	subLogger := logger.GetComponentLogger("shellserver")
-
-	params["connection_id"] = connectionId
 
 	return shellserver.StartShellServer(
 		subLogger,
