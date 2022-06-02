@@ -72,7 +72,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 
 			subSubLogger := subLogger.GetComponentLogger("authorized_keys")
 
-			// create our user
+			// Create will create the user with the given username if it is allowed, or it will return the existing user
 			usr, err := unixuser.Create(synPayload.TargetUser, unixuser.UserAddOptions{Sudoer: true})
 			if err != nil {
 				rerr = fmt.Errorf("failed to use ssh as user %s: %s", synPayload.TargetUser, err)
