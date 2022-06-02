@@ -143,7 +143,7 @@ func (u *UnixUser) OpenFile(path string, flag int, perm fs.FileMode) (*os.File, 
 
 // Get the default shell for the user based on configuration in /etc/passwd file.
 func getDefaultShell(usrName string) string {
-	// read the authorized key file
+	// read the passwd file file
 	fileBytes, err := os.ReadFile(passwdFile)
 	if err != nil {
 		return ""
@@ -154,6 +154,8 @@ func getDefaultShell(usrName string) string {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, usrName) {
+			// passwd file entries come in the form of
+			// username:password:uid:gid:GECOS(user id info):home:shell
 			entries := strings.Split(line, ":")
 			return strings.TrimSpace(entries[len(entries)-1])
 		}
