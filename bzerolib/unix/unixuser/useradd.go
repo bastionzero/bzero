@@ -38,9 +38,9 @@ type UserAddOptions struct {
 	Shell           string
 }
 
-func Create(username string, options UserAddOptions) error {
+func Create(username string, options UserAddOptions) (*UnixUser, error) {
 	if ok := validateUsername(username); !ok {
-		return fmt.Errorf("invalid username: %s", username)
+		return nil, fmt.Errorf("invalid username: %s", username)
 	}
 
 	// build our command line args
@@ -74,10 +74,10 @@ func Create(username string, options UserAddOptions) error {
 	if err := cmd.Run(); errors.As(err, &exitError) {
 		stderr := strings.ToLower(string(exitError.Stderr))
 		if strings.Contains(stderr, "permission denied") {
-			return PermissionDeniedError(fmt.Sprintf("failed to create user %s: %s", username, stderr))
+			return nil, PermissionDeniedError(fmt.Sprintf("failed to create user %s: %s", username, stderr))
 		}
 	} else if err != nil {
-		return err
+		return nil, err
 	}
 
 	if options.Sudoer {
@@ -87,12 +87,14 @@ func Create(username string, options UserAddOptions) error {
 			sudoersFile = defaultSudoersFileName
 		}
 
+		// add our user to the sudoers file
 		if err := addToSudoers(username, sudoersFile); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	// make sure we really did create the user
+	return Lookup(username)
 }
 
 func addToSudoers(username string, sudoersFile string) error {

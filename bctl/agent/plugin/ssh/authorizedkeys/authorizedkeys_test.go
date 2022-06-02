@@ -15,7 +15,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
-func TestDefaultSsh(t *testing.T) {
+func TestAuthorizedKeys(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Agent Authorized Keys Suite")
 }

@@ -43,7 +43,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"bastionzero.com/bctl/v1/bzerolib/unix/filemode"
@@ -65,18 +64,21 @@ func (u *UnixUser) CanOpen(path string) (bool, error) {
 	return u.checkPermissions(path, filemode.Open)
 }
 
+func (u *UnixUser) CanRemove(path string) (bool, error) {
+	return u.checkPermissions(path, filemode.Remove)
+}
+
 // This function does some extra logic to determine whether a user can or cannot
 // create a given file. It loops through the path, searching for the longest path
 // that exists and then checks the user's ability to create in that directory.
 func (u *UnixUser) CanCreate(path string) (bool, error) {
-	path = filepath.Clean(path)
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return false, err
+	}
 
-	// filepath.Dir will return "." if the filepath is empty, but we want to ignore
-	// that if it was not in the original path
-	notInPath := !strings.Contains(path, "./")
-
-	// loop through all subpaths in path until it finds longest one that exists
-	for path != "." && notInPath {
+	// loop through all subpaths in path until it finds longest subpath that exists
+	for path != "." {
 		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 			path = filepath.Dir(path)
 			continue
@@ -88,7 +90,7 @@ func (u *UnixUser) CanCreate(path string) (bool, error) {
 			return u.checkPermissions(path, filemode.Create)
 		}
 	}
-	return false, fmt.Errorf("path does not exist on this machine: %s", path)
+	return false, fmt.Errorf("path does not exist: %s", path)
 }
 
 func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool, error) {
