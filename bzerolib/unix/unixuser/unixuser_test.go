@@ -2,11 +2,16 @@ package unixuser
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -108,6 +113,42 @@ var _ = Describe("Unix", Ordered, func() {
 			By("not opening a file we don't have the permissions for")
 			_, err = usr.OpenFile(ourFilePath, os.O_RDWR, perms)
 			Expect(err).ToNot(BeNil())
+		})
+	})
+
+	Context("Create User", func() {
+		It("creates a new user", func() {
+			validCommand := regexp.MustCompile(`^useradd \S+(( --[a-z]+ \S+)+)$`)
+			sudoersFolder = bzeroDaddyPath
+			runCommand = func(cmd *exec.Cmd) error {
+				Expect(validCommand.Match([]byte(cmd.String()))).To(BeTrue())
+				return nil
+			}
+			validateUserCreation = func(username string) (*UnixUser, error) {
+				return &UnixUser{}, nil
+			}
+
+			By("adding a normal user with the specified options")
+			opts := UserAddOptions{
+				ExpireDate: time.Now().Add(24 * time.Hour),
+			}
+			_, err := Create("bzeronormal", opts)
+			Expect(err).To(BeNil())
+
+			By("creating a sudoer user with specified options")
+			sudoerUserName := "bzerosudoer"
+			sudoerFileName := "bzero-test"
+			opts.Sudoer = true
+			opts.SudoersFileName = sudoerFileName
+			_, err = Create(sudoerUserName, opts)
+			Expect(err).To(BeNil())
+
+			// check that our sudoers line was added correctly
+			fileBytes, err := os.ReadFile(filepath.Join(sudoersFolder, sudoerFileName))
+			Expect(err).To(BeNil())
+
+			expectedSudoerEntry := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", sudoerUserName)
+			Expect(strings.Contains(string(fileBytes), expectedSudoerEntry)).To(BeTrue())
 		})
 	})
 

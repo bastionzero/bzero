@@ -10,8 +10,18 @@ import (
 	"time"
 )
 
+// these variables gets overwritten by tests
+var sudoersFolder = "/etc/sudoers.d"
+
+var runCommand = func(cmd *exec.Cmd) error {
+	return cmd.Run()
+}
+
+var validateUserCreation = func(username string) (*UnixUser, error) {
+	return Lookup(username)
+}
+
 const (
-	sudoersFolder          = "/etc/sudoers.d"
 	defaultSudoersFileName = "bastionzero-users"
 	sudoersFilePermissions = 0640
 )
@@ -71,7 +81,7 @@ func Create(username string, options UserAddOptions) (*UnixUser, error) {
 	// run the command to add a new user
 	cmd := exec.Command(addUserCommand, args...)
 	var exitError *exec.ExitError
-	if err := cmd.Run(); errors.As(err, &exitError) {
+	if err := runCommand(cmd); errors.As(err, &exitError) {
 		stderr := strings.ToLower(string(exitError.Stderr))
 		if strings.Contains(stderr, "permission denied") {
 			return nil, PermissionDeniedError(fmt.Sprintf("failed to create user %s: %s", username, stderr))
@@ -94,7 +104,7 @@ func Create(username string, options UserAddOptions) (*UnixUser, error) {
 	}
 
 	// make sure we really did create the user
-	return Lookup(username)
+	return validateUserCreation(username)
 }
 
 func addToSudoers(username string, sudoersFile string) error {
