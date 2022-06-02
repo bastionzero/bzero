@@ -38,12 +38,18 @@ type Keysplitting struct {
 	agentPubKey  string
 	ackPublicKey string
 
+	synAction string
+
 	// for grabbing and updating id tokens
 	tokenRefresher TokenRefresher
 
-	// pipelineLock mutex coordinates usage of pipelineMap, isHandshakeComplete,
-	// and lastAck
-	pipelineLock sync.Mutex
+	// a channel for all the messages we give the datachannel to send
+	outboxQueue chan *ksmsg.KeysplittingMessage
+
+	// stateLock mutex coordinates usage of state variables defined below
+	stateLock sync.Mutex
+	// pipelineOpen allows concurrent goroutines to wait for some specific
+	// condition of the stateLock protected state variables to be true
 	pipelineOpen *sync.Cond
 	// ordered hash map to keep track of sent keysplitting messages
 	pipelineMap *orderedmap.OrderedMap
@@ -52,23 +58,16 @@ type Keysplitting struct {
 	isHandshakeComplete bool
 	// not the last ack we've received but the last ack we've received *in order*
 	lastAck *ksmsg.KeysplittingMessage
-
-	// a channel for all the messages we give the datachannel to send
-	outboxQueue chan *ksmsg.KeysplittingMessage
-
 	// bool variable for letting the datachannel know when to start processing
 	// incoming messages again
 	recovering bool
-
-	// We set the schemaVersion to use based on the schemaVersion sent by the agent in the synack
-	schemaVersion      *semver.Version
-	prePipeliningAgent bool
-	synAction          string
-
 	// keep track of how many times we've tried to recover
 	errorRecoveryAttempt int
-
-	pipelineLimit int
+	// We set the schemaVersion to use based on the schemaVersion sent by the
+	// agent in the synack
+	schemaVersion      *semver.Version
+	prePipeliningAgent bool
+	pipelineLimit      int
 }
 
 func New(
@@ -91,7 +90,7 @@ func New(
 		isHandshakeComplete:  false,
 		lastAck:              nil,
 	}
-	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
+	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.stateLock)
 	// Default to global constant
 	keysplitter.pipelineLimit = PipelineLimit
 
@@ -99,6 +98,8 @@ func New(
 }
 
 func (k *Keysplitting) Recovering() bool {
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
 	return k.recovering
 }
 
@@ -111,6 +112,9 @@ func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
 }
 
 func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
+
 	// only recover from this error message if it corresponds to a message we've actually sent
 	// our old error messages weren't setting hpointers correctly
 	// TODO: CWC-1818: remove schema version check
@@ -136,7 +140,7 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 	}
 
 	k.recovering = true
-	if _, err := k.BuildSyn("", []byte{}, true); err != nil {
+	if _, err := k.buildSyn("", []byte{}, true); err != nil {
 		return err
 	}
 	return nil
@@ -186,9 +190,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		return err
 	}
 
-	// Lock pipelineMap's mutex before accessing it
-	k.pipelineLock.Lock()
-	defer k.pipelineLock.Unlock()
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
 
 	// Check this messages is in response to one we've sent
 	if _, ok := k.pipelineMap.Get(hpointer); ok {
@@ -255,8 +258,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 }
 
 func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
-	k.pipelineLock.Lock()
-	defer k.pipelineLock.Unlock()
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
 
 	// Wait if pipeline is full OR if handshake is not complete
 	for k.pipelineMap.Len() >= k.pipelineLimit || !k.isHandshakeComplete {
@@ -339,11 +342,15 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 }
 
 func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
-	// lock our pipeline mutex because we are accessing pipelineMap and
-	// isHandshakeComplete
-	k.pipelineLock.Lock()
-	defer k.pipelineLock.Unlock()
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
 
+	return k.buildSyn(action, payload, send)
+}
+
+// It is the caller's responsibility to lock the stateLock mutex before calling
+// this function
+func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
 	// Reset state
 	k.isHandshakeComplete = false
 	k.lastAck = nil
