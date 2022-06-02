@@ -132,7 +132,7 @@ var _ = Describe("Unix", Ordered, func() {
 			opts := UserAddOptions{
 				ExpireDate: time.Now().Add(24 * time.Hour),
 			}
-			_, err := Create("bzeronormal", opts)
+			_, err := Create("sneakyman", opts)
 			Expect(err).ToNot(BeNil())
 
 			By("adding a normal user with the specified options")

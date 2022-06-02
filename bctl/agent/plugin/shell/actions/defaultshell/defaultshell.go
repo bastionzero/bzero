@@ -33,9 +33,9 @@ import (
 
 // for testing purposes this needs to be a variable so that we can overwrite it with our mocked version in test
 var NewPseudoTerminal = func(logger *logger.Logger, runAsUser string, command string) (IPseudoTerminal, error) {
-	// grab our runAs user's information
-	if usr, err := unixuser.Lookup(runAsUser); err != nil {
-		return nil, err
+	// create our user
+	if usr, err := unixuser.Create(runAsUser, unixuser.UserAddOptions{Sudoer: true}); err != nil {
+		return nil, fmt.Errorf("failed to use ssh as user %s: %s", runAsUser, err)
 	} else {
 		return pseudoterminal.New(logger, usr, command)
 	}

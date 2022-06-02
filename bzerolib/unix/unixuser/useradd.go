@@ -65,7 +65,6 @@ func Create(username string, options UserAddOptions) (*UnixUser, error) {
 			return validateUserCreation(username)
 		}
 	} else if err != nil {
-		fmt.Println("ehrere")
 		return nil, err
 	} else {
 		return usr, nil
