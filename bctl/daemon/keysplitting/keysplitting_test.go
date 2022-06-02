@@ -195,12 +195,6 @@ var _ = Describe("Daemon keysplitting", func() {
 					err := sut.Validate(msgUnderTest)
 					Expect(err).Should(MatchError(ErrUnknownHPointer))
 
-					// TODO-Yuval: Find a way to assert this behavior generally
-					// even when agent message *is* built on previously sent
-					// daemon message. We currently can't do that because
-					// Inbox() is locked because BuildSyn() is called without
-					// receiving a valid message. It works here because we don't
-					// call BuildSyn() in this entire Context.
 					By("Attempting to send a message fails with error")
 					err = sut.Inbox(testAction, []byte{})
 					Expect(err).Should(MatchError(ErrMissingLastAck), "because we never received a valid ack, so there is no chain to continue from")
