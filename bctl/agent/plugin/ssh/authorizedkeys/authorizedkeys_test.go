@@ -3,7 +3,6 @@ package authorizedkeys
 import (
 	"encoding/base64"
 	"os"
-	"os/user"
 	"path"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 )
 
 func TestAuthorizedKeys(t *testing.T) {
@@ -23,7 +23,7 @@ func TestAuthorizedKeys(t *testing.T) {
 var _ = Describe("Agent Authorized Keys", Ordered, func() {
 	authorizedKeyFolder := "fake_ssh"
 	logger := logger.MockLogger()
-	testUser, _ := user.Current()
+	testUser, _ := unixuser.Current()
 
 	authorizedKeysFile := path.Join(testUser.HomeDir, authorizedKeyFolder, authorizedKeyFileName)
 	os.OpenFile(authorizedKeysFile, os.O_RDONLY|os.O_CREATE, 0666)
@@ -39,7 +39,7 @@ var _ = Describe("Agent Authorized Keys", Ordered, func() {
 		doneChan := make(chan struct{})
 
 		It("adds keys to user's authorized_keys file and removes them after expiration", func() {
-			authKeyService, _ := New(logger, testUser.Username, doneChan, authorizedKeyFolder, authorizedKeyFolder, time.Second)
+			authKeyService, _ := New(logger, doneChan, testUser, authorizedKeyFolder, authorizedKeyFolder, time.Second)
 
 			By("adding a key to the authorized_keys file without error")
 			err := authKeyService.Add(fakePubKey)
@@ -57,7 +57,7 @@ var _ = Describe("Agent Authorized Keys", Ordered, func() {
 		})
 
 		It("adds keys to user's authorized_keys file and removes them on disconnect", func() {
-			authKeyService, _ := New(logger, testUser.Username, doneChan, authorizedKeyFolder, authorizedKeyFolder, time.Second)
+			authKeyService, _ := New(logger, doneChan, testUser, authorizedKeyFolder, authorizedKeyFolder, time.Second)
 
 			By("adding a key to the authorized_keys file without error")
 			err := authKeyService.Add(fakePubKey)
@@ -99,7 +99,7 @@ var _ = Describe("Agent Authorized Keys", Ordered, func() {
 
 			for i := 0; i < numKeys; i++ {
 				go func() {
-					authKeyService, err := New(logger, testUser.Username, doneChan, authorizedKeyFolder, authorizedKeyFolder, 30*time.Second)
+					authKeyService, err := New(logger, doneChan, testUser, authorizedKeyFolder, authorizedKeyFolder, 30*time.Second)
 					Expect(err).To(BeNil())
 					err = authKeyService.Add(fakePubKey)
 					Expect(err).To(BeNil())
