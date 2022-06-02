@@ -21,7 +21,7 @@ func TestDefaultSsh(t *testing.T) {
 }
 
 var _ = Describe("Agent OpaqueSsh action", func() {
-	logger := logger.MockLogger()
+	logger := logger.DevNullLogger()
 	testUser := "test-user"
 	testData := "testData"
 

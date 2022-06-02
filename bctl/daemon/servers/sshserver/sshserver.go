@@ -8,6 +8,7 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -126,7 +127,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	action = "ssh/" + action
 	ksLogger := s.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, s.agentPubKey, s.configPath, s.refreshTokenCommand); err != nil {
+	if keysplitter, err := keysplitting.New(ksLogger, s.agentPubKey, tokenrefresh.NewZLIKeysplittingTokenRefresher(s.refreshTokenCommand, s.configPath)); err != nil {
 		return err
 	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, actionParams, attach, false); err != nil {
 		return err

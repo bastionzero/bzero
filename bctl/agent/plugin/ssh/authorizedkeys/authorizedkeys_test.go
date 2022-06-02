@@ -22,7 +22,7 @@ func TestDefaultSsh(t *testing.T) {
 
 var _ = Describe("Agent Authorized Keys", Ordered, func() {
 	authorizedKeyFolder := "fake_ssh"
-	logger := logger.MockLogger()
+	logger := logger.DevNullLogger()
 	testUser, _ := user.Current()
 
 	authorizedKeysFile := path.Join(testUser.HomeDir, authorizedKeyFolder, authorizedKeyFileName)

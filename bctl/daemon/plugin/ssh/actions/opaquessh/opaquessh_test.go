@@ -23,7 +23,7 @@ func TestDefaultSsh(t *testing.T) {
 }
 
 var _ = Describe("Daemon OpaqueSsh action", func() {
-	logger := logger.MockLogger()
+	logger := logger.DevNullLogger()
 	identityFile := "testFile"
 	testData := "testData"
 	testOutput := "testOutput"
