@@ -128,15 +128,19 @@ var _ = Describe("Unix", Ordered, func() {
 				return &UnixUser{}, nil
 			}
 
-			By("adding a normal user with the specified options")
+			By("not creating a user it isn't allowed to")
 			opts := UserAddOptions{
 				ExpireDate: time.Now().Add(24 * time.Hour),
 			}
 			_, err := Create("bzeronormal", opts)
+			Expect(err).ToNot(BeNil())
+
+			By("adding a normal user with the specified options")
+			_, err = Create("ssm-user", opts)
 			Expect(err).To(BeNil())
 
 			By("creating a sudoer user with specified options")
-			sudoerUserName := "bzerosudoer"
+			sudoerUserName := "bzero-user"
 			sudoerFileName := "bzero-test"
 			opts.Sudoer = true
 			opts.SudoersFileName = sudoerFileName

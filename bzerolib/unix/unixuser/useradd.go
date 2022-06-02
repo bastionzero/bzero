@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// These are the users we're allowed to create, if someone is trying to look them up
+var allowedToCreate = map[string]string{"ssm-user": "", "bzero-user": ""}
 
 // these variables gets overwritten by tests
 var sudoersFolder = "/etc/sudoers.d"
@@ -49,10 +53,26 @@ type UserAddOptions struct {
 }
 
 func Create(username string, options UserAddOptions) (*UnixUser, error) {
-	if ok := validateUsername(username); !ok {
-		return nil, fmt.Errorf("invalid username: %s", username)
+	// check that user doesn't exist before we try to create it
+	var unknownUser user.UnknownUserError
+	if usr, err := Lookup(username); errors.As(err, &unknownUser) {
+		if _, ok := allowedToCreate[username]; !ok {
+			return nil, fmt.Errorf("we're not allowed to create user %s", username)
+		} else if err := userAdd(username, options); err != nil {
+			return nil, err
+		} else {
+			// make sure we really did create the user
+			return validateUserCreation(username)
+		}
+	} else if err != nil {
+		fmt.Println("ehrere")
+		return nil, err
+	} else {
+		return usr, nil
 	}
+}
 
+func userAdd(username string, options UserAddOptions) error {
 	// build our command line args
 	args := []string{username}
 	homePath := filepath.Clean(strings.TrimSpace(options.HomeDir))
@@ -84,10 +104,10 @@ func Create(username string, options UserAddOptions) (*UnixUser, error) {
 	if err := runCommand(cmd); errors.As(err, &exitError) {
 		stderr := strings.ToLower(string(exitError.Stderr))
 		if strings.Contains(stderr, "permission denied") {
-			return nil, PermissionDeniedError(fmt.Sprintf("failed to create user %s: %s", username, stderr))
+			return PermissionDeniedError(fmt.Sprintf("failed to create user %s: %s", username, stderr))
 		}
 	} else if err != nil {
-		return nil, err
+		return err
 	}
 
 	if options.Sudoer {
@@ -99,12 +119,11 @@ func Create(username string, options UserAddOptions) (*UnixUser, error) {
 
 		// add our user to the sudoers file
 		if err := addToSudoers(username, sudoersFile); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	// make sure we really did create the user
-	return validateUserCreation(username)
+	return nil
 }
 
 func addToSudoers(username string, sudoersFile string) error {
