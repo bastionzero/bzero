@@ -198,6 +198,17 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				k.lastAck = ksMessage
 				k.pipelineMap.Delete(hpointer) // delete syn from map
 
+				// Must set schema version first in case we're recovering and
+				// resend() has to rebuild Data messages. If we don't set
+				// schemaVersion first, then the resent Data messages will refer
+				// to the previously agreed schema version (in the original
+				// handshake prior to recovery) which might be different.
+				parsedSchemaVersion, err := semver.NewVersion(msg.SchemaVersion)
+				if err != nil {
+					return ErrFailedToParseVersion
+				}
+				k.schemaVersion = parsedSchemaVersion
+
 				// when we recover, we're recovering based on the nonce in the syn/ack because unless
 				// it's not in response to the initial syn, where the nonce is a true random number,
 				// it is an hpointer which refers to the agent's last recieved and validated message.
@@ -205,12 +216,6 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				// recovery mechanism allows us to sync our mrzap state to that
 				k.recovering = false
 				k.resend(msg.Nonce)
-
-				parsedSchemaVersion, err := semver.NewVersion(msg.SchemaVersion)
-				if err != nil {
-					return ErrFailedToParseVersion
-				}
-				k.schemaVersion = parsedSchemaVersion
 
 				// check to see if we're talking with an agent that's using
 				// pre-2.0 keysplitting because we'll need to dirty the payload

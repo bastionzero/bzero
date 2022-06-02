@@ -606,6 +606,7 @@ var _ = Describe("Daemon keysplitting", func() {
 			Expect(ok).To(BeTrue(), "passed in message must be a Data msg")
 			Expect(dataPayload.HPointer).Should(Equal(expectedPrevMessage.Hash()), fmt.Sprintf("This Data msg's HPointer should point to the previously received message: %#v", expectedPrevMessage))
 			Expect(dataPayload.ActionPayload).To(Equal(expectedPayload), "The Data's payload should match the expected payload")
+			Expect(dataPayload.SchemaVersion).To(Equal(agentSchemaVersion), "The schema version should match the agreed upon version found in the agent's SynAck")
 		}
 
 		BuildErrorMessage := func(hPointer string) rrr.ErrorMessage {
@@ -947,6 +948,19 @@ var _ = Describe("Daemon keysplitting", func() {
 							// Completes the recovery procedure by triggering
 							// resend() of all previously sent Data messages
 							ValidateAgentMsg(recoverySynAck)
+						})
+
+						Context("when recovery SynAck's schema version is different than the one agreed upon in initial handshake", func() {
+							BeforeEach(func() {
+								By("Building agent's recovery SynAck with a different schema version than before")
+								agentSchemaVersion = agentSchemaVersion + "-different"
+								// The default SynAck created by BuildSynAck()
+								// uses a random nonce
+								recoverySynAck = BuildSynAck(synMsgSentDuringRecovery)
+							})
+
+							// Pass index 0 because all payloads should be resent
+							AssertBehavior(0)
 						})
 
 						Context("when recovery SynAck's nonce references message not known by daemon", func() {
