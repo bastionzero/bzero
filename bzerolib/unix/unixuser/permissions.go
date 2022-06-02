@@ -112,7 +112,8 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 		return true, nil
 	case fileUid:
 		if ok := perms.Verify(filemode.User, check); !ok {
-			return false, fmt.Errorf("%s is owner but does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
+			err := fmt.Sprintf("%s is owner but does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
+			return false, PermissionDeniedError(err)
 		} else {
 			return true, nil
 		}
@@ -126,7 +127,8 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 		for _, gid := range gids {
 			if gid == fileGid {
 				if ok := perms.Verify(filemode.Group, check); !ok {
-					return false, fmt.Errorf("%s is a group member but does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
+					err := fmt.Sprintf("%s is a group member but does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
+					return false, PermissionDeniedError(err)
 				} else {
 					return true, nil
 				}
@@ -136,7 +138,8 @@ func (u *UnixUser) checkPermissions(path string, check filemode.CheckType) (bool
 
 	// check to see if anyone can write to the file
 	if ok := perms.Verify(filemode.Other, check); !ok {
-		return false, fmt.Errorf("%s is neither owner nor group member and does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
+		err := fmt.Sprintf("%s is neither owner nor group member and does not have sufficient permission to %s %s: %s", u.Username, check, path, info.Mode().String())
+		return false, PermissionDeniedError(err)
 	} else {
 		return true, nil
 	}
