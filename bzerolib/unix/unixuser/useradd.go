@@ -12,7 +12,7 @@ import (
 )
 
 // These are the users we're allowed to create, if someone is trying to look them up
-var allowedToCreate = map[string]UserAddOptions{
+var allowedToCreate = UserList{
 	"ssm-user":   {Sudoer: true},
 	"bzero-user": {Sudoer: true},
 }
@@ -43,6 +43,8 @@ const (
 	sudoersFilePermissions   = 0640
 )
 
+type UserList map[string]UserAddOptions
+
 type UserAddOptions struct {
 	HomeDir    string
 	ExpireDate time.Time
@@ -56,7 +58,7 @@ type UserAddOptions struct {
 	SudoersFileName   string // defaults to const defaultSudoersFileName
 }
 
-// TODO: instead of using hardcoded list, accept list as arg so that ssh and shell could have differently configured lists
+// TODO: instead of using hardcoded list, accept UserList arg so that ssh and shell could have differently configured lists
 // This function will lookup users from a list or create them if they don't exist
 func LookupOrCreateFromList(username string) (*UnixUser, error) {
 	// check that user doesn't exist before we try to create it
