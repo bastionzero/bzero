@@ -278,10 +278,12 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	// get the ack we're going to be building our new message off of
 	var ack *ksmsg.KeysplittingMessage
 	if pair := k.pipelineMap.Newest(); pair == nil {
-		// if our pipeline map is empty, we build off our last received ack.
-		// lastAck is guaranteed to be set because pipeline() is only called
-		// after handshake is complete
-		ack = k.lastAck
+		// if our pipeline map is empty, we build off our last received ack
+		if k.lastAck != nil {
+			ack = k.lastAck
+		} else {
+			return fmt.Errorf("can't build message because there's nothing to build it off of")
+		}
 	} else {
 		// otherwise, we're going to need to predict the ack we're building off of
 		ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
