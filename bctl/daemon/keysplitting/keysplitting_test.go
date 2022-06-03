@@ -17,6 +17,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/tests"
 
+	"github.com/Masterminds/semver"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -37,6 +38,12 @@ var _ = Describe("Daemon keysplitting", func() {
 	const prePipeliningVersion string = "1.9"
 	const timeToPollNothingReceivedOnOutbox time.Duration = 500 * time.Millisecond
 
+	GetAgentSchemaVersionAsSemVer := func() *semver.Version {
+		parsedSchemaVersion, err := semver.NewVersion(agentSchemaVersion)
+		Expect(err).ShouldNot(HaveOccurred())
+		return parsedSchemaVersion
+	}
+
 	// Get the BZCert the daemon is expected to use given our faked ZLI
 	// keysplitting configuration
 	GetFakeBZCert := func() *bzcrt.BZCert {
@@ -55,7 +62,7 @@ var _ = Describe("Daemon keysplitting", func() {
 			payload,
 			agentKeypair.Base64EncodedPublicKey,
 			util.Nonce(),
-			agentSchemaVersion,
+			GetAgentSchemaVersionAsSemVer().String(),
 		)
 		Expect(err).ShouldNot(HaveOccurred())
 		return &synAckMsg
@@ -67,7 +74,7 @@ var _ = Describe("Daemon keysplitting", func() {
 		dataAckMsg, err := dataMsg.BuildUnsignedDataAck(
 			payload,
 			agentKeypair.Base64EncodedPublicKey,
-			agentSchemaVersion,
+			GetAgentSchemaVersionAsSemVer().String(),
 		)
 		Expect(err).ShouldNot(HaveOccurred())
 		return &dataAckMsg
@@ -495,7 +502,7 @@ var _ = Describe("Daemon keysplitting", func() {
 						Expect(ok).To(BeTrue())
 
 						By("Asserting the keysplitting message payload details are correct")
-						Expect(dataPayload.SchemaVersion).To(Equal(agentSchemaVersion), "The schema version should match the agreed upon version found in the agent's SynAck")
+						Expect(dataPayload.SchemaVersion).To(Equal(GetAgentSchemaVersionAsSemVer().String()), "The schema version should match the agreed upon version found in the agent's SynAck")
 						Expect(dataPayload.Type).To(BeEquivalentTo(ksmsg.Data))
 						Expect(dataPayload.Action).To(Equal(testAction))
 						Expect(dataPayload.TargetId).To(Equal(agentKeypair.Base64EncodedPublicKey))
@@ -606,7 +613,7 @@ var _ = Describe("Daemon keysplitting", func() {
 			Expect(ok).To(BeTrue(), "passed in message must be a Data msg")
 			Expect(dataPayload.HPointer).Should(Equal(expectedPrevMessage.Hash()), fmt.Sprintf("This Data msg's HPointer should point to the previously received message: %#v", expectedPrevMessage))
 			Expect(dataPayload.ActionPayload).To(Equal(expectedPayload), "The Data's payload should match the expected payload")
-			Expect(dataPayload.SchemaVersion).To(Equal(agentSchemaVersion), "The schema version should match the agreed upon version found in the agent's SynAck")
+			Expect(dataPayload.SchemaVersion).To(Equal(GetAgentSchemaVersionAsSemVer().String()), "The schema version should match the agreed upon version found in the agent's SynAck")
 		}
 
 		BuildErrorMessage := func(hPointer string) rrr.ErrorMessage {
