@@ -61,7 +61,7 @@ type UnixUser struct {
 }
 
 func Lookup(username string) (*UnixUser, error) {
-	if ok := validateUsername(username); !ok {
+	if ok := isValidUsername(username); !ok {
 		return nil, fmt.Errorf("invalid username provided: %s", username)
 	} else if usr, err := user.Lookup(username); err != nil {
 		return nil, err
@@ -182,7 +182,7 @@ func getDefaultShell(usrName string) string {
 
 // test that the provided username is valid unix user name
 // source: https://unix.stackexchange.com/a/435120
-func validateUsername(username string) bool {
+func isValidUsername(username string) bool {
 	usernamePattern := "^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\\$)$"
 	var usernameMatch, _ = regexp.MatchString(usernamePattern, username)
 	return usernameMatch
@@ -193,7 +193,7 @@ func convertToUnixUser(usr *user.User) (*UnixUser, error) {
 		return nil, fmt.Errorf("failed to convert user string UID to int: %s", err)
 	} else if gid, err := strconv.Atoi(usr.Gid); err != nil {
 		return nil, fmt.Errorf("failed to convert user string GID to int: %s", err)
-	} else if ok := validateUsername(usr.Username); !ok {
+	} else if ok := isValidUsername(usr.Username); !ok {
 		return nil, fmt.Errorf("invalid username %s", usr.Username)
 	} else {
 		return &UnixUser{

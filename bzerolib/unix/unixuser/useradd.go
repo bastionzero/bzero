@@ -12,11 +12,12 @@ import (
 )
 
 // These are the users we're allowed to create, if someone is trying to look them up
-var allowedToCreate = map[string]string{"ssm-user": "", "bzero-user": ""}
+var allowedToCreate = map[string]UserAddOptions{
+	"ssm-user":   {Sudoer: true},
+	"bzero-user": {Sudoer: true},
+}
 
-// these variables gets overwritten by tests
-var sudoersFolder = "/etc/sudoers.d"
-
+// these variable functions are overwriten by tests
 var runCommand = func(cmd *exec.Cmd) error {
 	return cmd.Run()
 }
@@ -24,11 +25,6 @@ var runCommand = func(cmd *exec.Cmd) error {
 var validateUserCreation = func(username string) (*UnixUser, error) {
 	return Lookup(username)
 }
-
-const (
-	defaultSudoersFileName = "bastionzero-users"
-	sudoersFilePermissions = 0640
-)
 
 const (
 	addUserCommand   = "useradd"
@@ -40,25 +36,51 @@ const (
 	gidFlag        = "--gid"
 	groupsFlag     = "--groups"
 	shellFlag      = "--shell"
+
+	// sudoers constants
+	defaultSudoersFolderName = "/etc/sudoers.d"
+	defaultSudoersFileName   = "bastionzero-users"
+	sudoersFilePermissions   = 0640
 )
 
 type UserAddOptions struct {
-	Sudoer          bool
-	SudoersFileName string
-	HomeDir         string
-	ExpireDate      time.Time
-	Gid             uint32
-	Groups          []uint32
-	Shell           string
+	HomeDir    string
+	ExpireDate time.Time
+	Gid        uint32
+	Groups     []uint32
+	Shell      string
+
+	// sudoer config variables
+	Sudoer            bool   // defaults to false
+	SudoersFolderName string // defaults to const defaultSudoersFolderName
+	SudoersFileName   string // defaults to const defaultSudoersFileName
 }
 
-func Create(username string, options UserAddOptions) (*UnixUser, error) {
+// TODO: instead of using hardcoded list, accept list as arg so that ssh and shell could have differently configured lists
+// This function will lookup users from a list or create them if they don't exist
+func LookupOrCreateFromList(username string) (*UnixUser, error) {
 	// check that user doesn't exist before we try to create it
 	var unknownUser user.UnknownUserError
 	if usr, err := Lookup(username); errors.As(err, &unknownUser) {
-		if _, ok := allowedToCreate[username]; !ok {
+		if opts, ok := allowedToCreate[username]; !ok {
 			return nil, fmt.Errorf("we're not allowed to create user %s", username)
-		} else if err := userAdd(username, options); err != nil {
+		} else if err := userAdd(username, opts); err != nil {
+			return nil, err
+		} else {
+			// make sure we really did create the user
+			return validateUserCreation(username)
+		}
+	} else if err != nil {
+		return nil, err
+	} else {
+		return usr, nil
+	}
+}
+
+func Create(username string, options UserAddOptions) (*UnixUser, error) {
+	var unknownUser user.UnknownUserError
+	if usr, err := Lookup(username); errors.As(err, &unknownUser) {
+		if err := userAdd(username, options); err != nil {
 			return nil, err
 		} else {
 			// make sure we really did create the user
@@ -109,6 +131,8 @@ func userAdd(username string, options UserAddOptions) error {
 		return err
 	}
 
+	// grab our user
+
 	if options.Sudoer {
 		// determine our sudoers sudoersFile name
 		sudoersFile := strings.TrimSpace(options.SudoersFileName)
@@ -116,8 +140,14 @@ func userAdd(username string, options UserAddOptions) error {
 			sudoersFile = defaultSudoersFileName
 		}
 
+		// determine our sudoers folder name
+		sudoersFolder := strings.TrimSpace(options.SudoersFolderName)
+		if sudoersFile == "" {
+			sudoersFolder = defaultSudoersFolderName
+		}
+
 		// add our user to the sudoers file
-		if err := addToSudoers(username, sudoersFile); err != nil {
+		if err := addToSudoers(username, filepath.Join(sudoersFolder, sudoersFile)); err != nil {
 			return err
 		}
 	}
@@ -125,8 +155,7 @@ func userAdd(username string, options UserAddOptions) error {
 	return nil
 }
 
-func addToSudoers(username string, sudoersFile string) error {
-	sudoersFilePath := filepath.Join(sudoersFolder, sudoersFile)
+func addToSudoers(username string, sudoersFilePath string) error {
 	sudoersEntry := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL\n", username)
 
 	// open the file as the current user so that we can bubble up any permissions errors
@@ -137,7 +166,7 @@ func addToSudoers(username string, sudoersFile string) error {
 	} else {
 		// if the file was previously empty, then we make sure to add a comment
 		if fi, err := file.Stat(); err == nil && fi.Size() == 0 {
-			sudoersFileComment := fmt.Sprintf("# Created by the BastionZero Agent on %s\n\n", time.Now().Round(time.Second))
+			sudoersFileComment := fmt.Sprintf("# Created by BastionZero on %s\n\n", time.Now().Round(time.Second))
 			if _, err := file.WriteString(sudoersFileComment); err != nil {
 				return err
 			}
