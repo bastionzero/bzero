@@ -9,8 +9,9 @@ replace bastionzero.com/bctl/v1/bctl => ./
 require (
 	bastionzero.com/bctl/v1/bzerolib v0.0.0
 	github.com/Masterminds/semver v1.5.0
-	github.com/creack/pty v1.1.17
+	github.com/creack/pty v1.1.18
 	github.com/fsnotify/fsnotify v1.5.1
+	github.com/gliderlabs/ssh v0.3.4 // indirect
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/websocket v1.4.2
 	github.com/onsi/ginkgo/v2 v2.1.4
