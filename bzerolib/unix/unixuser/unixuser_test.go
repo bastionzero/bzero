@@ -62,11 +62,11 @@ var _ = Describe("Unix", Ordered, func() {
 			Expect(err).To(BeNil())
 			Expect(len(currentGids)).To(Equal(len(userGids)))
 		})
-
 	})
 
 	Context("Permissions", func() {
 		usr, _ := Current()
+		fmt.Printf("running test as: %s uid: %d\n", usr.Name, usr.Uid)
 
 		// create a directory in temp with 700 permission and owned by this user
 		ourPath := filepath.Join(bzeroDaddyPath, "ourdir")

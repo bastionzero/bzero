@@ -27,7 +27,7 @@ var validateUserCreation = func(username string) (*UnixUser, error) {
 }
 
 const (
-	addUserCommand   = "useradd"
+	addUserCommand   = "useradd -m"
 	expireTimeFormat = "2006-01-02"
 
 	// option flags
@@ -43,6 +43,7 @@ const (
 	sudoersFilePermissions   = 0640
 )
 
+// key'ed by user name
 type UserList map[string]UserAddOptions
 
 type UserAddOptions struct {
@@ -65,7 +66,7 @@ func LookupOrCreateFromList(username string) (*UnixUser, error) {
 	var unknownUser user.UnknownUserError
 	if usr, err := Lookup(username); errors.As(err, &unknownUser) {
 		if opts, ok := allowedToCreate[username]; !ok {
-			return nil, fmt.Errorf("we're not allowed to create user %s", username)
+			return nil, fmt.Errorf("%s does not exist", username)
 		} else if err := userAdd(username, opts); err != nil {
 			return nil, err
 		} else {
