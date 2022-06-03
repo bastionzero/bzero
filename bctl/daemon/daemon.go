@@ -267,6 +267,9 @@ func parseFlags() error {
 	flag.StringVar(&sessionToken, "sessionToken", "", "Session Token From Zli")
 	flag.StringVar(&authHeader, "authHeader", "", "Auth Header From Zli")
 	flag.StringVar(&logLevel, "logLevel", logger.Debug.String(), "The log level to use")
+	flag.StringVar(&connectionId, "connectionId", "", "The bzero connection id for the shell connection")
+	flag.StringVar(&connectionServiceUrl, "connectionServiceUrl", "", "The bzero connection id for the shell connection")
+	flag.StringVar(&connectionServiceAuthToken, "connectionServiceAuthToken", "", "The bzero connection id for the shell connection")
 
 	// Our expected flags we need to start
 	flag.StringVar(&serviceUrl, "serviceURL", prodServiceUrl, "Service URL to use")
@@ -291,10 +294,7 @@ func parseFlags() error {
 	flag.StringVar(&remoteHost, "remoteHost", "", "Remote target host to connect to")
 
 	// Shell plugin variables
-	flag.StringVar(&connectionId, "connectionId", "", "The bzero connection id for the shell connection")
 	flag.StringVar(&dataChannelId, "dataChannelId", "", "The datachannel id to attach to an existing shell connection")
-	flag.StringVar(&connectionServiceUrl, "connectionServiceUrl", "", "The bzero connection id for the shell connection")
-	flag.StringVar(&connectionServiceAuthToken, "connectionServiceAuthToken", "", "The bzero connection id for the shell connection")
 
 	// SSH plugin variables
 	flag.StringVar(&identityFile, "identityFile", "", "Path to an SSH IdentityFile")
@@ -312,7 +312,7 @@ func parseFlags() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requiredFlags := []string{"sessionId", "sessionToken", "authHeader", "logPath", "configPath", "agentPubKey"}
+	requiredFlags := []string{"connectionId", "connectionServiceUrl", "connectionServiceAuthToken", "sessionId", "sessionToken", "authHeader", "logPath", "configPath", "agentPubKey"}
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Kube:
 		requiredFlags = append(requiredFlags, "localPort", "targetUser", "targetId", "localhostToken", "certPath", "keyPath")
