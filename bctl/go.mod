@@ -14,9 +14,11 @@ require (
 	github.com/gliderlabs/ssh v0.3.4 // indirect
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/websocket v1.4.2
+	github.com/kr/pty v1.1.8 // indirect
 	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.19.0
 	github.com/stretchr/testify v1.7.0
+	github.com/unknwon/com v1.0.1 // indirect
 	github.com/wk8/go-ordered-map v0.2.0
 	golang.org/x/build v0.0.0-20211108163316-3ce30f35b9aa
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
