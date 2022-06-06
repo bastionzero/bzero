@@ -19,7 +19,7 @@ func TestPseudoTerminal(t *testing.T) {
 var _ = Describe("Pseudo Terminal", Ordered, func() {
 	Context("Happy Path", func() {
 		commandstr := ""
-		logger := logger.DevNullLogger()
+		logger := logger.MockLogger()
 		var terminal *PseudoTerminal
 
 		// create our pseudo terminal

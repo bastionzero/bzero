@@ -88,7 +88,7 @@ var _ = Describe("Agent PortForward action", Ordered, func() {
 		doDial = oldDoDial
 	})
 
-	logger := logger.DevNullLogger()
+	logger := logger.MockLogger()
 
 	requestId := "rid"
 	portForwardRequestId := "pid"

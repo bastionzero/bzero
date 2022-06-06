@@ -62,7 +62,7 @@ var _ = Describe("Agent RestApi action", Ordered, func() {
 		makeRequest = oldMakeRequest
 	})
 
-	logger := logger.DevNullLogger()
+	logger := logger.MockLogger()
 
 	statusCode := 200
 	requestId := "rid"

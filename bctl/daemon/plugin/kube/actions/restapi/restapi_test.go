@@ -22,7 +22,7 @@ func TestRestApi(t *testing.T) {
 }
 
 var _ = Describe("Daemon RestApi action", func() {
-	logger := logger.DevNullLogger()
+	logger := logger.MockLogger()
 
 	requestId := "rid"
 	logId := "lid"

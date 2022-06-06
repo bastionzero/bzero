@@ -62,7 +62,7 @@ var _ = Describe("Daemon PortForward action", Ordered, func() {
 		performHandshake = oldPerformHandshake
 	})
 
-	logger := logger.DevNullLogger()
+	logger := logger.MockLogger()
 
 	requestId := "rid"
 	logId := "lid"

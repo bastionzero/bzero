@@ -71,7 +71,7 @@ var _ = Describe("Agent Exec action", Ordered, func() {
 		getConfig = oldGetConfig
 	})
 
-	logger := logger.DevNullLogger()
+	logger := logger.MockLogger()
 
 	requestId := "rid"
 	logId := "lid"
