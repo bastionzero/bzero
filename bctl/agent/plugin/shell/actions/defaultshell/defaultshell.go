@@ -217,9 +217,6 @@ func (d *DefaultShell) writePump() {
 	stdoutBuff := make([]byte, streamDataPayloadSize)
 	stdOut := d.terminal.StdOut()
 
-	// Wait for all input commands to run.
-	time.Sleep(time.Second)
-
 	for {
 		select {
 		case <-d.terminal.Done():
