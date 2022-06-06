@@ -127,7 +127,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	action = "ssh/" + action
 	ksLogger := s.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, s.agentPubKey, tokenrefresh.NewZLIKeysplittingTokenRefresher(s.refreshTokenCommand, s.configPath)); err != nil {
+	if keysplitter, err := keysplitting.New(ksLogger, s.agentPubKey, tokenrefresh.NewMRZAPTokenRefresher(s.configPath, s.refreshTokenCommand)); err != nil {
 		return err
 	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, actionParams, attach, false); err != nil {
 		return err

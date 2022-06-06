@@ -157,7 +157,7 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 
 	action = "db/" + action
 	ksLogger := d.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, d.agentPubKey, tokenrefresh.NewZLIKeysplittingTokenRefresher(d.refreshTokenCommand, d.configPath)); err != nil {
+	if keysplitter, err := keysplitting.New(ksLogger, d.agentPubKey, tokenrefresh.NewMRZAPTokenRefresher(d.configPath, d.refreshTokenCommand)); err != nil {
 		return err
 	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true); err != nil {
 		return err

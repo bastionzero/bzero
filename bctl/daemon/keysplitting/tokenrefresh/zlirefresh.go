@@ -6,22 +6,22 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
 
-type ZLIKeysplittingTokenRefresher struct {
-	refreshTokenCommand string
+type MRZAPTokenRefresher struct {
 	configPath          string
+	refreshTokenCommand string
 }
 
-func NewZLIKeysplittingTokenRefresher(
-	refreshTokenCommand string,
+func NewMRZAPTokenRefresher(
 	configPath string,
-) *ZLIKeysplittingTokenRefresher {
-	return &ZLIKeysplittingTokenRefresher{
-		refreshTokenCommand: refreshTokenCommand,
+	refreshTokenCommand string,
+) *MRZAPTokenRefresher {
+	return &MRZAPTokenRefresher{
 		configPath:          configPath,
+		refreshTokenCommand: refreshTokenCommand,
 	}
 }
 
-func (r *ZLIKeysplittingTokenRefresher) Refresh() (*ZLIKeysplittingConfig, error) {
+func (r *MRZAPTokenRefresher) Refresh() (*ZLIKeysplittingConfig, error) {
 	// Update the id token by calling the passed in zli refresh command
 	if err := util.RunRefreshAuthCommand(r.refreshTokenCommand); err != nil {
 		return nil, fmt.Errorf("failed to run refresh auth command: %w", err)

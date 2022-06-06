@@ -168,7 +168,7 @@ func (k *KubeServer) newDataChannel(dcId string, action string, websocket *webso
 
 	action = "kube/" + action
 	ksLogger := k.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, k.agentPubKey, tokenrefresh.NewZLIKeysplittingTokenRefresher(k.refreshTokenCommand, k.configPath)); err != nil {
+	if keysplitter, err := keysplitting.New(ksLogger, k.agentPubKey, tokenrefresh.NewMRZAPTokenRefresher(k.configPath, k.refreshTokenCommand)); err != nil {
 		return err
 	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &k.tmb, websocket, keysplitter, plugin, action, actionParams, attach, true); err != nil {
 		return err
