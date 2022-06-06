@@ -154,8 +154,10 @@ var _ = Describe("Daemon keysplitting", func() {
 		// Setup keypairs to use for agent and daemon
 		var err error
 		agentKeypair, err = tests.GenerateEd25519Key()
+		GinkgoWriter.Printf("Agent keypair: Private key: %v; Public key: %v\n", agentKeypair.Base64EncodedPrivateKey, agentKeypair.Base64EncodedPublicKey)
 		Expect(err).ShouldNot(HaveOccurred())
 		daemonKeypair, err = tests.GenerateEd25519Key()
+		GinkgoWriter.Printf("Daemon keypair: Private key: %v; Public key: %v\n", daemonKeypair.Base64EncodedPrivateKey, daemonKeypair.Base64EncodedPublicKey)
 		Expect(err).ShouldNot(HaveOccurred())
 
 		// Set schema version to use when building agent messages
