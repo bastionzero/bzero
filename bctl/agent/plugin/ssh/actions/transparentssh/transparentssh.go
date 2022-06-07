@@ -1,11 +1,9 @@
 package transparentssh
 
 import (
-	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"time"
 
@@ -38,6 +36,10 @@ type TransparentSsh struct {
 	streamOutputChan     chan smsg.StreamMessage
 	streamMessageVersion smsg.SchemaVersion
 
+	//stdInReader *StdReader
+	conn    *gossh.Client
+	session *gossh.Session
+
 	remoteConnection *net.TCPConn
 	authorizedKeys   AuthorizedKeysInterface
 
@@ -61,6 +63,8 @@ func (t *TransparentSsh) Kill() {
 	if t.remoteConnection != nil {
 		(*t.remoteConnection).Close()
 	}
+	t.conn.Close()
+	t.session.Close()
 	t.tmb.Wait()
 }
 
@@ -80,6 +84,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 			}
 		*/
 
+		// do I need to send a ready message?
 		return t.start(openRequest, action)
 	case ssh.SshInput:
 
@@ -92,12 +97,20 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		// TODO: send these to a channel that is piped to ssh
 		t.stdInChan <- inputRequest.Data
 
-		/*
-			if err != nil {
-				t.logger.Errorf("error writing to local TCP connection: %s", err)
-				t.Kill()
-			}
-		*/
+	/*
+		if err != nil {
+			t.logger.Errorf("error writing to local TCP connection: %s", err)
+			t.Kill()
+		}
+	*/
+
+	case ssh.SshExec:
+		var execRequest ssh.SshExecMessage
+		if err := json.Unmarshal(actionPayload, &execRequest); err != nil {
+			return nil, fmt.Errorf("unable to unmarshal transparent SSH exec message: %s", err)
+		} else {
+			return t.executeCommand(execRequest.Command)
+		}
 
 	case ssh.SshClose:
 		// Deserialize the action payload
@@ -120,6 +133,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 
 func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
 
+	t.logger.Errorf("open request %+v", openRequest)
 	host := "localhost:22"
 	privateBytes, publicBytes, _ := opaquessh.GenerateKeys()
 	t.authorizedKeys.Add(string(publicBytes))
@@ -135,7 +149,8 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 	}
 
 	conf := &gossh.ClientConfig{
-		User: openRequest.TargetUser,
+		// FIXME: get this here...
+		User: "ec2-user",
 		// FIXME: get rid of that...
 		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 		Auth: []gossh.AuthMethod{
@@ -143,46 +158,53 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 		},
 	}
 
-	var conn *gossh.Client
-
-	conn, err = gossh.Dial("tcp", host, conf)
+	t.conn, err = gossh.Dial("tcp", host, conf)
 	if err != nil {
 		return nil, fmt.Errorf("dial error: %s", err)
 	}
-	defer conn.Close()
 
-	var session *gossh.Session
-	var stdin io.WriteCloser
-	var stdout, stderr io.Reader
-
-	session, err = conn.NewSession()
+	t.session, err = t.conn.NewSession()
 	if err != nil {
-		return nil, err
-	}
-	defer session.Close()
-
-	stdin, err = session.StdinPipe()
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session err: %s", err)
 	}
 
-	stdout, err = session.StdoutPipe()
+	// Update our remote connection
+	return []byte{}, nil
+}
+
+func (t *TransparentSsh) executeCommand(command string) ([]byte, error) {
+
+	t.session.C
+
+	return []byte{}, nil
+}
+
+/*
+func (t *TransparentSsh) startShell() {
+
+	stdin, err := t.session.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("stdin pipe err: %s", err)
 	}
 
-	stderr, err = session.StderrPipe()
+	stdout, err := t.session.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("stdout pipe err: %s", err)
+	}
+
+	stderr, err := t.session.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe err: %s", err)
 	}
 
 	go func() {
 		for {
 			d := <-t.stdInChan
+			t.logger.Errorf("Writing %d bytes to stdin", len(d))
 			_, err := stdin.Write(d)
 			if err != nil {
 				// FIXME: probably kill here
-				t.logger.Errorf(err.Error())
+				t.logger.Errorf("stdin write err")
 			}
 		}
 	}()
@@ -190,43 +212,55 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 	// TODO: goroutines to read from stdout/stderr and write them back to daemon
 	// FIXME: may not be these...
 	go func() {
-		scanner := bufio.NewScanner(stdout)
+		b := make([]byte, chunkSize)
+		t.logger.Errorf("reading stdout...")
 		for {
-			if tkn := scanner.Scan(); tkn {
-				rcv := scanner.Bytes()
-
-				raw := make([]byte, len(rcv))
-				copy(raw, rcv)
-
-				// FIXME: sequence number...
-				t.sendStreamMessage(0, smsg.StdOut, true, raw)
-			} else {
-				if scanner.Err() != nil {
-					fmt.Println(scanner.Err())
-				} else {
-					t.sendStreamMessage(0, smsg.StdOut, false, []byte{})
-				}
+			select {
+			case <-t.tmb.Dying():
 				return
+			default:
+				if n, err := stdout.Read(b); !t.tmb.Alive() {
+					return
+				} else if err != nil {
+					if err == io.EOF {
+						t.sendStreamMessage(0, smsg.StdOut, false, b[:n])
+						return
+					}
+				} else if n > 0 {
+					t.logger.Debugf("Read %d bytes from local SSH stdout", n)
+					t.sendStreamMessage(0, smsg.StdOut, true, b[:n])
+				}
 			}
 		}
 	}()
 
 	go func() {
-		scanner := bufio.NewScanner(stderr)
-
-		for scanner.Scan() {
-			rcv := scanner.Bytes()
-			raw := make([]byte, len(rcv))
-			copy(raw, rcv)
-			t.sendStreamMessage(0, smsg.StdErr, true, scanner.Bytes())
+		b := make([]byte, chunkSize)
+		t.logger.Errorf("reading stderr...")
+		for {
+			select {
+			case <-t.tmb.Dying():
+				return
+			default:
+				if n, err := stderr.Read(b); !t.tmb.Alive() {
+					return
+				} else if err != nil && n > 0 {
+					t.logger.Debugf("Read %d bytes from local SSH stderr", n)
+					t.sendStreamMessage(0, smsg.StdErr, true, b[:n])
+				}
+			}
 		}
 	}()
 
-	session.Shell()
+	err = t.session.Shell()
+	if err != nil {
+		t.logger.Errorf("shell issue: %s", err)
+	} else {
+		t.logger.Errorf("Uh uh - it's turtle time")
+	}
 
-	// Update our remote connection
-	return []byte{}, nil
 }
+*/
 
 func (t *TransparentSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
 	t.streamOutputChan <- smsg.StreamMessage{

@@ -2,7 +2,6 @@ package transparentssh
 
 import (
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -104,11 +103,9 @@ func (t *TransparentSsh) Start() error {
 		},
 	}
 
-	t.logger.Infof("Making config")
 	newPrivate, _, _ := opaquessh.GenerateKeys()
 	private, _ := gossh.ParsePrivateKey(newPrivate)
 	config.AddHostKey(private)
-	t.logger.Infof("Made config")
 	go func() {
 		// Once a ServerConfig has been configured, connections can be
 		// accepted.
@@ -152,24 +149,17 @@ func (t *TransparentSsh) Start() error {
 					continue
 				}
 
-				// allocate a terminal for this channel
-				t.logger.Infof("creating pty...")
 				// Create new pty
-				f, _, err := pty.Open()
+				_, _, err = pty.Open()
 				if err != nil {
 					t.logger.Errorf("could not start pty (%s)", err)
 					continue
 				}
 
-				shell := os.Getenv("SHELL")
-				if shell == "" {
-					shell = DEFAULT_SHELL
-				}
-
 				// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 				go func(in <-chan *gossh.Request) {
 					for req := range in {
-						t.logger.Infof("%v %s", req.Payload, req.Payload)
+						t.logger.Errorf("What I am is %s and what I have is %+v", req.Type, req.Payload)
 						ok := false
 						switch req.Type {
 						// handles scp and other exec
@@ -177,30 +167,15 @@ func (t *TransparentSsh) Start() error {
 							ok = true
 							command := string(req.Payload[4 : req.Payload[3]+4])
 							t.logger.Infof("Lucie, the command is %s", command)
-							cmd := exec.Command(shell, []string{"-c", command}...)
-
-							cmd.Stdout = channel
-							cmd.Stderr = channel
-							cmd.Stdin = channel
-
-							err := cmd.Start()
-							if err != nil {
-								t.logger.Errorf("could not start command (%s)", err)
-								continue
+							sshExecMessage := ssh.SshExecMessage{
+								Command: command,
 							}
+							t.sendOutputMessage(ssh.SshExec, sshExecMessage)
 
-							// teardown session
-							go func() {
-								_, err := cmd.Process.Wait()
-								if err != nil {
-									t.logger.Errorf("failed to exit bash (%s)", err)
-								}
-								channel.Close()
-								t.logger.Infof("session closed")
-							}()
 						case "shell":
 							t.tmb.Go(func() error {
 								b := make([]byte, InputBufferSize)
+								t.logger.Errorf("Trying to read from stdin...")
 
 								for {
 									select {
@@ -238,20 +213,23 @@ func (t *TransparentSsh) Start() error {
 							if len(req.Payload) == 0 {
 								ok = true
 							}
-						case "pty-req":
-							// Responding 'ok' here will let the client
-							// know we have a pty ready for input
-							ok = true
-							// Parse body...
-							termLen := req.Payload[3]
-							termEnv := string(req.Payload[4 : termLen+4])
-							w, h := parseDims(req.Payload[termLen+4:])
-							SetWinsize(f.Fd(), w, h)
-							t.logger.Infof("pty-req '%s'", termEnv)
-						case "window-change":
-							w, h := parseDims(req.Payload)
-							SetWinsize(f.Fd(), w, h)
-							continue //no response
+							/*
+								case "pty-req":
+									// Responding 'ok' here will let the client
+									// know we have a pty ready for input
+									ok = true
+									// Parse body...
+									termLen := req.Payload[3]
+									termEnv := string(req.Payload[4 : termLen+4])
+									w, h := parseDims(req.Payload[termLen+4:])
+									SetWinsize(f.Fd(), w, h)
+									t.logger.Infof("pty-req '%s'", termEnv)
+								case "window-change":
+									w, h := parseDims(req.Payload)
+									SetWinsize(f.Fd(), w, h)
+									continue //no response
+								}
+							*/
 						}
 
 						if !ok {
@@ -288,11 +266,13 @@ func PtyRun(c *exec.Cmd, tty *os.File) (err error) {
 }
 
 // parseDims extracts two uint32s from the provided buffer.
+/*
 func parseDims(b []byte) (uint32, uint32) {
 	w := binary.BigEndian.Uint32(b)
 	h := binary.BigEndian.Uint32(b[4:])
 	return w, h
 }
+*/
 
 // Winsize stores the Height and Width of a terminal.
 type Winsize struct {
@@ -311,6 +291,19 @@ func SetWinsize(fd uintptr, w, h uint32) {
 func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	t.logger.Debugf("Default ssh received %+v stream", smessage.Type)
 	switch smsg.StreamType(smessage.Type) {
+	case smsg.Data:
+		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
+			t.logger.Errorf("Error decoding ssh Data stream content: %s", err)
+		} else {
+			if _, err = t.sshChannel.Write(contentBytes); err != nil {
+				t.logger.Errorf("Error writing to Stdout: %s", err)
+			}
+			if !smessage.More {
+				t.tmb.Kill(fmt.Errorf("received ssh close stream message"))
+				t.sshChannel.Close()
+				return
+			}
+		}
 	// FIXME: just a stopgap
 	case smsg.StdErr:
 		fallthrough

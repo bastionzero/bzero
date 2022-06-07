@@ -320,7 +320,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
-		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "remoteHost", "remotePort", "sshAction")
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "remoteHost", "remotePort", "sshAction")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

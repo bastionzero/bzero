@@ -125,6 +125,8 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 		RemotePort: s.remotePort,
 	}
 
+	s.logger.Infof("params %+v", actionParams)
+
 	action = "ssh/" + action
 	ksLogger := s.logger.GetComponentLogger("mrzap")
 	if keysplitter, err := keysplitting.New(ksLogger, s.agentPubKey, s.configPath, s.refreshTokenCommand); err != nil {

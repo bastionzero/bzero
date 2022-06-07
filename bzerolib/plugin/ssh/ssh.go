@@ -27,6 +27,10 @@ type SshInputMessage struct {
 	Data []byte `json:"data"`
 }
 
+type SshExecMessage struct {
+	Command string `json:"command"`
+}
+
 type SshCloseMessage struct {
 	Reason string `json:"reason"`
 }
@@ -35,6 +39,7 @@ type SshSubAction string
 
 const (
 	SshOpen  SshSubAction = "ssh/open"
+	SshExec  SshSubAction = "ssh/exec"
 	SshInput SshSubAction = "ssh/input"
 	SshClose SshSubAction = "ssh/close"
 )
