@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -97,20 +98,12 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		// TODO: send these to a channel that is piped to ssh
 		t.stdInChan <- inputRequest.Data
 
-	/*
-		if err != nil {
-			t.logger.Errorf("error writing to local TCP connection: %s", err)
-			t.Kill()
-		}
-	*/
-
-	case ssh.SshExec:
-		var execRequest ssh.SshExecMessage
-		if err := json.Unmarshal(actionPayload, &execRequest); err != nil {
-			return nil, fmt.Errorf("unable to unmarshal transparent SSH exec message: %s", err)
-		} else {
-			return t.executeCommand(execRequest.Command)
-		}
+		/*
+			if err != nil {
+				t.logger.Errorf("error writing to local TCP connection: %s", err)
+				t.Kill()
+			}
+		*/
 
 	case ssh.SshClose:
 		// Deserialize the action payload
@@ -163,39 +156,34 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 		return nil, fmt.Errorf("dial error: %s", err)
 	}
 
+	var stdin io.WriteCloser
+	var stdout, stderr io.Reader
+
 	t.session, err = t.conn.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("session err: %s", err)
 	}
 
-	// Update our remote connection
-	return []byte{}, nil
-}
-
-func (t *TransparentSsh) executeCommand(command string) ([]byte, error) {
-
-	t.session.C
-
-	return []byte{}, nil
-}
-
-/*
-func (t *TransparentSsh) startShell() {
-
-	stdin, err := t.session.StdinPipe()
+	stdin, err = t.session.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe err: %s", err)
 	}
 
-	stdout, err := t.session.StdoutPipe()
+	stdout, err = t.session.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe err: %s", err)
 	}
 
-	stderr, err := t.session.StderrPipe()
+	stderr, err = t.session.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stderr pipe err: %s", err)
 	}
+
+	/*
+		stdOutWriter := NewStdWriter(t.streamOutputChan, t.streamMessageVersion, string(ssh.TransparentSsh), smsg.StdOut)
+		stdErrWriter := NewStdWriter(t.streamOutputChan, t.streamMessageVersion, string(ssh.TransparentSsh), smsg.StdErr)
+		t.stdInReader = NewStdReader(string(ssh.SshInput), t.stdInChan)
+	*/
 
 	go func() {
 		for {
@@ -252,6 +240,16 @@ func (t *TransparentSsh) startShell() {
 		}
 	}()
 
+	modes := gossh.TerminalModes{
+		//gossh.ECHO:          0,     // disable echoing
+		gossh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+		gossh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+	}
+
+	if err := t.session.RequestPty("xterm", 40, 80, modes); err != nil {
+		t.logger.Errorf("request for pseudo terminal failed: ", err)
+	}
+
 	err = t.session.Shell()
 	if err != nil {
 		t.logger.Errorf("shell issue: %s", err)
@@ -259,8 +257,9 @@ func (t *TransparentSsh) startShell() {
 		t.logger.Errorf("Uh uh - it's turtle time")
 	}
 
+	// Update our remote connection
+	return []byte{}, nil
 }
-*/
 
 func (t *TransparentSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
 	t.streamOutputChan <- smsg.StreamMessage{
