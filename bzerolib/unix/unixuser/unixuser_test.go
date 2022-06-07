@@ -118,7 +118,7 @@ var _ = Describe("Unix", Ordered, func() {
 
 	Context("Create User", func() {
 		It("creates a new user", func() {
-			validCommand := regexp.MustCompile(`^useradd -m \S+(( --[a-z]+ \S+)*)$`)
+			validCommand := regexp.MustCompile(`^\S+useradd -m \S+(( --[a-z]+ \S+)*)$`)
 			runCommand = func(cmd *exec.Cmd) error {
 				fmt.Printf("\n Generated command: %s\n", cmd.String())
 				Expect(validCommand.Match([]byte(cmd.String()))).To(BeTrue())
