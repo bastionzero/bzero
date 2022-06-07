@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/opaquessh"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/transparentssh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
@@ -84,8 +85,36 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 				authKeys,
 			)
 
+		case bzssh.TransparentSsh:
+			// Open up a connection to the TCP addr we are trying to connect to
+			raddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", synPayload.RemoteHost, synPayload.RemotePort))
+			if err != nil {
+				rerr = fmt.Errorf("failed to resolve remote address: %s", err)
+			}
+			remoteConnection, err := net.DialTCP("tcp", nil, raddr)
+			if err != nil {
+				rerr = fmt.Errorf("failed to dial remote address: %s", err)
+			}
+
+			subSubLogger := subLogger.GetComponentLogger("authorized_keys")
+
+			// we place the authorized keys lock file inside the user's /home/.ssh/ directory because that is the least bad place for it
+			// source: https://i.stack.imgur.com/BlpRb.png
+			authKeys, err := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan, sshFolder, sshFolder, maxKeyLifetime)
+			if err != nil {
+				rerr = fmt.Errorf("failed to set up authorized_keys file: %s", err)
+			}
+
+			plugin.action = transparentssh.New(
+				subLogger,
+				plugin.doneChan,
+				plugin.streamOutputChan,
+				remoteConnection,
+				authKeys,
+			)
+
 		default:
-			rerr = fmt.Errorf("unhandled Ssh action")
+			rerr = fmt.Errorf("unhandled Ssh action %s", parsedAction)
 		}
 
 		if rerr != nil {

@@ -44,6 +44,7 @@ var (
 
 	// SSH specific arguments
 	identityFile string
+	sshAction    string
 )
 
 const (
@@ -160,6 +161,7 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 		identityFile,
 		remoteHost,
 		remotePort,
+		sshAction,
 	)
 }
 
@@ -292,6 +294,7 @@ func parseFlags() error {
 
 	// SSH plugin variables
 	flag.StringVar(&identityFile, "identityFile", "", "Path to an SSH IdentityFile")
+	flag.StringVar(&sshAction, "sshAction", "", "One of ['opaque', 'transparent']")
 
 	flag.Parse()
 
@@ -317,7 +320,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
-		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "remoteHost", "remotePort")
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "remoteHost", "remotePort", "sshAction")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

@@ -61,6 +61,7 @@ func StartSshServer(
 	identityFile string,
 	remoteHost string,
 	remotePort int,
+	action string,
 ) error {
 
 	server := &SshServer{
@@ -85,7 +86,7 @@ func StartSshServer(
 	}
 
 	// create our new datachannel
-	if err := server.newDataChannel(string(bzssh.OpaqueSsh), server.websocket); err != nil {
+	if err := server.newDataChannel(action, server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 
@@ -114,7 +115,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
 
 	plugin := ssh.New(pluginLogger, s.identityFile, bzio.OsFileIo{}, bzio.StdIo{})
-	if err := plugin.StartAction(); err != nil {
+	if err := plugin.StartAction(action); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)
 	}
 

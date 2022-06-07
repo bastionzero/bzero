@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/opaquessh"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/transparentssh"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -42,14 +43,19 @@ func New(logger *logger.Logger, identityFile string, filIo bzio.BzFileIo, stdIo 
 	}
 }
 
-func (s *SshDaemonPlugin) StartAction() error {
+func (s *SshDaemonPlugin) StartAction(actionName string) error {
 	if s.killed {
 		return fmt.Errorf("plugin has already been killed, cannot create a new ssh action")
 	}
 
-	// Create the OpaqueSsh action
-	actLogger := s.logger.GetActionLogger(string(bzssh.OpaqueSsh))
-	s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
+	// Create the action
+	actLogger := s.logger.GetActionLogger(actionName)
+	switch actionName {
+	case string(bzssh.OpaqueSsh):
+		s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
+	case string(bzssh.TransparentSsh):
+		s.action = transparentssh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
+	}
 
 	// Start the ssh action
 	if err := s.action.Start(); err != nil {
