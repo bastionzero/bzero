@@ -12,6 +12,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.0.0
 	github.com/gofrs/flock v0.8.1
 	github.com/gorilla/websocket v1.4.2
+	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.19.0
 	github.com/rs/zerolog v1.24.0
 	github.com/stretchr/testify v1.7.0

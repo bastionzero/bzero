@@ -54,13 +54,9 @@ func New(
 	} else {
 		switch parsedAction {
 		case shell.DefaultShell:
-			if act, err := defaultshell.New(subLogger, plugin.streamOutputChan, plugin.doneChan, plugin.runAsUser); err != nil {
-				return nil, fmt.Errorf("could not start new action: %s", err)
-			} else {
-				plugin.logger.Infof("Shell plugin started %v action", action)
-				plugin.action = act
-				return plugin, nil
-			}
+			plugin.action = defaultshell.New(subLogger, plugin.streamOutputChan, plugin.doneChan, plugin.runAsUser)
+			plugin.logger.Infof("Shell plugin started %v action", action)
+			return plugin, nil
 		default:
 			return nil, fmt.Errorf("could not start unhandled shell action: %v", action)
 		}

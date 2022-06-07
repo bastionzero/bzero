@@ -257,7 +257,10 @@ func parseFlags() error {
 	// Our required registration flags
 	flag.StringVar(&activationToken, "activationToken", "", "Single-use token used to register the agent")
 	flag.StringVar(&registrationKey, "registrationKey", "", "API Key used to register the agent")
-	flag.BoolVar(&forceReRegistration, "f", false, "Boolean flag if you want to force the agent to re-register")
+
+	// forced re-registration flags
+	flag.BoolVar(&forceReRegistration, "y", false, "Boolean flag if you want to force the agent to re-register")
+	flag.BoolVar(&forceReRegistration, "f", false, "Same as -y")
 
 	// Our flag to determine if this is systemd and will therefore wait for successful registration
 	flag.BoolVar(&wait, "w", false, "Mode for background processes to wait for successful registration")
@@ -267,9 +270,14 @@ func parseFlags() error {
 	flag.StringVar(&orgId, "orgId", "", "OrgID to use")
 	flag.StringVar(&targetName, "targetName", "", "Target name to use")
 	flag.StringVar(&targetId, "targetId", "", "Target ID to use")
-	flag.StringVar(&environmentId, "environmentId", "", "Policy environment ID to associate with agent")
-	flag.StringVar(&environmentName, "environmentName", "", "Policy environment Name to associate with agent")
 	flag.StringVar(&logLevel, "logLevel", logger.Debug.String(), "The log level to use")
+
+	flag.StringVar(&environmentId, "environmentId", "", "Policy environment ID to associate with agent")
+	flag.StringVar(&environmentName, "environmentName", "", "(Deprecated) Policy environment Name to associate with agent")
+
+	// new env flags
+	flag.StringVar(&environmentId, "envId", "", "(Deprecated) Please use environmentId")
+	flag.StringVar(&environmentName, "envName", "", "(Deprecated) Policy environment Name to associate with agent")
 
 	// Parse any flag
 	flag.Parse()

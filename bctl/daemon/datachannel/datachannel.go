@@ -59,6 +59,9 @@ type DataChannel struct {
 
 	// channels for incoming messages
 	inputChan chan *am.AgentMessage
+
+	// whether or not to wait for the inputChannel queue to be flushed before exiting
+	processInputChanBeforeExit bool
 }
 
 func New(
@@ -71,15 +74,17 @@ func New(
 	action string,
 	synPayload interface{},
 	attach bool, // bool to indicate if we are attaching to an existing datachannel
+	processInputChanBeforeExit bool,
 ) (*DataChannel, *tomb.Tomb, error) {
 
 	dc := &DataChannel{
-		logger:      logger,
-		id:          id,
-		websocket:   websocket,
-		keysplitter: keysplitter,
-		plugin:      plugin,
-		inputChan:   make(chan *am.AgentMessage, 50),
+		logger:                     logger,
+		id:                         id,
+		websocket:                  websocket,
+		keysplitter:                keysplitter,
+		plugin:                     plugin,
+		inputChan:                  make(chan *am.AgentMessage, 50),
+		processInputChanBeforeExit: processInputChanBeforeExit,
 	}
 
 	// register with websocket so datachannel can send and receive messages
@@ -121,8 +126,11 @@ func New(
 				return nil
 			case <-dc.plugin.Done():
 				dc.logger.Infof("%s is done", action)
-				// wait for any in-flight messages to come in or timeout
-				return dc.waitOrTimeout()
+				if processInputChanBeforeExit {
+					// wait for any in-flight messages to come in or timeout
+					return dc.waitOrTimeout()
+				}
+				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
 				if err := dc.processInputMessage(agentMessage); err != nil {
 					dc.logger.Error(err)
