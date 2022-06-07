@@ -36,11 +36,16 @@ type AuthorizedKeys struct {
 	fileLock    *filelock.FileLock
 }
 
-func New(logger *logger.Logger, username string, doneChan chan struct{}, authKeyFolder string, lockFileFolder string, keyLifetime time.Duration) (*AuthorizedKeys, error) {
-	usr, err := unixuser.Lookup(username)
-	if err != nil {
-		return nil, err
-	} else if usr.HomeDir == "" {
+func New(
+	logger *logger.Logger,
+	doneChan chan struct{},
+	usr *unixuser.UnixUser,
+	authKeyFolder string,
+	lockFileFolder string,
+	keyLifetime time.Duration,
+) (*AuthorizedKeys, error) {
+
+	if usr.HomeDir == "" {
 		return nil, fmt.Errorf("user does not have an associated home directory")
 	}
 
