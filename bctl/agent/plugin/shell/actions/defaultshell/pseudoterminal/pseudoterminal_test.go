@@ -41,8 +41,8 @@ var _ = Describe("Pseudo Terminal", Ordered, func() {
 		It("runs commands", func() {
 			// we use a command that requires calculation so that we don't confuse an error that
 			// outputs the entire string with a successful execution
-			keystrokes := "declare -i myvar=5+1; echo $myvar\n"
-			expectedOutput := "6"
+			keystrokes := "expr 1 + 1\n"
+			expectedOutput := "2"
 
 			for _, char := range keystrokes {
 				_, err := terminal.StdIn().Write([]byte(string(char)))

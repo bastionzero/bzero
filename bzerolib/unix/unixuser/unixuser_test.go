@@ -118,8 +118,9 @@ var _ = Describe("Unix", Ordered, func() {
 
 	Context("Create User", func() {
 		It("creates a new user", func() {
-			validCommand := regexp.MustCompile(`^useradd \S+(( --[a-z]+ \S+)+)$`)
+			validCommand := regexp.MustCompile(`^useradd -m \S+(( --[a-z]+ \S+)*)$`)
 			runCommand = func(cmd *exec.Cmd) error {
+				fmt.Printf("\n Generated command: %s\n", cmd.String())
 				Expect(validCommand.Match([]byte(cmd.String()))).To(BeTrue())
 				return nil
 			}
@@ -133,7 +134,7 @@ var _ = Describe("Unix", Ordered, func() {
 
 			By("creating a user it is allowed to")
 			_, err = LookupOrCreateFromList("ssm-user")
-			Expect(err).ToNot(BeNil())
+			Expect(err).To(BeNil())
 
 			By("adding a normal user with the specified options")
 			opts := UserAddOptions{

@@ -9,7 +9,7 @@ env:
     version_check_branch: master
     BZERO_IN_CI: 1
     HOME: "/home/codebuild-user"
-    # PYTHONPATH: "/usr/lib/python3/dist-packages:/usr/local/lib/python3.8/dist-packages"
+    PATH: "$PATH:/home/codebuild-user/.local/bin"
   parameter-store:
     GITHUB_KEY_PATH: "/github/sshkey/path"
     SSH_KEY_PATH: "/webshell/sshkey/path"
@@ -17,17 +17,15 @@ env:
     GITHUB_API_KEY: arn:aws:secretsmanager:us-east-1:238681891460:secret:development/infra/roleandfrank-github-api-key-1Cok4j:Token
 phases:
   install:
-    # run-as: codebuild-user
     runtime-versions:
       nodejs: 14
-      python: 3.9
     commands:
       - echo Install started on `date`
       - whoami
-      # - useradd -m rolandfrank -d $HOME
-      - echo "\ncodebuild-user ALL=(ALL) NOPASSWD:ALL\n" >> /etc/sudoers
       # Create home directory for codebuild-user
-      - mkdir -m700 $HOME
+      - mkdir $HOME
+      - touch $HOME/.bash_profile
+      - chown -R codebuild-user $HOME
       # We need to 1.16 and this isnt in yum
       - wget https://dl.google.com/go/go1.16.4.linux-amd64.tar.gz -q
       - tar -C /usr/local -xzf go1.16.4.linux-amd64.tar.gz
@@ -36,39 +34,37 @@ phases:
       # Install gocov-xml to push our coverage reports
       - go install github.com/axw/gocov/gocov@latest
       - go install github.com/AlekSi/gocov-xml@latest
-      - chmod -R 777 /go/pkg/mod/cache/download
-      - chmod -R 777 /codebuild/output
-      - chmod -R 777 /go/pkg/mod
+      # Install python 3.9 and set as default
       - apt update
       - apt install -y python3.9
       - ln -sf /usr/bin/python3.9 /usr/bin/python3
+      # Install pip3
       - sudo apt-get -y install python3-pip
-      - chown -R codebuild-user $HOME
+      # Set all permissions required by unit tests
+      - chmod -R 777 /go/pkg/mod/cache/download
+      - chmod -R 777 /codebuild/output
+      - chmod -R 777 /go/pkg/mod
   pre_build:
     run-as: codebuild-user
     commands:
       - echo Pre-Build phase...
-      - python3 --version
       - pwd
       - whoami
+      # Setup ssh keys
       - aws s3 cp $(dirname $GITHUB_KEY_PATH) ~/.ssh --recursive --include ".pem"
       - aws s3 cp $(dirname $SSH_KEY_PATH) ~/.ssh --recursive --include ".pem"
       - chmod 700 ~/.ssh/*
       - ls -als ~/.ssh/*
       - eval `ssh-agent -s`
       - ssh-add ~/.ssh/*.pem
-      # Install Bzero-QA
       - ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
+      # Install bzero-qa
       - git clone git@github.com:bastionzero/cwc-infra.git --branch develop ~/cwc-infra/
-      - export PATH=$PATH:/home/codebuild-user/.local/bin
-      - ls /usr/bin | grep "python"
+      - pip3 install --user -e ~/cwc-infra/Bzero-Common/. && pip3 install --user -e ~/cwc-infra/Bzero-QA/.
   build:
     run-as: codebuild-user
     commands:
-      - ls -l /usr/bin/python3
       - python3 --version
-      - sudo pip3 install -e ~/cwc-infra/Bzero-Common/. && sudo pip3 install -e ~/cwc-infra/Bzero-QA/.
-      - export PATH=$PATH:/home/codebuild-user/.local/bin
       - echo Build started on `date`
       - bzero-qa test -unit-tests
 reports:
