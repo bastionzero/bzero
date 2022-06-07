@@ -27,7 +27,7 @@ var validateUserCreation = func(username string) (*UnixUser, error) {
 }
 
 const (
-	addUserCommand   = "useradd -m"
+	addUserCommand   = "useradd"
 	expireTimeFormat = "2006-01-02"
 
 	// option flags
@@ -98,7 +98,7 @@ func Create(username string, options UserAddOptions) (*UnixUser, error) {
 
 func userAdd(username string, options UserAddOptions) error {
 	// build our command line args
-	args := []string{username}
+	args := []string{"-m", username}
 	homePath := filepath.Clean(strings.TrimSpace(options.HomeDir))
 	if filepath.IsAbs(homePath) {
 		args = append(args, homeDirFlag, homePath)
@@ -133,8 +133,6 @@ func userAdd(username string, options UserAddOptions) error {
 	} else if err != nil {
 		return err
 	}
-
-	// grab our user
 
 	if options.Sudoer {
 		// determine our sudoers sudoersFile name
