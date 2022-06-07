@@ -9,7 +9,6 @@ env:
     version_check_branch: master
     BZERO_IN_CI: 1
     HOME: "/home/codebuild-user"
-    PATH: "$PATH:/home/codebuild-user/.local/bin"
   parameter-store:
     GITHUB_KEY_PATH: "/github/sshkey/path"
     SSH_KEY_PATH: "/webshell/sshkey/path"
@@ -60,6 +59,7 @@ phases:
       - ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
       # Install bzero-qa
       - git clone git@github.com:bastionzero/cwc-infra.git --branch develop ~/cwc-infra/
+      - export PATH=$PATH:/home/codebuild-user/.local/bin
       - pip3 install --user -e ~/cwc-infra/Bzero-Common/. && pip3 install --user -e ~/cwc-infra/Bzero-QA/.
   build:
     run-as: codebuild-user
