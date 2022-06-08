@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"time"
 
 	gossh "golang.org/x/crypto/ssh"
@@ -184,11 +183,12 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 					return
 				} else if err != nil {
 					if err == io.EOF {
+						t.logger.Debugf("Finished reading: %v", b[:n])
 						t.sendStreamMessage(0, smsg.StdOut, false, b[:n])
 						return
 					}
 				} else if n > 0 {
-					t.logger.Debugf("Read %d bytes from local SSH stdout: %s", n, b[:n])
+					t.logger.Debugf("Read %d bytes from local SSH stdout: %v", n, b[:n])
 					t.sendStreamMessage(0, smsg.StdOut, true, b[:n])
 				}
 			}
@@ -220,12 +220,12 @@ func (t *TransparentSsh) exec(command string) error {
 	go func() {
 		err := t.session.Wait()
 		if err != nil {
-			log.Printf("failed to exit bash (%s)", err)
+			t.logger.Errorf("failed to exit bash (%s)", err)
 		}
 		t.session.Close()
-		log.Printf("session closed")
 	}()
 	// FIXME: reviist how this gets returned
+	t.sendStreamMessage(0, smsg.StdOut, false, []byte{})
 	return nil
 }
 

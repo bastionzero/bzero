@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/creack/pty"
 	gossh "golang.org/x/crypto/ssh"
 	"gopkg.in/tomb.v2"
 
@@ -53,7 +52,8 @@ type TransparentSsh struct {
 	filIo bzio.BzFileIo
 	stdIo io.ReadWriter
 
-	sshChannel io.ReadWriteCloser
+	sshChannel    io.ReadWriteCloser
+	agentDoneChan chan struct{}
 }
 
 func New(
@@ -66,13 +66,14 @@ func New(
 ) *TransparentSsh {
 
 	return &TransparentSsh{
-		logger:       logger,
-		outboxQueue:  outboxQueue,
-		doneChan:     doneChan,
-		stdInChan:    make(chan []byte),
-		identityFile: identityFile,
-		filIo:        filIo,
-		stdIo:        stdIo,
+		logger:        logger,
+		outboxQueue:   outboxQueue,
+		doneChan:      doneChan,
+		stdInChan:     make(chan []byte),
+		identityFile:  identityFile,
+		filIo:         filIo,
+		stdIo:         stdIo,
+		agentDoneChan: make(chan struct{}),
 	}
 }
 
@@ -90,17 +91,8 @@ func (t *TransparentSsh) Start() error {
 
 	t.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
 
-	/* switch stdin into 'raw' mode
-	// https://pkg.go.dev/golang.org/x/term#pkg-overview
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		return fmt.Errorf("error switching std to raw mode: %s", err)
-	}*/
-
 	go func() {
 		defer close(t.doneChan)
-
-		//defer term.Restore(int(os.Stdin.Fd()), oldState)
 		<-t.tmb.Dying()
 	}()
 
@@ -165,17 +157,10 @@ func (t *TransparentSsh) Start() error {
 					continue
 				}
 
-				// Create new pty
-				_, _, err = pty.Open()
-				if err != nil {
-					t.logger.Errorf("could not start pty (%s)", err)
-					continue
-				}
-
 				// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 				go func(in <-chan *gossh.Request) {
 					for req := range in {
-						t.logger.Errorf("What I am is %s and what I have is %+v", req.Type, req.Payload)
+						t.logger.Errorf("What I am is %s and what I have is %s", req.Type, req.Payload)
 						ok := false
 						switch req.Type {
 						// handles scp and other exec
@@ -183,40 +168,48 @@ func (t *TransparentSsh) Start() error {
 							ok = true
 							command := string(req.Payload[4 : req.Payload[3]+4])
 							t.logger.Infof("Lucie, the command is %s", command)
+
+							go t.readFromChannel()
+							// channel.Close()
+
 							sshExecMessage := ssh.SshExecMessage{
 								Command: command,
 							}
+							t.logger.Infof("gonna send %s", command)
 							t.sendOutputMessage(ssh.SshExec, sshExecMessage)
+							t.logger.Infof("sent my command")
+							<-t.agentDoneChan
+							channel.Close()
 
 						case "shell":
-							/*
-								t.tmb.Go(func() error {
-									b := make([]byte, InputBufferSize)
-									t.logger.Errorf("Trying to read from stdin...")
+							/* TODO: this code works okay if the agent provides a PTY, but only sends input line by line, not char by char!
+							t.tmb.Go(func() error {
+								b := make([]byte, InputBufferSize)
+								t.logger.Errorf("Trying to read from stdin...")
 
-									for {
-										select {
-										case <-t.tmb.Dying():
-											channel.Close()
+								for {
+									select {
+									case <-t.tmb.Dying():
+										channel.Close()
+										return nil
+									default:
+										if n, err := channel.Read(b); !t.tmb.Alive() {
 											return nil
-										default:
-											if n, err := channel.Read(b); !t.tmb.Alive() {
-												return nil
-											} else if err != nil {
-												if err == io.EOF {
-													t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
-													channel.Close()
-													return fmt.Errorf("finished reading from stdin")
-												}
+										} else if err != nil {
+											if err == io.EOF {
+												t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
 												channel.Close()
-												return fmt.Errorf("error reading from Stdin: %s", err)
-											} else if n > 0 {
-												t.logger.Debugf("Read %d bytes from local SSH", n)
-												t.sendSshInputMessage(b[:n])
+												return fmt.Errorf("finished reading from stdin")
 											}
+											channel.Close()
+											return fmt.Errorf("error reading from Stdin: %s", err)
+										} else if n > 0 {
+											t.logger.Debugf("Read %d bytes from local SSH", n)
+											t.sendSshInputMessage(b[:n])
 										}
 									}
-								})
+								}
+							})
 							*/
 
 							stdWriter := NewStdWriter(t.logger, t.stdInChan)
@@ -280,18 +273,49 @@ func (t *TransparentSsh) Start() error {
 							t.logger.Errorf("declining %s request...", req.Type)
 						}
 
+						t.logger.Infof("Replying %v", ok)
+
 						req.Reply(ok, nil)
 					}
 				}(requests)
 			}
 		}()
-
-		//keyID := sConn.Permissions.Extensions["key-id"]
-
-		// Service the incoming Channel channel.
 	}()
 
 	return nil
+}
+
+func (t *TransparentSsh) readFromChannel() {
+
+	b := make([]byte, InputBufferSize)
+	t.logger.Errorf("Trying to read from stdin...")
+
+	for {
+		select {
+		case <-t.tmb.Dying():
+			t.sshChannel.Close()
+			return
+		default:
+			t.logger.Infof("reading time...")
+			n, err := t.sshChannel.Read(b)
+			t.logger.Infof("I read %d bytes: %v", n, b[:n])
+
+			if err != nil {
+				if err == io.EOF {
+					//t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
+					t.logger.Errorf("finished reading from stdin")
+				} else {
+					t.sshChannel.Close()
+					t.logger.Errorf("error reading from Stdin: %s", err)
+				}
+			} else if n > 0 {
+				t.logger.Debugf("Read %d bytes from local SSH", n)
+				t.logger.Errorf("Here they are, %s", b[:n])
+			} else {
+				t.logger.Errorf("Read but channel didn't give me anything")
+			}
+		}
+	}
 }
 
 // Start assigns a pseudo-terminal tty os.File to c.Stdin, c.Stdout,
@@ -354,7 +378,7 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			t.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 		} else {
-			t.logger.Infof("sending %d bytes to channel: %s", len(contentBytes), contentBytes)
+			t.logger.Infof("sending %d bytes to channel: %v", len(contentBytes), contentBytes)
 			//t.stdInChan <- contentBytes
 			t.logger.Infof("Knock knock?")
 			if _, err = t.sshChannel.Write(contentBytes); err != nil {
@@ -362,23 +386,17 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 			}
 			if !smessage.More {
 				t.tmb.Kill(fmt.Errorf("received ssh close stream message"))
+				//t.agentDoneChan <- struct{}{}
 				return
 			}
 		}
 	case smsg.Error:
 		t.tmb.Kill(fmt.Errorf("received an error from the agent"))
+		t.agentDoneChan <- struct{}{}
 		return
 	default:
 		t.logger.Errorf("unhandled stream type: %s", smessage.Type)
 	}
-}
-
-func (t *TransparentSsh) sendSshInputMessage(bs []byte) {
-	// Send all accumulated input in an sshInput data message
-	sshInputDataMessage := ssh.SshInputMessage{
-		Data: bs,
-	}
-	t.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
 }
 
 func (t *TransparentSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
@@ -388,4 +406,5 @@ func (t *TransparentSsh) sendOutputMessage(action ssh.SshSubAction, payload inte
 		Action:        string(action),
 		ActionPayload: payloadBytes,
 	}
+	t.logger.Errorf("So did I not send a message??")
 }
