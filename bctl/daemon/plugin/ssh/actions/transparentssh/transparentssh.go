@@ -31,9 +31,11 @@ var (
 )
 
 const (
-	InputBufferSize = int(128 * 1024)
+	InputBufferSize = int(64 * 1024)
 	endedByUser     = "SSH session ended"
 )
+
+const readyMsg = "BZERO-DAEMON READY-TO-CONNECT"
 
 type TransparentSsh struct {
 	tmb    tomb.Tomb
@@ -127,6 +129,7 @@ func (t *TransparentSsh) Start() error {
 		if err != nil {
 			t.logger.Errorf("failed to listen for connection: ", err)
 		}
+		t.stdIo.Write([]byte(readyMsg))
 
 		defer listener.Close()
 
