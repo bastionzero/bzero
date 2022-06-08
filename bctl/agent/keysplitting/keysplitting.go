@@ -79,8 +79,9 @@ func New(parameters KeysplittingParameters) (*Keysplitting, error) {
 		} else {
 			keysplitter.bzCertVerifier = verifier
 		}
+	} else {
+		keysplitter.bzCertVerifier = parameters.Verifier
 	}
-
 	// Validate SchemaVersion
 	var schemaVersion string
 	if parameters.SchemaVersion == "" {
@@ -118,14 +119,14 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 		// Verify the signature
 		if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
-			return fmt.Errorf("failed to verify SYN's signature: %w", err)
+			return fmt.Errorf("%w: failed to verify Syn's signature: %v", ErrInvalidSignature, err)
 		}
 
 		// Extract semver version to determine if different protocol checks must
 		// be done
 		v, err := semver.NewVersion(synPayload.SchemaVersion)
 		if err != nil {
-			return fmt.Errorf("failed to parse schema version (%v) as semver: %w", synPayload.SchemaVersion, err)
+			return fmt.Errorf("%w: failed to parse schema version (%v) as semver: %v", ErrFailedToParseVersion, synPayload.SchemaVersion, err)
 		} else {
 			k.daemonSchemaVersion = v
 		}
@@ -136,7 +137,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		if k.shouldCheckTargetId.Check(v) {
 			// Verify SYN message commits to this agent's cryptographic identity
 			if synPayload.TargetId != k.publickey {
-				return fmt.Errorf("SYN's TargetId did not match agent's public key")
+				return ErrTargetIdMismatch
 			}
 		}
 
@@ -151,22 +152,22 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 		// Check BZCert matches one we have stored
 		if k.bzCert.Hash != dataPayload.BZCertHash {
-			return fmt.Errorf("DATA's BZCert does not match the active user's")
+			return ErrBZCertMismatch
 		}
 
 		// Verify the signature
 		if err := ksMessage.VerifySignature(k.bzCert.Cert.ClientPublicKey); err != nil {
-			return err
+			return fmt.Errorf("%w: failed to verify Data's signature: %v", ErrInvalidSignature, err)
 		}
 
 		// Check that BZCert isn't expired
 		if time.Now().After(k.bzCert.Expiration) {
-			return fmt.Errorf("DATA's referenced BZCert has expired")
+			return ErrBZCertExpired
 		}
 
 		// Verify received hash pointer matches expected
 		if dataPayload.HPointer != k.expectedHPointer {
-			return fmt.Errorf("DATA's hash pointer %s did not match expected hash pointer %s", dataPayload.HPointer, k.expectedHPointer)
+			return fmt.Errorf("%w: Data's hash pointer %s did not match expected hash pointer %s", ErrUnexpectedHPointer, dataPayload.HPointer, k.expectedHPointer)
 		}
 
 		k.lastDataMessage = ksMessage
