@@ -2,12 +2,15 @@ package transparentssh
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -28,7 +31,7 @@ var (
 )
 
 const (
-	InputBufferSize = int(64 * 1024)
+	InputBufferSize = int(128 * 1024)
 	endedByUser     = "SSH session ended"
 )
 
@@ -40,6 +43,7 @@ type TransparentSsh struct {
 	doneChan    chan struct{}
 
 	// channel where we push from StdIn
+	// FIXME: not quite true
 	stdInChan chan []byte
 
 	identityFile string
@@ -63,7 +67,7 @@ func New(
 		logger:       logger,
 		outboxQueue:  outboxQueue,
 		doneChan:     doneChan,
-		stdInChan:    make(chan []byte, InputBufferSize),
+		stdInChan:    make(chan []byte),
 		identityFile: identityFile,
 		filIo:        filIo,
 		stdIo:        stdIo,
@@ -84,8 +88,17 @@ func (t *TransparentSsh) Start() error {
 
 	t.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
 
+	/* switch stdin into 'raw' mode
+	// https://pkg.go.dev/golang.org/x/term#pkg-overview
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return fmt.Errorf("error switching std to raw mode: %s", err)
+	}*/
+
 	go func() {
 		defer close(t.doneChan)
+
+		//defer term.Restore(int(os.Stdin.Fd()), oldState)
 		<-t.tmb.Dying()
 	}()
 
@@ -173,30 +186,55 @@ func (t *TransparentSsh) Start() error {
 							t.sendOutputMessage(ssh.SshExec, sshExecMessage)
 
 						case "shell":
-							t.tmb.Go(func() error {
-								b := make([]byte, InputBufferSize)
-								t.logger.Errorf("Trying to read from stdin...")
+							/*
+								t.tmb.Go(func() error {
+									b := make([]byte, InputBufferSize)
+									t.logger.Errorf("Trying to read from stdin...")
 
-								for {
-									select {
-									case <-t.tmb.Dying():
-										return nil
-									default:
-										if n, err := channel.Read(b); !t.tmb.Alive() {
+									for {
+										select {
+										case <-t.tmb.Dying():
+											channel.Close()
 											return nil
-										} else if err != nil {
-											if err == io.EOF {
-												t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
-												return fmt.Errorf("finished reading from stdin")
+										default:
+											if n, err := channel.Read(b); !t.tmb.Alive() {
+												return nil
+											} else if err != nil {
+												if err == io.EOF {
+													t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
+													channel.Close()
+													return fmt.Errorf("finished reading from stdin")
+												}
+												channel.Close()
+												return fmt.Errorf("error reading from Stdin: %s", err)
+											} else if n > 0 {
+												t.logger.Debugf("Read %d bytes from local SSH", n)
+												t.sendSshInputMessage(b[:n])
 											}
-											return fmt.Errorf("error reading from Stdin: %s", err)
-										} else if n > 0 {
-											t.logger.Debugf("Read %d bytes from local SSH", n)
-											t.sendSshInputMessage(b[:n])
 										}
 									}
-								}
-							})
+								})
+							*/
+
+							stdWriter := NewStdWriter(t.logger, t.stdInChan)
+							stdReader := NewStdReader(t.logger, t.outboxQueue, string(ssh.SshInput))
+
+							var once sync.Once
+							close := func() {
+								channel.Close()
+								log.Printf("session closed")
+							}
+							go func() {
+								t.logger.Errorf("Has this ever happened to read?")
+								io.Copy(channel, stdReader)
+								once.Do(close)
+							}()
+
+							go func() {
+								t.logger.Errorf("Has this ever happened to write?")
+								io.Copy(stdWriter, channel)
+								once.Do(close)
+							}()
 
 							// Teardown session
 							// FIXME: figure out the right way to close channel
@@ -213,22 +251,25 @@ func (t *TransparentSsh) Start() error {
 							if len(req.Payload) == 0 {
 								ok = true
 							}
+
+						case "pty-req":
+							// Responding 'ok' here will let the client
+							// know we have a pty ready for input
+							ok = true
+							// Parse body...
+
+							termLen := req.Payload[3]
+							termEnv := string(req.Payload[4 : termLen+4])
+							w, h := parseDims(req.Payload[termLen+4:])
+							t.logger.Infof("pty-req stuff: termlen %d termEnv %s w %d h %d", termLen, termEnv, w, h)
+							//SetWinsize(f.Fd(), w, h)
+							//t.logger.Infof("pty-req '%s'", termEnv)
+						case "window-change":
+							t.logger.Infof("Window changing??")
 							/*
-								case "pty-req":
-									// Responding 'ok' here will let the client
-									// know we have a pty ready for input
-									ok = true
-									// Parse body...
-									termLen := req.Payload[3]
-									termEnv := string(req.Payload[4 : termLen+4])
-									w, h := parseDims(req.Payload[termLen+4:])
-									SetWinsize(f.Fd(), w, h)
-									t.logger.Infof("pty-req '%s'", termEnv)
-								case "window-change":
-									w, h := parseDims(req.Payload)
-									SetWinsize(f.Fd(), w, h)
-									continue //no response
-								}
+								w, h := parseDims(req.Payload)
+								SetWinsize(f.Fd(), w, h)
+								continue //no response
 							*/
 						}
 
@@ -266,13 +307,12 @@ func PtyRun(c *exec.Cmd, tty *os.File) (err error) {
 }
 
 // parseDims extracts two uint32s from the provided buffer.
-/*
+
 func parseDims(b []byte) (uint32, uint32) {
 	w := binary.BigEndian.Uint32(b)
 	h := binary.BigEndian.Uint32(b[4:])
 	return w, h
 }
-*/
 
 // Winsize stores the Height and Width of a terminal.
 type Winsize struct {
@@ -311,6 +351,9 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			t.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 		} else {
+			t.logger.Infof("sending %d bytes to channel: %s", len(contentBytes), contentBytes)
+			//t.stdInChan <- contentBytes
+			t.logger.Infof("Knock knock?")
 			if _, err = t.sshChannel.Write(contentBytes); err != nil {
 				t.logger.Errorf("Error writing to Stdout: %s", err)
 			}

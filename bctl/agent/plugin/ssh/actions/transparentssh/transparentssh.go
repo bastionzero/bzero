@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	chunkSize     = 64 * 1024
+	chunkSize     = 128 * 1024
 	writeDeadline = 5 * time.Second
 )
 
@@ -94,6 +94,8 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		if err := json.Unmarshal(actionPayload, &inputRequest); err != nil {
 			return nil, fmt.Errorf("unable to unmarshal default SSH input message: %s", err)
 		}
+
+		t.logger.Infof("the data is %s", inputRequest.Data)
 
 		// TODO: send these to a channel that is piped to ssh
 		t.stdInChan <- inputRequest.Data
@@ -188,11 +190,11 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 	go func() {
 		for {
 			d := <-t.stdInChan
-			t.logger.Errorf("Writing %d bytes to stdin", len(d))
+			t.logger.Errorf("Writing %d bytes to stdin: %s", len(d), d)
 			_, err := stdin.Write(d)
 			if err != nil {
 				// FIXME: probably kill here
-				t.logger.Errorf("stdin write err")
+				t.logger.Errorf("stdin write err: %s", err)
 			}
 		}
 	}()
@@ -215,7 +217,7 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 						return
 					}
 				} else if n > 0 {
-					t.logger.Debugf("Read %d bytes from local SSH stdout", n)
+					t.logger.Debugf("Read %d bytes from local SSH stdout: %s", n, b[:n])
 					t.sendStreamMessage(0, smsg.StdOut, true, b[:n])
 				}
 			}
@@ -241,12 +243,19 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 	}()
 
 	modes := gossh.TerminalModes{
-		//gossh.ECHO:          0,     // disable echoing
+		gossh.ECHO: 0, // disable echoing
+		/*
+			gossh.VLNEXT: 1,
+			gossh.ISIG:   1,
+			gossh.ECHOE:  1,
+			gossh.ECHOK:  1,
+		*/
+
 		gossh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
 		gossh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
 	}
 
-	if err := t.session.RequestPty("xterm", 40, 80, modes); err != nil {
+	if err := t.session.RequestPty("xterm", 29, 149, modes); err != nil {
 		t.logger.Errorf("request for pseudo terminal failed: ", err)
 	}
 
