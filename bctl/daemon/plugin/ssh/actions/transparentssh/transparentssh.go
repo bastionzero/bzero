@@ -36,10 +36,6 @@ type TransparentSsh struct {
 	outboxQueue chan plugin.ActionWrapper
 	doneChan    chan struct{}
 
-	// channel where we push from StdIn
-	// FIXME: not quite true
-	stdInChan chan []byte
-
 	identityFile string
 
 	filIo bzio.BzFileIo
@@ -61,7 +57,6 @@ func New(
 		logger:       logger,
 		outboxQueue:  outboxQueue,
 		doneChan:     doneChan,
-		stdInChan:    make(chan []byte),
 		identityFile: identityFile,
 		filIo:        filIo,
 		stdIo:        stdIo,
@@ -111,7 +106,6 @@ func (t *TransparentSsh) Start() error {
 	// An SSH server is represented by a ServerConfig, which holds
 	// certificate details and handles authentication of ServerConns.
 	config := &gossh.ServerConfig{
-		// don't even think this part is strictly necessary...
 		PublicKeyCallback: func(c gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
 			return &gossh.Permissions{
 				// Record the public key used for authentication.
@@ -177,7 +171,7 @@ func (t *TransparentSsh) Start() error {
 							if !ssh.IsValidScp(command) {
 								errMsg := fmt.Sprintf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", command)
 								t.logger.Errorf(errMsg)
-								t.stdIo.Write([]byte(errMsg))
+								//t.stdIo.Write([]byte(errMsg))
 								channel.Close()
 								t.Kill()
 								return
@@ -203,10 +197,8 @@ func (t *TransparentSsh) Start() error {
 						}
 
 						if !ok {
-							t.logger.Errorf("declining %s request...", req.Type)
+							t.logger.Errorf("declining %s request", req.Type)
 						}
-
-						t.logger.Infof("Replying %v", ok)
 
 						req.Reply(ok, nil)
 					}
@@ -218,10 +210,10 @@ func (t *TransparentSsh) Start() error {
 	return nil
 }
 
+// send anything we get from local SSH up to the agent
 func (t *TransparentSsh) readFromChannel() {
 
 	b := make([]byte, InputBufferSize)
-	t.logger.Errorf("Trying to read from stdin...")
 
 	for {
 		select {
@@ -242,41 +234,24 @@ func (t *TransparentSsh) readFromChannel() {
 					return
 				}
 			} else if n > 0 {
-				t.logger.Errorf("Here they are, %s", b[:n])
+				t.logger.Debugf("Sending %d bytes to remote SSH", n)
 				t.sendOutputMessage(ssh.SshInput, ssh.SshInputMessage{Data: b[:n]})
-			} else {
-				t.logger.Errorf("Read but channel didn't give me anything")
 			}
 		}
 	}
 }
 
 func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
-	t.logger.Debugf("transparent ssh received %+v stream", smessage.Type)
 	switch smsg.StreamType(smessage.Type) {
-	case smsg.Data:
-		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
-			t.logger.Errorf("Error decoding ssh Data stream content: %s", err)
-		} else {
-			if _, err = t.sshChannel.Write(contentBytes); err != nil {
-				t.logger.Errorf("Error writing to Stdout: %s", err)
-			}
-			if !smessage.More {
-				t.tmb.Kill(fmt.Errorf("received ssh close stream message"))
-				t.sshChannel.Close()
-				return
-			}
-		}
-	// FIXME: just a stopgap
+	// TODO: we don't expect any stderr messages to come -- treat them the same as stdout?
 	case smsg.StdErr:
+		t.logger.Errorf("received bytes from remote stderr")
 		fallthrough
 	case smsg.StdOut:
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			t.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 		} else {
-			t.logger.Infof("sending %d bytes to channel: %v", len(contentBytes), contentBytes)
-			//t.stdInChan <- contentBytes
-			t.logger.Infof("Knock knock?")
+			t.logger.Infof("sending %d bytes to channel", len(contentBytes))
 			if _, err = t.sshChannel.Write(contentBytes); err != nil {
 				t.logger.Errorf("Error writing to Stdout: %s", err)
 			}
@@ -296,7 +271,6 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 
 func (t *TransparentSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
 	// Send payload to plugin output queue
-	t.logger.Infof("Sending %s message", action)
 	payloadBytes, _ := json.Marshal(payload)
 	t.outboxQueue <- plugin.ActionWrapper{
 		Action:        string(action),

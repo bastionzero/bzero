@@ -59,7 +59,7 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 
 	// Start the ssh action
 	if err := s.action.Start(); err != nil {
-		return fmt.Errorf("error starting the ssh action: %s", err)
+		return fmt.Errorf("error starting the default ssh action: %s", err)
 	} else {
 		return nil
 	}
