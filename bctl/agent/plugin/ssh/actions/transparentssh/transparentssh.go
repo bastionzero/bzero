@@ -184,7 +184,7 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 	go func() {
 		for {
 			d := <-t.stdInChan
-			t.logger.Errorf("Writing %d bytes to stdin", len(d))
+			t.logger.Debugf("Writing %d bytes to stdin", len(d))
 			_, err := stdin.Write(d)
 			if err != nil {
 				// FIXME: probably kill here
@@ -240,11 +240,12 @@ func (t *TransparentSsh) exec(command string) error {
 	t.session.Start(command)
 	go func() {
 		err := t.session.Wait()
-		if err != nil {
-			t.logger.Errorf("failed to exit bash (%s)", err)
+		// TODO: scp seems to end silently without a status, which is fine for us but bothers Wait
+		// this seems like too brittle a way to check for this message but I'm not sure how else we would
+		if err != nil && err.Error() != "wait: remote command exited without exit status or exit signal" {
+			t.logger.Errorf("command exited with nonzero exit status: %s", err)
 		}
 		t.session.Close()
-		t.logger.Infof("finished execution")
 	}()
 	// FIXME: reviist how this gets returned
 	//t.sendStreamMessage(0, smsg.StdOut, false, []byte{})
