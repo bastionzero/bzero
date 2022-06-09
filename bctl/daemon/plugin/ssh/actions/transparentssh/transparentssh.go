@@ -2,17 +2,10 @@ package transparentssh
 
 import (
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
-	"os"
-	"os/exec"
-	"sync"
-	"syscall"
-	"unsafe"
 
 	gossh "golang.org/x/crypto/ssh"
 	"gopkg.in/tomb.v2"
@@ -135,9 +128,7 @@ func (t *TransparentSsh) Start() error {
 	private, _ := gossh.ParsePrivateKey(newPrivate)
 	config.AddHostKey(private)
 	go func() {
-		// Once a ServerConfig has been configured, connections can be
-		// accepted.
-		t.logger.Infof("Gonna listen")
+		// Once a ServerConfig has been configured, tell ZLI we can accept connections
 		listener, err := net.Listen("tcp", ":2222")
 		if err != nil {
 			t.logger.Errorf("failed to listen for connection: ", err)
@@ -146,15 +137,11 @@ func (t *TransparentSsh) Start() error {
 
 		defer listener.Close()
 
-		t.logger.Infof("Accepting...")
 		nConn, _ := listener.Accept()
-		t.logger.Infof("accepted")
 		// Before use, a handshake must be performed on the incoming
 		// net.Conn.
-		t.logger.Infof("Trying to make thingies??")
 		_, chans, reqs, err := gossh.NewServerConn(nConn, config)
 
-		t.logger.Infof("Made thingies??")
 		if err != nil {
 			t.logger.Errorf("failed to handshake: ", err)
 		}
@@ -210,6 +197,7 @@ func (t *TransparentSsh) Start() error {
 							t.sendOutputMessage(ssh.SshExec, sshExecMessage)
 
 						case "shell":
+							// TODO: make sure we properly reject this for now
 							/* TODO: this code works okay if the agent provides a PTY, but only sends input line by line, not char by char!
 							t.tmb.Go(func() error {
 								b := make([]byte, InputBufferSize)
@@ -238,58 +226,19 @@ func (t *TransparentSsh) Start() error {
 									}
 								}
 							})
-							*/
-
-							stdWriter := NewStdWriter(t.logger, t.stdInChan)
-							stdReader := NewStdReader(t.logger, t.outboxQueue, string(ssh.SshInput))
-
-							var once sync.Once
-							close := func() {
-								channel.Close()
-								log.Printf("session closed")
-							}
-							go func() {
-								t.logger.Errorf("Has this ever happened to read?")
-								io.Copy(channel, stdReader)
-								once.Do(close)
-							}()
-
-							go func() {
-								t.logger.Errorf("Has this ever happened to write?")
-								io.Copy(stdWriter, channel)
-								once.Do(close)
-							}()
-
-							// Teardown session
-							// FIXME: figure out the right way to close channel
-							/*
-								var once sync.Once
-								close := func() {
-									channel.Close()
-									t.logger.Infof("session closed")
-								}
-							*/
-
 							// We don't accept any commands (Payload),
 							// only the default shell.
 							if len(req.Payload) == 0 {
 								ok = true
 							}
 
-						case "pty-req":
-							// Responding 'ok' here will let the client
-							// know we have a pty ready for input
-							ok = true
-							// Parse body...
+							*/
 
-							termLen := req.Payload[3]
-							termEnv := string(req.Payload[4 : termLen+4])
-							w, h := parseDims(req.Payload[termLen+4:])
-							t.logger.Infof("pty-req stuff: termlen %d termEnv %s w %d h %d", termLen, termEnv, w, h)
-							//SetWinsize(f.Fd(), w, h)
-							//t.logger.Infof("pty-req '%s'", termEnv)
+						case "pty-req":
+							// TODO: make sure we properly reject this for now
+
 						case "window-change":
-							t.logger.Infof("Window changing??")
+							// TODO: make sure we properly reject this for now
 							/*
 								w, h := parseDims(req.Payload)
 								SetWinsize(f.Fd(), w, h)
@@ -344,43 +293,6 @@ func (t *TransparentSsh) readFromChannel() {
 			}
 		}
 	}
-}
-
-// Start assigns a pseudo-terminal tty os.File to c.Stdin, c.Stdout,
-// and c.Stderr, calls c.Start, and returns the File of the tty's
-// corresponding pty.
-func PtyRun(c *exec.Cmd, tty *os.File) (err error) {
-	defer tty.Close()
-	c.Stdout = tty
-	c.Stdin = tty
-	c.Stderr = tty
-	c.SysProcAttr = &syscall.SysProcAttr{
-		Setctty: true,
-		Setsid:  true,
-	}
-	return c.Start()
-}
-
-// parseDims extracts two uint32s from the provided buffer.
-
-func parseDims(b []byte) (uint32, uint32) {
-	w := binary.BigEndian.Uint32(b)
-	h := binary.BigEndian.Uint32(b[4:])
-	return w, h
-}
-
-// Winsize stores the Height and Width of a terminal.
-type Winsize struct {
-	Height uint16
-	Width  uint16
-	x      uint16 // unused
-	y      uint16 // unused
-}
-
-// SetWinsize sets the size of the given pty.
-func SetWinsize(fd uintptr, w, h uint32) {
-	ws := &Winsize{Width: uint16(w), Height: uint16(h)}
-	syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(ws)))
 }
 
 func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
