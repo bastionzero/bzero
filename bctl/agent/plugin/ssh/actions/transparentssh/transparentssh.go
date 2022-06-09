@@ -42,6 +42,7 @@ type TransparentSsh struct {
 
 	authorizedKeys AuthorizedKeysInterface
 
+	stdInChan  chan []byte
 	targetUser string
 }
 
@@ -53,6 +54,7 @@ func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessa
 		streamOutputChan: ch,
 		authorizedKeys:   authKeys,
 		targetUser:       targetUser,
+		stdInChan:        make(chan []byte, 10),
 	}
 }
 
@@ -81,9 +83,6 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		// do I need to send a ready message?
 		return t.start(openRequest, action)
 	case ssh.SshInput:
-		return nil, fmt.Errorf("shell sessions are not supported yet vai transparent ssh")
-
-		/* TODO: needed for shell but not supported yet
 		// Deserialize the action payload, the only action passed is input
 		var inputRequest ssh.SshInputMessage
 		if err := json.Unmarshal(actionPayload, &inputRequest); err != nil {
@@ -93,7 +92,6 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		t.logger.Infof("the data is %s", inputRequest.Data)
 
 		t.stdInChan <- inputRequest.Data
-		*/
 
 	case ssh.SshExec:
 		// Deserialize the action payload, the only action passed is input
@@ -123,6 +121,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		return nil, fmt.Errorf("unhandled stream action: %s", action)
 	}
 
+	t.logger.Infof("Did %s successfully", action)
 	return []byte{}, nil
 }
 
@@ -155,11 +154,17 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 		return nil, fmt.Errorf("dial error: %s", err)
 	}
 
+	var stdin io.WriteCloser
 	var stdout, stderr io.Reader
 
 	t.session, err = t.conn.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("session err: %s", err)
+	}
+
+	stdin, err = t.session.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdin pipe err: %s", err)
 	}
 
 	stdout, err = t.session.StdoutPipe()
@@ -171,6 +176,18 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 	if err != nil {
 		return nil, fmt.Errorf("stderr pipe err: %s", err)
 	}
+
+	go func() {
+		for {
+			d := <-t.stdInChan
+			t.logger.Errorf("Writing %d bytes to stdin", len(d))
+			_, err := stdin.Write(d)
+			if err != nil {
+				// FIXME: probably kill here
+				t.logger.Errorf("stdin write err")
+			}
+		}
+	}()
 
 	go func() {
 		b := make([]byte, chunkSize)
@@ -216,16 +233,17 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 }
 
 func (t *TransparentSsh) exec(command string) error {
-	t.session.Run(command)
+	t.session.Start(command)
 	go func() {
 		err := t.session.Wait()
 		if err != nil {
 			t.logger.Errorf("failed to exit bash (%s)", err)
 		}
 		t.session.Close()
+		t.logger.Infof("finished execution")
 	}()
 	// FIXME: reviist how this gets returned
-	t.sendStreamMessage(0, smsg.StdOut, false, []byte{})
+	//t.sendStreamMessage(0, smsg.StdOut, false, []byte{})
 	return nil
 }
 

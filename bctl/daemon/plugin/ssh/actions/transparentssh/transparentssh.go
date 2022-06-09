@@ -170,16 +170,15 @@ func (t *TransparentSsh) Start() error {
 							t.logger.Infof("Lucie, the command is %s", command)
 
 							go t.readFromChannel()
-							// channel.Close()
+							// channel.Close()\
+							// respond to the initial scp request
+							//channel.Write([]byte([]uint8{0}))
+							//channel.Write([]byte([]uint8{0}))
 
 							sshExecMessage := ssh.SshExecMessage{
 								Command: command,
 							}
-							t.logger.Infof("gonna send %s", command)
 							t.sendOutputMessage(ssh.SshExec, sshExecMessage)
-							t.logger.Infof("sent my command")
-							<-t.agentDoneChan
-							channel.Close()
 
 						case "shell":
 							/* TODO: this code works okay if the agent provides a PTY, but only sends input line by line, not char by char!
@@ -296,21 +295,21 @@ func (t *TransparentSsh) readFromChannel() {
 			t.sshChannel.Close()
 			return
 		default:
-			t.logger.Infof("reading time...")
 			n, err := t.sshChannel.Read(b)
-			t.logger.Infof("I read %d bytes: %v", n, b[:n])
-
 			if err != nil {
 				if err == io.EOF {
-					//t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
+					t.sshChannel.Close()
+					t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
 					t.logger.Errorf("finished reading from stdin")
+					return
 				} else {
 					t.sshChannel.Close()
 					t.logger.Errorf("error reading from Stdin: %s", err)
+					return
 				}
 			} else if n > 0 {
-				t.logger.Debugf("Read %d bytes from local SSH", n)
 				t.logger.Errorf("Here they are, %s", b[:n])
+				t.sendOutputMessage(ssh.SshInput, ssh.SshInputMessage{Data: b[:n]})
 			} else {
 				t.logger.Errorf("Read but channel didn't give me anything")
 			}
@@ -386,13 +385,12 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 			}
 			if !smessage.More {
 				t.tmb.Kill(fmt.Errorf("received ssh close stream message"))
-				//t.agentDoneChan <- struct{}{}
-				return
+				t.sshChannel.Close()
 			}
 		}
 	case smsg.Error:
 		t.tmb.Kill(fmt.Errorf("received an error from the agent"))
-		t.agentDoneChan <- struct{}{}
+		t.sshChannel.Close()
 		return
 	default:
 		t.logger.Errorf("unhandled stream type: %s", smessage.Type)
@@ -401,10 +399,10 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 
 func (t *TransparentSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
 	// Send payload to plugin output queue
+	t.logger.Infof("Sending %s message", action)
 	payloadBytes, _ := json.Marshal(payload)
 	t.outboxQueue <- plugin.ActionWrapper{
 		Action:        string(action),
 		ActionPayload: payloadBytes,
 	}
-	t.logger.Errorf("So did I not send a message??")
 }
