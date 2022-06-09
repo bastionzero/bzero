@@ -40,11 +40,12 @@ type TransparentSsh struct {
 
 	authorizedKeys AuthorizedKeysInterface
 
-	stdInChan  chan []byte
-	targetUser string
+	stdInChan     chan []byte
+	targetUser    string
+	remoteADdress string
 }
 
-func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, authKeys AuthorizedKeysInterface, targetUser string) *TransparentSsh {
+func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, authKeys AuthorizedKeysInterface, targetUser string, remoteAddress string) *TransparentSsh {
 
 	return &TransparentSsh{
 		logger:           logger,
@@ -53,6 +54,7 @@ func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessa
 		authorizedKeys:   authKeys,
 		targetUser:       targetUser,
 		stdInChan:        make(chan []byte, 10),
+		remoteADdress:    remoteAddress,
 	}
 }
 
@@ -123,14 +125,11 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		return nil, fmt.Errorf("unhandled stream action: %s", action)
 	}
 
-	t.logger.Infof("Did %s successfully", action)
 	return []byte{}, nil
 }
 
 func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
 
-	// FIXME: make this the host I got
-	host := "localhost:22"
 	privateBytes, publicBytes, _ := opaquessh.GenerateKeys()
 	t.authorizedKeys.Add(string(publicBytes))
 
@@ -154,7 +153,7 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 		},
 	}
 
-	t.conn, err = gossh.Dial("tcp", host, conf)
+	t.conn, err = gossh.Dial("tcp", t.remoteADdress, conf)
 	if err != nil {
 		return nil, fmt.Errorf("dial error: %s", err)
 	}

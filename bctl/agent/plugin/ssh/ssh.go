@@ -73,10 +73,11 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 		}
 
 		if rerr == nil {
+			remoteAddress := fmt.Sprintf("%s:%d", synPayload.RemoteHost, synPayload.RemotePort)
 			switch parsedAction {
 			case bzssh.OpaqueSsh:
 				// Open up a connection to the TCP addr we are trying to connect to
-				raddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", synPayload.RemoteHost, synPayload.RemotePort))
+				raddr, err := net.ResolveTCPAddr("tcp", remoteAddress)
 				if err != nil {
 					rerr = fmt.Errorf("failed to resolve remote address: %s", err)
 					break
@@ -102,6 +103,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 					plugin.streamOutputChan,
 					authKeys,
 					synPayload.TargetUser,
+					remoteAddress,
 				)
 
 			default:

@@ -175,7 +175,9 @@ func (t *TransparentSsh) Start() error {
 							// TODO: read the command; if invalid, tell the ZLI that
 							t.logger.Infof("Lucie, the command is %s", command)
 							if !ssh.IsValidScp(command) {
-								t.logger.Errorf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", command)
+								errMsg := fmt.Sprintf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", command)
+								t.logger.Errorf(errMsg)
+								t.stdIo.Write([]byte(errMsg))
 								channel.Close()
 								t.Kill()
 								return
