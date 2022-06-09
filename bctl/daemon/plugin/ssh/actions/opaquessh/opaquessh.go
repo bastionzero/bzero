@@ -72,8 +72,8 @@ func (d *OpaqueSsh) Start() error {
 	// NOTE: it is technically possible for this to create a one-time race if two SSH processes
 	// are kicked off *and* the user just logged in. However this is unlikely and can be resolved
 	// if/when we upgrade the SSH architecture
-	if publicKeyRsa, err := readPublicKeyRsa(d.identityFile, d.filIo); err == nil {
-		if publicKey, err = generatePublicKey(publicKeyRsa); err != nil {
+	if publicKeyRsa, err := ReadPublicKeyRsa(d.identityFile, d.filIo); err == nil {
+		if publicKey, err = GeneratePublicKey(publicKeyRsa); err != nil {
 			return fmt.Errorf("error decoding temporary public key: %s", err)
 		} else {
 			d.logger.Debugf("using existing temporary keys")

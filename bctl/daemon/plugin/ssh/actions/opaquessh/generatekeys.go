@@ -23,7 +23,7 @@ func GenerateKeys() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	publicKeyBytes, err := generatePublicKey(&privateKey.PublicKey)
+	publicKeyBytes, err := GeneratePublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -79,7 +79,7 @@ func decodePemToPrivateKey(privatePem []byte) (*rsa.PrivateKey, error) {
 
 // generatePublicKey take a rsa.PublicKey and return bytes suitable for writing to .pub file
 // returns in the format "ssh-rsa ..."
-func generatePublicKey(publicKey *rsa.PublicKey) ([]byte, error) {
+func GeneratePublicKey(publicKey *rsa.PublicKey) ([]byte, error) {
 	publicRsaKey, err := ssh.NewPublicKey(publicKey)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func generatePublicKey(publicKey *rsa.PublicKey) ([]byte, error) {
 
 // takes a private key path and returns a public key struct
 // returns an error if the key cannot be read or is invalid
-func readPublicKeyRsa(privateKeyPath string, fileIo bzio.BzFileIo) (*rsa.PublicKey, error) {
+func ReadPublicKeyRsa(privateKeyPath string, fileIo bzio.BzFileIo) (*rsa.PublicKey, error) {
 	if privatePem, err := fileIo.ReadFile(privateKeyPath); err != nil {
 		return nil, err
 	} else if privateKey, err := decodePemToPrivateKey(privatePem); err != nil {

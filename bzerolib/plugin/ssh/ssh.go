@@ -9,6 +9,7 @@ type SshAction string
 const (
 	OpaqueSsh      SshAction = "opaque"
 	TransparentSsh SshAction = "transparent"
+	scpWithSpace   string    = "scp "
 )
 
 type SshActionParams struct {
@@ -43,3 +44,7 @@ const (
 	SshInput SshSubAction = "ssh/input"
 	SshClose SshSubAction = "ssh/close"
 )
+
+func IsValidScp(command string) bool {
+	return string([]rune(command)[:4]) == scpWithSpace
+}

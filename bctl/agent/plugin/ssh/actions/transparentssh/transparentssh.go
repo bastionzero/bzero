@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
 	gossh "golang.org/x/crypto/ssh"
 	"gopkg.in/tomb.v2"
@@ -17,8 +16,7 @@ import (
 )
 
 const (
-	chunkSize     = 64 * 1024
-	writeDeadline = 5 * time.Second
+	chunkSize = 64 * 1024
 )
 
 type AuthorizedKeysInterface interface {
@@ -100,6 +98,10 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 			return nil, fmt.Errorf("unable to unmarshal transparent SSH exec message: %s", err)
 		}
 
+		if !ssh.IsValidScp(execRequest.Command) {
+			return nil, fmt.Errorf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", execRequest.Command)
+		}
+
 		if err := t.exec(execRequest.Command); err != nil {
 			return nil, fmt.Errorf("failed to execute command %s: %s", execRequest.Command, err)
 		}
@@ -131,6 +133,9 @@ func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([
 	host := "localhost:22"
 	privateBytes, publicBytes, _ := opaquessh.GenerateKeys()
 	t.authorizedKeys.Add(string(publicBytes))
+
+	// the following implementation of an ssh client is heavily based on thsi example:
+	// https://medium.com/@marcus.murray/go-ssh-client-shell-session-c4d40daa46cd
 
 	var err error
 	var signer gossh.Signer

@@ -87,6 +87,24 @@ func (t *TransparentSsh) Kill() {
 
 func (t *TransparentSsh) Start() error {
 
+	var privateKey []byte
+	// FIXME: stopgap so that there is always an identityfile
+	if publicKeyRsa, err := opaquessh.ReadPublicKeyRsa(t.identityFile, t.filIo); err == nil {
+		if _, err = opaquessh.GeneratePublicKey(publicKeyRsa); err != nil {
+			return fmt.Errorf("error decoding temporary public key: %s", err)
+		} else {
+			t.logger.Debugf("using existing temporary keys")
+		}
+	} else {
+		t.logger.Debugf("generating new temporary keys")
+		privateKey, _, err = opaquessh.GenerateKeys()
+		if err != nil {
+			return fmt.Errorf("error generating temporary keys: %s", err)
+		} else if err := t.filIo.WriteFile(t.identityFile, privateKey, 0600); err != nil {
+			return fmt.Errorf("error writing temporary private key: %s", err)
+		}
+	}
+
 	sshOpenMessage := ssh.SshOpenMessage{}
 
 	t.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
@@ -95,6 +113,9 @@ func (t *TransparentSsh) Start() error {
 		defer close(t.doneChan)
 		<-t.tmb.Dying()
 	}()
+
+	// the following implementation of an ssh server is based heavily on this example:
+	// https://github.com/Scalingo/go-ssh-examples/blob/master/server_complex.go
 
 	// An SSH server is represented by a ServerConfig, which holds
 	// certificate details and handles authentication of ServerConns.
@@ -165,9 +186,17 @@ func (t *TransparentSsh) Start() error {
 						switch req.Type {
 						// handles scp and other exec
 						case "exec":
-							ok = true
 							command := string(req.Payload[4 : req.Payload[3]+4])
+							// FIXME: read the command; if invalid, tell the ZLI that
 							t.logger.Infof("Lucie, the command is %s", command)
+							if !ssh.IsValidScp(command) {
+								t.logger.Errorf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", command)
+								channel.Close()
+								t.Kill()
+								return
+							}
+
+							ok = true
 
 							go t.readFromChannel()
 							// channel.Close()\
