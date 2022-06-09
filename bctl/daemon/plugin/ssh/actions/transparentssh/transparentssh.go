@@ -252,7 +252,7 @@ func (t *TransparentSsh) readFromChannel() {
 }
 
 func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
-	t.logger.Debugf("Default ssh received %+v stream", smessage.Type)
+	t.logger.Debugf("transparent ssh received %+v stream", smessage.Type)
 	switch smsg.StreamType(smessage.Type) {
 	case smsg.Data:
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {

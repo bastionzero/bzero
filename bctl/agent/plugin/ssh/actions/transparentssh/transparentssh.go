@@ -77,7 +77,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 	case ssh.SshOpen:
 		var openRequest ssh.SshOpenMessage
 		if err := json.Unmarshal(actionPayload, &openRequest); err != nil {
-			return nil, fmt.Errorf("malformed default SSH action payload %s", string(actionPayload))
+			return nil, fmt.Errorf("malformed transparent ssh action payload %s", string(actionPayload))
 		}
 
 		// do I need to send a ready message?
@@ -86,7 +86,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		// Deserialize the action payload, the only action passed is input
 		var inputRequest ssh.SshInputMessage
 		if err := json.Unmarshal(actionPayload, &inputRequest); err != nil {
-			return nil, fmt.Errorf("unable to unmarshal default SSH input message: %s", err)
+			return nil, fmt.Errorf("unable to unmarshal transparent ssh input message: %s", err)
 		}
 
 		t.logger.Infof("the data is %s", inputRequest.Data)
@@ -114,7 +114,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		var closeRequest ssh.SshCloseMessage
 		if jerr := json.Unmarshal(actionPayload, &closeRequest); jerr != nil {
 			// not a fatal error, we can still just close without a reason
-			t.logger.Errorf("unable to unmarshal default SSH close message: %s", jerr)
+			t.logger.Errorf("unable to unmarshal transparent ssh close message: %s", jerr)
 		}
 
 		t.logger.Infof("Ending TCP connection because we received this close message from daemon: %s", closeRequest.Reason)
