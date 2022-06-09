@@ -45,8 +45,7 @@ type TransparentSsh struct {
 	filIo bzio.BzFileIo
 	stdIo io.ReadWriter
 
-	sshChannel    io.ReadWriteCloser
-	agentDoneChan chan struct{}
+	sshChannel io.ReadWriteCloser
 }
 
 func New(
@@ -59,14 +58,13 @@ func New(
 ) *TransparentSsh {
 
 	return &TransparentSsh{
-		logger:        logger,
-		outboxQueue:   outboxQueue,
-		doneChan:      doneChan,
-		stdInChan:     make(chan []byte),
-		identityFile:  identityFile,
-		filIo:         filIo,
-		stdIo:         stdIo,
-		agentDoneChan: make(chan struct{}),
+		logger:       logger,
+		outboxQueue:  outboxQueue,
+		doneChan:     doneChan,
+		stdInChan:    make(chan []byte),
+		identityFile: identityFile,
+		filIo:        filIo,
+		stdIo:        stdIo,
 	}
 }
 
@@ -174,7 +172,7 @@ func (t *TransparentSsh) Start() error {
 						// handles scp and other exec
 						case "exec":
 							command := string(req.Payload[4 : req.Payload[3]+4])
-							// FIXME: read the command; if invalid, tell the ZLI that
+							// TODO: read the command; if invalid, tell the ZLI that
 							t.logger.Infof("Lucie, the command is %s", command)
 							if !ssh.IsValidScp(command) {
 								t.logger.Errorf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", command)
@@ -186,10 +184,6 @@ func (t *TransparentSsh) Start() error {
 							ok = true
 
 							go t.readFromChannel()
-							// channel.Close()\
-							// respond to the initial scp request
-							//channel.Write([]byte([]uint8{0}))
-							//channel.Write([]byte([]uint8{0}))
 
 							sshExecMessage := ssh.SshExecMessage{
 								Command: command,
@@ -198,41 +192,6 @@ func (t *TransparentSsh) Start() error {
 
 						case "shell":
 							// TODO: make sure we properly reject this for now
-							/* TODO: this code works okay if the agent provides a PTY, but only sends input line by line, not char by char!
-							t.tmb.Go(func() error {
-								b := make([]byte, InputBufferSize)
-								t.logger.Errorf("Trying to read from stdin...")
-
-								for {
-									select {
-									case <-t.tmb.Dying():
-										channel.Close()
-										return nil
-									default:
-										if n, err := channel.Read(b); !t.tmb.Alive() {
-											return nil
-										} else if err != nil {
-											if err == io.EOF {
-												t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
-												channel.Close()
-												return fmt.Errorf("finished reading from stdin")
-											}
-											channel.Close()
-											return fmt.Errorf("error reading from Stdin: %s", err)
-										} else if n > 0 {
-											t.logger.Debugf("Read %d bytes from local SSH", n)
-											t.sendSshInputMessage(b[:n])
-										}
-									}
-								}
-							})
-							// We don't accept any commands (Payload),
-							// only the default shell.
-							if len(req.Payload) == 0 {
-								ok = true
-							}
-
-							*/
 
 						case "pty-req":
 							// TODO: make sure we properly reject this for now
