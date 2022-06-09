@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/pkgerrors"
@@ -63,6 +64,7 @@ func DefaultLoggerConfig(logLevel string) *LoggerConfig {
 func New(config *LoggerConfig, logFilePath string, writeToConsole bool) (*Logger, error) {
 	// Let's us display stack info on errors
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
+	zerolog.TimeFieldFormat = time.StampMilli
 	zerolog.SetGlobalLevel(config.LogLevel)
 
 	// If the log file doesn't exist, create it, or append to the file

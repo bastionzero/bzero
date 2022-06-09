@@ -57,6 +57,7 @@ const (
 	// and execute
 	Open   CheckType = "open"
 	Create CheckType = "create"
+	Remove CheckType = "remove"
 )
 
 type ModeParser struct {
@@ -77,7 +78,7 @@ func (m *ModeParser) Verify(set PrivilegeSet, mode CheckType) bool {
 		return m.CanWrite(set)
 	case Execute, Open:
 		return m.CanExecute(set)
-	case Create:
+	case Create, Remove:
 		return m.CanCreate(set)
 	default:
 		return false
@@ -102,4 +103,8 @@ func (m *ModeParser) CanOpen(set PrivilegeSet) bool {
 
 func (m *ModeParser) CanCreate(set PrivilegeSet) bool {
 	return m.CanExecute(set) && m.CanWrite(set)
+}
+
+func (m *ModeParser) CanRemove(set PrivilegeSet) bool {
+	return m.CanCreate(set)
 }

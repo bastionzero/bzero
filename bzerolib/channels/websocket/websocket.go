@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +21,6 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/controllers/agentcontroller"
 	"bastionzero.com/bctl/v1/bzerolib/controllers/connectionnodecontroller"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
@@ -440,37 +438,11 @@ func (w *Websocket) connect() error {
 				}
 			}
 
-			// If we have the option to refresh our auth details do it here before reconnecting
-			if w.refreshTokenCommand != "" {
-				if err := util.RunRefreshAuthCommand(w.refreshTokenCommand); err != nil {
-					w.logger.Error(fmt.Errorf("error executing refresh auth command: %s -- will retry", err))
-					continue
-				}
-			}
-
 			// Switch based on the targetType
-			// NOTE: the following connectX() functions have their own exponential backoff
-			// which is why we fail on their errors instead of retrying
 			switch w.targetType {
-			case Cluster:
-				if err := w.connectCluster(); err != nil {
-					return fmt.Errorf("error making kube cluster connection: %s", err)
-				}
-			case Db:
-				if err := w.connectDb(); err != nil {
-					return fmt.Errorf("error making database connection: %s", err)
-				}
-			case Web:
-				if err := w.connectWeb(); err != nil {
-					return fmt.Errorf("error making web connection: %s", err)
-				}
-			case Shell:
-				if err := w.connectShell(); err != nil {
-					return fmt.Errorf("error making shell connection: %s", err)
-				}
-			case Ssh:
-				if err := w.connectSsh(); err != nil {
-					return fmt.Errorf("error making ssh connection: %s", err)
+			case Cluster, Db, Web, Shell, Ssh:
+				if err := w.connectDaemonWebsocket(); err != nil {
+					return fmt.Errorf("error making daemon websocket connection")
 				}
 			case AgentWebsocket:
 				if err := w.connectAgentWebsocket(); err != nil {
@@ -564,65 +536,6 @@ func (w *Websocket) solveChallenge() error {
 	return nil
 }
 
-func (w *Websocket) connectCluster() error {
-	cnController, cnControllerErr := w.getCnController()
-	if cnControllerErr != nil {
-		return fmt.Errorf("error creating cnController")
-	}
-	targetGroups := []string{}
-	if w.params["target_groups"] != "" {
-		targetGroups = strings.Split(w.params["target_groups"], ",")
-	}
-
-	createConnectionResponse, err := cnController.CreateKubeConnection(w.params["target_user"], targetGroups, w.params["target_id"])
-
-	return w.buildCnUrl(createConnectionResponse, err)
-}
-
-func (w *Websocket) connectDb() error {
-	cnController, cnControllerErr := w.getCnController()
-	if cnControllerErr != nil {
-		return fmt.Errorf("error creating cnController")
-	}
-
-	createConnectionResponse, err := cnController.CreateDbConnection(w.params["target_id"])
-
-	return w.buildCnUrl(createConnectionResponse, err)
-}
-
-func (w *Websocket) connectWeb() error {
-	cnController, cnControllerErr := w.getCnController()
-	if cnControllerErr != nil {
-		return fmt.Errorf("error creating cnController")
-	}
-
-	createConnectionResponse, err := cnController.CreateWebConnection(w.params["target_id"])
-
-	return w.buildCnUrl(createConnectionResponse, err)
-}
-
-func (w *Websocket) connectShell() error {
-	cnController, cnControllerErr := w.getCnController()
-	if cnControllerErr != nil {
-		return fmt.Errorf("error creating cnController")
-	}
-
-	createConnectionResponse, err := cnController.CreateShellConnection(w.params["connection_id"])
-
-	return w.buildCnUrl(createConnectionResponse, err)
-}
-
-func (w *Websocket) connectSsh() error {
-	cnController, cnControllerErr := w.getCnController()
-	if cnControllerErr != nil {
-		return fmt.Errorf("error creating cnController")
-	}
-
-	createConnectionResponse, err := cnController.CreateSshConnection(w.params["target_id"], w.params["target_user"], w.params["remote_host"], w.params["remote_port"])
-
-	return w.buildCnUrl(createConnectionResponse, err)
-}
-
 func (w *Websocket) connectAgentWebsocket() error {
 	// Build our connection node Url
 	if newBaseUrl, err := bzhttp.BuildEndpoint(w.params["connection_service_url"], agentConnectionNodeHubEndpoint); err != nil {
@@ -659,24 +572,19 @@ func (w *Websocket) getCnController() (*connectionnodecontroller.ConnectionNodeC
 	return connectionnodecontroller.New(cnControllerLogger, w.serviceUrl, "", w.headers, w.params)
 }
 
-func (w *Websocket) buildCnUrl(response connectionnodecontroller.ConnectionDetailsResponse, err error) error {
+func (w *Websocket) connectDaemonWebsocket() error {
 	// Always set connectionId incase we error later and need to close the connection
-	w.requestParams["connectionId"] = response.ConnectionId
-
-	// return if our caller's createXConnection failed
-	if err != nil {
-		return err
-	}
+	w.requestParams["connectionId"] = w.params["connection_id"]
 
 	// Now we can build our connectionnode url
-	newBaseUrl, err := bzhttp.BuildEndpoint(response.ConnectionServiceUrl, daemonConnectionNodeHubEndpoint)
+	newBaseUrl, err := bzhttp.BuildEndpoint(w.params["connectionServiceUrl"], daemonConnectionNodeHubEndpoint)
 	if err != nil {
 		return err
 	}
 	w.baseUrl = newBaseUrl
 
 	// Define our request params
-	w.requestParams["authToken"] = response.AuthToken
+	w.requestParams["authToken"] = w.params["connectionServiceAuthToken"]
 
 	// Get the connection type based on the websocket type
 	connectionType := ConnectionType(w.params["websocketType"])

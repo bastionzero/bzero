@@ -1,125 +1,81 @@
 package pseudoterminal
 
 import (
-	"fmt"
-	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"github.com/stretchr/testify/assert"
+	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 )
 
-func TestPseudoTerminalCreation(t *testing.T) {
-	if terminal, err := getPseudoTerminal(); err != nil {
-		t.Errorf("failed to create new pseudo terminal: %s", err)
-	} else {
-		assert.NotNil(t, terminal)
-		assert.NotNil(t, terminal.command)
-		assert.NotNil(t, terminal.ptyFile)
-		assert.NotNil(t, terminal.logger)
-
-		assert.NotNil(t, terminal.StdIn())
-		assert.NotNil(t, terminal.StdOut())
-	}
+func TestPseudoTerminal(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Pseudo Terminal Suite")
 }
 
-func TestRunCommand(t *testing.T) {
-	// we use a command that requires calculation so that we don't confuse an error that
-	// outputs the entire string with a successful execution
-	keystrokes := "declare -i myvar=5+1; echo $myvar\n"
-	expectedOutput := "6"
+var _ = Describe("Pseudo Terminal", Ordered, func() {
+	Context("Happy Path", func() {
+		commandstr := ""
+		logger := logger.MockLogger()
+		var terminal *PseudoTerminal
 
-	if terminal, err := getPseudoTerminal(); err != nil {
-		t.Errorf("failed to create new pseudo terminal: %s", err)
-	} else {
-		for _, char := range keystrokes {
-			if _, err := terminal.StdIn().Write([]byte(string(char))); err != nil {
-				t.Errorf("Unable to write to stdin: %s", err)
+		// create our pseudo terminal
+		BeforeEach(func() {
+			usr, err := unixuser.Current()
+			Expect(err).To(BeNil())
+			terminal, err = New(logger, usr, commandstr)
+			Expect(err).To(BeNil())
+		})
+
+		It("creates a new pseudo terminal", func() {
+			Expect(terminal).ToNot(BeNil())
+			Expect(terminal.command).ToNot(BeNil())
+			Expect(terminal.ptyFile).ToNot(BeNil())
+			Expect(terminal.StdIn()).ToNot(BeNil())
+			Expect(terminal.StdOut()).ToNot(BeNil())
+		})
+
+		It("runs commands", func() {
+			// we use a command that requires calculation so that we don't confuse an error that
+			// outputs the entire string with a successful execution
+			keystrokes := "expr 1 + 1\n"
+			expectedOutput := "2"
+
+			for _, char := range keystrokes {
+				_, err := terminal.StdIn().Write([]byte(string(char)))
+				Expect(err).To(BeNil())
 			}
-		}
-		time.Sleep(1 * time.Second) // let the command run
+			time.Sleep(1 * time.Second) // let the command run
 
-		stdoutBytes := make([]byte, 1000)
-		if n, err := terminal.StdOut().Read(stdoutBytes); err != nil {
-			t.Errorf("failed to read from stdout: %s", err)
-		} else {
-			assert.Contains(t, string(stdoutBytes[:n]), expectedOutput)
-		}
-	}
-}
+			stdoutBytes := make([]byte, 1000)
+			n, err := terminal.StdOut().Read(stdoutBytes)
+			Expect(err).To(BeNil())
 
-func TestShutdown(t *testing.T) {
-	if terminal, err := getPseudoTerminal(); err != nil {
-		t.Errorf("failed to create new pseudo terminal: %s", err)
-	} else {
-		for {
-			go func() {
-				time.Sleep(1 * time.Second)
-				terminal.Kill()
-			}()
+			Expect(string(stdoutBytes[:n])).To(ContainSubstring(expectedOutput))
+		})
 
-			select {
-			case <-terminal.Done():
-				return
-			case <-time.After(5 * time.Second):
-				t.Error("terminal failed to die")
+		It("shuts down properly", func() {
+			for {
+				go func() {
+					time.Sleep(1 * time.Second)
+					terminal.Kill()
+				}()
+
+				select {
+				case <-terminal.Done():
+					return
+				case <-time.After(5 * time.Second):
+					panic("terminal failed to die")
+				}
 			}
-		}
-	}
-}
+		})
 
-func TestSetSize(t *testing.T) {
-	if terminal, err := getPseudoTerminal(); err != nil {
-		t.Error(err)
-	} else {
-		assert.Nil(t, terminal.SetSize(10, 10))
-	}
-}
-
-func TestDoesUserExist(t *testing.T) {
-	shellCommand := defaultShellCommand
-	shellCommandArgs := []string{"-c"}
-
-	realUser, err := whoAmI()
-	if err != nil {
-		t.Error("failed to grab current user")
-	}
-	assert.Nil(t, doesUserExist(realUser, shellCommand, shellCommandArgs))
-
-	fakeUser := "MonsieurFake"
-	assert.NotNil(t, doesUserExist(fakeUser, shellCommand, shellCommandArgs))
-}
-
-func getPseudoTerminal() (*PseudoTerminal, error) {
-	logger := logger.MockLogger()
-	runAsUser, err := whoAmI()
-	if err != nil {
-		return nil, fmt.Errorf("failed to grab current user")
-	}
-	commandstr := ""
-
-	if terminal, err := New(logger, runAsUser, commandstr); err != nil {
-		return nil, fmt.Errorf("failed to create new pseudo terminal: %s", err)
-	} else {
-		return terminal, nil
-	}
-}
-
-// whoAmI returns the current username that the agent is running under
-func whoAmI() (string, error) {
-	cmdstr := "whoami"
-	shellCmdArgs := append([]string{"-c"}, cmdstr)
-	cmd := exec.Command(defaultShellCommand, shellCmdArgs...)
-	stdout, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			// The program has exited with an exit code != 0
-			return "", fmt.Errorf("encountered an error while running command %v : %s", cmdstr, exitErr)
-		}
-		return "", nil
-	}
-
-	return strings.TrimSpace(string(stdout)), nil
-}
+		It("sets terminal size", func() {
+			err := terminal.SetSize(10, 10)
+			Expect(err).To(BeNil())
+		})
+	})
+})

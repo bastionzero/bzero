@@ -13,6 +13,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
+	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 )
 
 const (
@@ -58,44 +59,54 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 
 		subSubLogger := subLogger.GetComponentLogger("authorized_keys")
 
+		// Create will create the user with the given username if it is allowed, or it will return the existing user
+		usr, err := unixuser.LookupOrCreateFromList(synPayload.TargetUser)
+		if err != nil {
+			rerr = fmt.Errorf("failed to use ssh as user %s: %s", synPayload.TargetUser, err)
+		}
+
 		// we place the authorized keys lock file inside the user's /home/.ssh/ directory because that is the least bad place for it
 		// source: https://i.stack.imgur.com/BlpRb.png
-		authKeys, err := authorizedkeys.New(subSubLogger, synPayload.TargetUser, plugin.doneChan, sshFolder, sshFolder, maxKeyLifetime)
+		authKeys, err := authorizedkeys.New(subSubLogger, plugin.doneChan, usr, sshFolder, sshFolder, maxKeyLifetime)
 		if err != nil {
 			rerr = fmt.Errorf("failed to set up authorized_keys file: %s", err)
 		}
 
-		switch parsedAction {
-		case bzssh.OpaqueSsh:
-			// Open up a connection to the TCP addr we are trying to connect to
-			raddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", synPayload.RemoteHost, synPayload.RemotePort))
-			if err != nil {
-				rerr = fmt.Errorf("failed to resolve remote address: %s", err)
+		if rerr == nil {
+			switch parsedAction {
+			case bzssh.OpaqueSsh:
+				// Open up a connection to the TCP addr we are trying to connect to
+				raddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", synPayload.RemoteHost, synPayload.RemotePort))
+				if err != nil {
+					rerr = fmt.Errorf("failed to resolve remote address: %s", err)
+					break
+				}
+				remoteConnection, err := net.DialTCP("tcp", nil, raddr)
+				if err != nil {
+					rerr = fmt.Errorf("failed to dial remote address: %s", err)
+					break
+				}
+
+				plugin.action = opaquessh.New(
+					subLogger,
+					plugin.doneChan,
+					plugin.streamOutputChan,
+					remoteConnection,
+					authKeys,
+				)
+
+			case bzssh.TransparentSsh:
+				plugin.action = transparentssh.New(
+					subLogger,
+					plugin.doneChan,
+					plugin.streamOutputChan,
+					authKeys,
+					synPayload.TargetUser,
+				)
+
+			default:
+				rerr = fmt.Errorf("unhandled Ssh action %s", parsedAction)
 			}
-			remoteConnection, err := net.DialTCP("tcp", nil, raddr)
-			if err != nil {
-				rerr = fmt.Errorf("failed to dial remote address: %s", err)
-			}
-
-			plugin.action = opaquessh.New(
-				subLogger,
-				plugin.doneChan,
-				plugin.streamOutputChan,
-				remoteConnection,
-				authKeys,
-			)
-
-		case bzssh.TransparentSsh:
-			plugin.action = transparentssh.New(
-				subLogger,
-				plugin.doneChan,
-				plugin.streamOutputChan,
-				authKeys,
-				synPayload.TargetUser,
-			)
-
-		default:
-			rerr = fmt.Errorf("unhandled Ssh action %s", parsedAction)
 		}
 
 		if rerr != nil {
