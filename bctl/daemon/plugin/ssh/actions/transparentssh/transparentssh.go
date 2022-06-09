@@ -198,11 +198,6 @@ func (t *TransparentSsh) Start() error {
 
 						case "window-change":
 							// TODO: make sure we properly reject this for now
-							/*
-								w, h := parseDims(req.Payload)
-								SetWinsize(f.Fd(), w, h)
-								continue //no response
-							*/
 						}
 
 						if !ok {
