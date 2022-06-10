@@ -121,6 +121,7 @@ func (t *TransparentSsh) Start() error {
 	config.AddHostKey(private)
 	go func() {
 		// Once a ServerConfig has been configured, tell ZLI we can accept connections
+		// TODO: should be passed a listener
 		listener, err := net.Listen("tcp", ":2222")
 		if err != nil {
 			t.logger.Errorf("failed to listen for connection: ", err)
@@ -130,8 +131,7 @@ func (t *TransparentSsh) Start() error {
 		defer listener.Close()
 
 		nConn, _ := listener.Accept()
-		// Before use, a handshake must be performed on the incoming
-		// net.Conn.
+		// Before use, a handshake must be performed on the incoming net.Conn.
 		_, chans, reqs, err := gossh.NewServerConn(nConn, config)
 
 		if err != nil {

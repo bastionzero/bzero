@@ -102,6 +102,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
 		t.exec(execRequest.Command)
 
+		// FIXME: doesn't seem like we're receiving this
 	case bzssh.SshClose:
 		// Deserialize the action payload
 		var closeRequest bzssh.SshCloseMessage
@@ -253,7 +254,6 @@ func (t *TransparentSsh) exec(command string) {
 		} else {
 			t.logger.Debugf("finished execution")
 		}
-		t.Kill()
 	}()
 }
 
