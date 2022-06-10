@@ -11,7 +11,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
-	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -72,15 +72,15 @@ func (s *OpaqueSsh) Start() error {
 	// NOTE: it is technically possible for this to create a one-time race if two SSH processes
 	// are kicked off *and* the user just logged in. However this is unlikely and can be resolved
 	// if/when we upgrade the SSH architecture
-	if publicKeyRsa, err := ReadPublicKeyRsa(s.identityFile, s.filIo); err == nil {
-		if publicKey, err = GeneratePublicKey(publicKeyRsa); err != nil {
+	if publicKeyRsa, err := bzssh.ReadPublicKeyRsa(s.identityFile, s.filIo); err == nil {
+		if publicKey, err = bzssh.GeneratePublicKey(publicKeyRsa); err != nil {
 			return fmt.Errorf("error decoding temporary public key: %s", err)
 		} else {
 			s.logger.Debugf("using existing temporary keys")
 		}
 	} else {
 		s.logger.Debugf("generating new temporary keys")
-		privateKey, publicKey, err = GenerateKeys()
+		privateKey, publicKey, err = bzssh.GenerateKeys()
 		if err != nil {
 			return fmt.Errorf("error generating temporary keys: %s", err)
 		} else if err := s.filIo.WriteFile(s.identityFile, privateKey, 0600); err != nil {
@@ -88,12 +88,12 @@ func (s *OpaqueSsh) Start() error {
 		}
 	}
 
-	sshOpenMessage := ssh.SshOpenMessage{
+	sshOpenMessage := bzssh.SshOpenMessage{
 		PublicKey:            []byte(publicKey),
 		StreamMessageVersion: smsg.CurrentSchema,
 	}
 
-	s.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
+	s.sendOutputMessage(bzssh.SshOpen, sshOpenMessage)
 
 	go func() {
 		defer close(s.doneChan)
@@ -112,7 +112,7 @@ func (s *OpaqueSsh) Start() error {
 					return nil
 				} else if err != nil {
 					if err == io.EOF {
-						s.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
+						s.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
 						return fmt.Errorf("finished reading from stdin")
 					}
 					return fmt.Errorf("error reading from Stdin: %s", err)
@@ -152,13 +152,13 @@ func (s *OpaqueSsh) ReceiveStream(smessage smsg.StreamMessage) {
 
 func (s *OpaqueSsh) sendSshInputMessage(bs []byte) {
 	// Send all accumulated input in an sshInput data message
-	sshInputDataMessage := ssh.SshInputMessage{
+	sshInputDataMessage := bzssh.SshInputMessage{
 		Data: bs,
 	}
-	s.sendOutputMessage(ssh.SshInput, sshInputDataMessage)
+	s.sendOutputMessage(bzssh.SshInput, sshInputDataMessage)
 }
 
-func (s *OpaqueSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
+func (s *OpaqueSsh) sendOutputMessage(action bzssh.SshSubAction, payload interface{}) {
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	s.outboxQueue <- plugin.ActionWrapper{

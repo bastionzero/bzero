@@ -9,19 +9,15 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/opaquessh"
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
 const (
 	chunkSize = 64 * 1024
 )
-
-type AuthorizedKeysInterface interface {
-	Add(pubkey string) error
-}
 
 type TransparentSsh struct {
 	tmb    tomb.Tomb
@@ -38,14 +34,14 @@ type TransparentSsh struct {
 	conn    *gossh.Client
 	session *gossh.Session
 
-	authorizedKeys AuthorizedKeysInterface
+	authorizedKeys authorizedkeys.IAuthorizedKeys
 
 	stdInChan     chan []byte
 	targetUser    string
 	remoteADdress string
 }
 
-func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, authKeys AuthorizedKeysInterface, targetUser string, remoteAddress string) *TransparentSsh {
+func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, authKeys authorizedkeys.IAuthorizedKeys, targetUser string, remoteAddress string) *TransparentSsh {
 
 	return &TransparentSsh{
 		logger:           logger,
@@ -73,18 +69,18 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 
 	// Update the logger action
 	t.logger = t.logger.GetActionLogger(action)
-	switch ssh.SshSubAction(action) {
-	case ssh.SshOpen:
-		var openRequest ssh.SshOpenMessage
+	switch bzssh.SshSubAction(action) {
+	case bzssh.SshOpen:
+		var openRequest bzssh.SshOpenMessage
 		if err := json.Unmarshal(actionPayload, &openRequest); err != nil {
 			return nil, fmt.Errorf("malformed transparent ssh action payload %s", string(actionPayload))
 		}
 
 		// do I need to send a ready message?
 		return t.start(openRequest, action)
-	case ssh.SshInput:
+	case bzssh.SshInput:
 		// Deserialize the action payload, the only action passed is input
-		var inputRequest ssh.SshInputMessage
+		var inputRequest bzssh.SshInputMessage
 		if err := json.Unmarshal(actionPayload, &inputRequest); err != nil {
 			return nil, fmt.Errorf("unable to unmarshal transparent ssh input message: %s", err)
 		}
@@ -93,14 +89,14 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 
 		t.stdInChan <- inputRequest.Data
 
-	case ssh.SshExec:
+	case bzssh.SshExec:
 		// Deserialize the action payload, the only action passed is input
-		var execRequest ssh.SshExecMessage
+		var execRequest bzssh.SshExecMessage
 		if err := json.Unmarshal(actionPayload, &execRequest); err != nil {
 			return nil, fmt.Errorf("unable to unmarshal transparent SSH exec message: %s", err)
 		}
 
-		if !ssh.IsValidScp(execRequest.Command) {
+		if !bzssh.IsValidScp(execRequest.Command) {
 			return nil, fmt.Errorf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", execRequest.Command)
 		}
 
@@ -108,10 +104,10 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 			return nil, fmt.Errorf("failed to execute command %s: %s", execRequest.Command, err)
 		}
 
-	case ssh.SshClose:
+	case bzssh.SshClose:
 		// FIXME: implement this better? I guess kill is all that's really needed...
 		// Deserialize the action payload
-		var closeRequest ssh.SshCloseMessage
+		var closeRequest bzssh.SshCloseMessage
 		if jerr := json.Unmarshal(actionPayload, &closeRequest); jerr != nil {
 			// not a fatal error, we can still just close without a reason
 			t.logger.Errorf("unable to unmarshal transparent ssh close message: %s", jerr)
@@ -128,9 +124,9 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 	return []byte{}, nil
 }
 
-func (t *TransparentSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
+func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) ([]byte, error) {
 
-	privateBytes, publicBytes, _ := opaquessh.GenerateKeys()
+	privateBytes, publicBytes, _ := bzssh.GenerateKeys()
 	t.authorizedKeys.Add(string(publicBytes))
 
 	// the following implementation of an ssh client is heavily based on thsi example:
@@ -256,7 +252,7 @@ func (t *TransparentSsh) sendStreamMessage(sequenceNumber int, streamType smsg.S
 	t.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  t.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		Action:         string(ssh.TransparentSsh),
+		Action:         string(bzssh.TransparentSsh),
 		Type:           streamType,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(contentBytes),

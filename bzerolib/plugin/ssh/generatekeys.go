@@ -1,4 +1,4 @@
-package opaquessh
+package ssh
 
 // functions for handling SSH keypairs
 // based on: https://gist.github.com/devinodaniel/8f9b8a4f31573f428f29ec0e884e6673

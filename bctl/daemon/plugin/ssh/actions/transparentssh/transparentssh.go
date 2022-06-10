@@ -10,11 +10,10 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/opaquessh"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
-	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -75,15 +74,15 @@ func (t *TransparentSsh) Start() error {
 
 	var privateKey []byte
 	// FIXME: stopgap so that there is always an identityfile
-	if publicKeyRsa, err := opaquessh.ReadPublicKeyRsa(t.identityFile, t.filIo); err == nil {
-		if _, err = opaquessh.GeneratePublicKey(publicKeyRsa); err != nil {
+	if publicKeyRsa, err := bzssh.ReadPublicKeyRsa(t.identityFile, t.filIo); err == nil {
+		if _, err = bzssh.GeneratePublicKey(publicKeyRsa); err != nil {
 			return fmt.Errorf("error decoding temporary public key: %s", err)
 		} else {
 			t.logger.Debugf("using existing temporary keys")
 		}
 	} else {
 		t.logger.Debugf("generating new temporary keys")
-		privateKey, _, err = opaquessh.GenerateKeys()
+		privateKey, _, err = bzssh.GenerateKeys()
 		if err != nil {
 			return fmt.Errorf("error generating temporary keys: %s", err)
 		} else if err := t.filIo.WriteFile(t.identityFile, privateKey, 0600); err != nil {
@@ -91,9 +90,9 @@ func (t *TransparentSsh) Start() error {
 		}
 	}
 
-	sshOpenMessage := ssh.SshOpenMessage{}
+	sshOpenMessage := bzssh.SshOpenMessage{}
 
-	t.sendOutputMessage(ssh.SshOpen, sshOpenMessage)
+	t.sendOutputMessage(bzssh.SshOpen, sshOpenMessage)
 
 	go func() {
 		defer close(t.doneChan)
@@ -116,7 +115,7 @@ func (t *TransparentSsh) Start() error {
 		},
 	}
 
-	newPrivate, _, _ := opaquessh.GenerateKeys()
+	newPrivate, _, _ := bzssh.GenerateKeys()
 	private, _ := gossh.ParsePrivateKey(newPrivate)
 	config.AddHostKey(private)
 	go func() {
@@ -168,7 +167,7 @@ func (t *TransparentSsh) Start() error {
 							command := string(req.Payload[4 : req.Payload[3]+4])
 							// TODO: read the command; if invalid, tell the ZLI that
 							t.logger.Infof("Lucie, the command is %s", command)
-							if !ssh.IsValidScp(command) {
+							if !bzssh.IsValidScp(command) {
 								errMsg := fmt.Sprintf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", command)
 								t.logger.Errorf(errMsg)
 								//t.stdIo.Write([]byte(errMsg))
@@ -181,10 +180,10 @@ func (t *TransparentSsh) Start() error {
 
 							go t.readFromChannel()
 
-							sshExecMessage := ssh.SshExecMessage{
+							sshExecMessage := bzssh.SshExecMessage{
 								Command: command,
 							}
-							t.sendOutputMessage(ssh.SshExec, sshExecMessage)
+							t.sendOutputMessage(bzssh.SshExec, sshExecMessage)
 
 						case "shell":
 							// TODO: make sure we properly reject this for now
@@ -225,7 +224,7 @@ func (t *TransparentSsh) readFromChannel() {
 			if err != nil {
 				if err == io.EOF {
 					t.sshChannel.Close()
-					t.sendOutputMessage(ssh.SshClose, ssh.SshCloseMessage{Reason: endedByUser})
+					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
 					t.logger.Errorf("finished reading from stdin")
 					return
 				} else {
@@ -235,7 +234,7 @@ func (t *TransparentSsh) readFromChannel() {
 				}
 			} else if n > 0 {
 				t.logger.Debugf("Sending %d bytes to remote SSH", n)
-				t.sendOutputMessage(ssh.SshInput, ssh.SshInputMessage{Data: b[:n]})
+				t.sendOutputMessage(bzssh.SshInput, bzssh.SshInputMessage{Data: b[:n]})
 			}
 		}
 	}
@@ -269,7 +268,7 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	}
 }
 
-func (t *TransparentSsh) sendOutputMessage(action ssh.SshSubAction, payload interface{}) {
+func (t *TransparentSsh) sendOutputMessage(action bzssh.SshSubAction, payload interface{}) {
 	// Send payload to plugin output queue
 	payloadBytes, _ := json.Marshal(payload)
 	t.outboxQueue <- plugin.ActionWrapper{

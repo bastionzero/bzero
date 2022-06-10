@@ -10,8 +10,9 @@ import (
 
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -19,10 +20,6 @@ const (
 	chunkSize     = 64 * 1024
 	writeDeadline = 5 * time.Second
 )
-
-type AuthorizedKeysInterface interface {
-	Add(pubkey string) error
-}
 
 type OpaqueSsh struct {
 	tmb    tomb.Tomb
@@ -36,10 +33,10 @@ type OpaqueSsh struct {
 	streamMessageVersion smsg.SchemaVersion
 
 	remoteConnection *net.TCPConn
-	authorizedKeys   AuthorizedKeysInterface
+	authorizedKeys   authorizedkeys.IAuthorizedKeys
 }
 
-func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *net.TCPConn, authKeys AuthorizedKeysInterface) *OpaqueSsh {
+func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *net.TCPConn, authKeys authorizedkeys.IAuthorizedKeys) *OpaqueSsh {
 
 	return &OpaqueSsh{
 		logger:           logger,
@@ -62,9 +59,9 @@ func (s *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error)
 
 	// Update the logger action
 	s.logger = s.logger.GetActionLogger(action)
-	switch ssh.SshSubAction(action) {
-	case ssh.SshOpen:
-		var openRequest ssh.SshOpenMessage
+	switch bzssh.SshSubAction(action) {
+	case bzssh.SshOpen:
+		var openRequest bzssh.SshOpenMessage
 		if err := json.Unmarshal(actionPayload, &openRequest); err != nil {
 			return nil, fmt.Errorf("malformed opaque ssh action payload %s", string(actionPayload))
 		} else if err = s.authorizedKeys.Add(string(openRequest.PublicKey)); err != nil {
@@ -72,10 +69,10 @@ func (s *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error)
 		}
 
 		return s.start(openRequest, action)
-	case ssh.SshInput:
 
+	case bzssh.SshInput:
 		// Deserialize the action payload, the only action passed is input
-		var inputRequest ssh.SshInputMessage
+		var inputRequest bzssh.SshInputMessage
 		if err := json.Unmarshal(actionPayload, &inputRequest); err != nil {
 			return nil, fmt.Errorf("unable to unmarshal opaque ssh input message: %s", err)
 		}
@@ -89,9 +86,9 @@ func (s *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error)
 			s.Kill()
 		}
 
-	case ssh.SshClose:
+	case bzssh.SshClose:
 		// Deserialize the action payload
-		var closeRequest ssh.SshCloseMessage
+		var closeRequest bzssh.SshCloseMessage
 		if jerr := json.Unmarshal(actionPayload, &closeRequest); jerr != nil {
 			// not a fatal error, we can still just close without a reason
 			s.logger.Errorf("unable to unmarshal opaque ssh close message: %s", jerr)
@@ -108,7 +105,7 @@ func (s *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error)
 	return []byte{}, nil
 }
 
-func (s *OpaqueSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
+func (s *OpaqueSsh) start(openRequest bzssh.SshOpenMessage, action string) ([]byte, error) {
 	s.streamMessageVersion = openRequest.StreamMessageVersion
 	s.logger.Debugf("Setting stream message version: %s", s.streamMessageVersion)
 
@@ -158,7 +155,7 @@ func (s *OpaqueSsh) sendStreamMessage(sequenceNumber int, streamType smsg.Stream
 	s.streamOutputChan <- smsg.StreamMessage{
 		SchemaVersion:  s.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		Action:         string(ssh.OpaqueSsh),
+		Action:         string(bzssh.OpaqueSsh),
 		Type:           streamType,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(contentBytes),
