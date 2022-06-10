@@ -75,18 +75,14 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		if err := json.Unmarshal(actionPayload, &openRequest); err != nil {
 			return nil, fmt.Errorf("malformed transparent ssh action payload %s", string(actionPayload))
 		}
-
-		// do I need to send a ready message?
 		return t.start(openRequest, action)
+
 	case bzssh.SshInput:
 		// Deserialize the action payload, the only action passed is input
 		var inputRequest bzssh.SshInputMessage
 		if err := json.Unmarshal(actionPayload, &inputRequest); err != nil {
 			return nil, fmt.Errorf("unable to unmarshal transparent ssh input message: %s", err)
 		}
-
-		t.logger.Infof("the data is %s", inputRequest.Data)
-
 		t.stdInChan <- inputRequest.Data
 
 	case bzssh.SshExec:
@@ -97,15 +93,16 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		}
 
 		if !bzssh.IsValidScp(execRequest.Command) {
-			return nil, fmt.Errorf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", execRequest.Command)
+			// TODO: tell daemon to tell ZLI about this...
+			errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
+			t.sendStreamMessage(0, smsg.Error, false, []byte(errMsg))
+			return nil, fmt.Errorf(errMsg)
 		}
 
-		if err := t.exec(execRequest.Command); err != nil {
-			return nil, fmt.Errorf("failed to execute command %s: %s", execRequest.Command, err)
-		}
+		// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
+		t.exec(execRequest.Command)
 
 	case bzssh.SshClose:
-		// FIXME: implement this better? I guess kill is all that's really needed...
 		// Deserialize the action payload
 		var closeRequest bzssh.SshCloseMessage
 		if jerr := json.Unmarshal(actionPayload, &closeRequest); jerr != nil {
@@ -113,10 +110,10 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 			t.logger.Errorf("unable to unmarshal transparent ssh close message: %s", jerr)
 		}
 
-		t.logger.Infof("Ending TCP connection because we received this close message from daemon: %s", closeRequest.Reason)
+		t.logger.Infof("Ending SSH session because we received this close message from daemon: %s", closeRequest.Reason)
 		t.Kill()
-
 		return actionPayload, nil
+
 	default:
 		return nil, fmt.Errorf("unhandled stream action: %s", action)
 	}
@@ -183,8 +180,13 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 			t.logger.Debugf("Writing %d bytes to stdin", len(d))
 			_, err := stdin.Write(d)
 			if err != nil {
-				// FIXME: probably kill here
-				t.logger.Errorf("stdin write err")
+				if err == io.EOF {
+					t.logger.Infof("Finished writing to stdin")
+					return
+				}
+				t.logger.Errorf("error writing to stdin: %s", err)
+				t.Kill()
+				return
 			}
 		}
 	}()
@@ -200,12 +202,15 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 					return
 				} else if err != nil {
 					if err == io.EOF {
-						t.logger.Debugf("Finished reading: %v", b[:n])
+						t.logger.Infof("Finished reading from stdout")
 						t.sendStreamMessage(0, smsg.StdOut, false, b[:n])
 						return
 					}
+					t.logger.Errorf("error reading from stdout: %s", err)
+					t.Kill()
+					return
 				} else if n > 0 {
-					t.logger.Debugf("Read %d bytes from local SSH stdout: %v", n, b[:n])
+					t.logger.Debugf("Read %d bytes from local SSH stdout", n)
 					t.sendStreamMessage(0, smsg.StdOut, true, b[:n])
 				}
 			}
@@ -224,6 +229,10 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 				} else if err != nil && n > 0 {
 					t.logger.Debugf("Read %d bytes from local SSH stderr", n)
 					t.sendStreamMessage(0, smsg.StdErr, true, b[:n])
+				} else if err != nil && err != io.EOF {
+					t.logger.Errorf("error reading from stderr: %s", err)
+					t.Kill()
+					return
 				}
 			}
 		}
@@ -232,7 +241,7 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 	return []byte{}, nil
 }
 
-func (t *TransparentSsh) exec(command string) error {
+func (t *TransparentSsh) exec(command string) {
 	t.session.Start(command)
 	go func() {
 		err := t.session.Wait()
@@ -240,12 +249,12 @@ func (t *TransparentSsh) exec(command string) error {
 		// this seems like too brittle a way to check for this message but I'm not sure how else we would
 		if err != nil && err.Error() != "wait: remote command exited without exit status or exit signal" {
 			t.logger.Errorf("command exited with nonzero exit status: %s", err)
+
+		} else {
+			t.logger.Debugf("finished execution")
 		}
-		t.session.Close()
+		t.Kill()
 	}()
-	// FIXME: reviist how this gets returned
-	//t.sendStreamMessage(0, smsg.StdOut, false, []byte{})
-	return nil
 }
 
 func (t *TransparentSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {

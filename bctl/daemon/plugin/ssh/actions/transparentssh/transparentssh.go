@@ -38,7 +38,7 @@ type TransparentSsh struct {
 	identityFile string
 
 	filIo bzio.BzFileIo
-	stdIo io.ReadWriter
+	stdIo bzio.BzIo
 
 	sshChannel io.ReadWriteCloser
 }
@@ -49,7 +49,7 @@ func New(
 	doneChan chan struct{},
 	identityFile string,
 	filIo bzio.BzFileIo,
-	stdIo io.ReadWriter,
+	stdIo bzio.BzIo,
 ) *TransparentSsh {
 
 	return &TransparentSsh{
@@ -67,6 +67,7 @@ func (t *TransparentSsh) Done() <-chan struct{} {
 }
 
 func (t *TransparentSsh) Kill() {
+	t.sshChannel.Close()
 	t.tmb.Kill(nil)
 }
 
@@ -140,6 +141,7 @@ func (t *TransparentSsh) Start() error {
 		go gossh.DiscardRequests(reqs)
 
 		go func() {
+			t.stdIo.Write([]byte("And even more"))
 			for newChannel := range chans {
 				// Channels have a type, depending on the application level
 				// protocol intended. In the case of a shell, the type is
@@ -165,13 +167,11 @@ func (t *TransparentSsh) Start() error {
 						// handles scp and other exec
 						case "exec":
 							command := string(req.Payload[4 : req.Payload[3]+4])
-							// TODO: read the command; if invalid, tell the ZLI that
 							t.logger.Infof("Lucie, the command is %s", command)
 							if !bzssh.IsValidScp(command) {
-								errMsg := fmt.Sprintf("invalid command: this user is only allowed to perform file upload / download via scp, but recieved %s", command)
+								errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command))
 								t.logger.Errorf(errMsg)
-								//t.stdIo.Write([]byte(errMsg))
-								channel.Close()
+								t.stdIo.Write([]byte(errMsg))
 								t.Kill()
 								return
 							}
@@ -186,13 +186,16 @@ func (t *TransparentSsh) Start() error {
 							t.sendOutputMessage(bzssh.SshExec, sshExecMessage)
 
 						case "shell":
-							// TODO: make sure we properly reject this for now
+							errMsg := bzssh.UnauthorizedCommandError("shell request")
+							t.logger.Errorf(errMsg)
+							t.stdIo.WriteErr([]byte(errMsg))
+							t.Kill()
 
 						case "pty-req":
-							// TODO: make sure we properly reject this for now
-
-						case "window-change":
-							// TODO: make sure we properly reject this for now
+							errMsg := bzssh.UnauthorizedCommandError("PTY request")
+							t.logger.Errorf(errMsg)
+							t.stdIo.WriteErr([]byte(errMsg))
+							t.Kill()
 						}
 
 						if !ok {
@@ -217,19 +220,18 @@ func (t *TransparentSsh) readFromChannel() {
 	for {
 		select {
 		case <-t.tmb.Dying():
-			t.sshChannel.Close()
 			return
 		default:
 			n, err := t.sshChannel.Read(b)
 			if err != nil {
 				if err == io.EOF {
-					t.sshChannel.Close()
 					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
 					t.logger.Errorf("finished reading from stdin")
+					t.Kill()
 					return
 				} else {
-					t.sshChannel.Close()
 					t.logger.Errorf("error reading from Stdin: %s", err)
+					t.Kill()
 					return
 				}
 			} else if n > 0 {
@@ -255,13 +257,19 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 				t.logger.Errorf("Error writing to Stdout: %s", err)
 			}
 			if !smessage.More {
-				t.tmb.Kill(fmt.Errorf("received ssh close stream message"))
-				t.sshChannel.Close()
+				t.logger.Errorf("received ssh close stream message")
+				t.Kill()
 			}
 		}
 	case smsg.Error:
-		t.tmb.Kill(fmt.Errorf("received an error from the agent"))
-		t.sshChannel.Close()
+		// let the ZLI know if the agent encountered a policy error
+		t.logger.Errorf("received an error from the agent")
+		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
+			t.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
+		} else {
+			t.stdIo.WriteErr([]byte(contentBytes))
+		}
+		t.Kill()
 		return
 	default:
 		t.logger.Errorf("unhandled stream type: %s", smessage.Type)

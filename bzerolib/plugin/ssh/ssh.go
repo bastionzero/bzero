@@ -1,6 +1,8 @@
 package ssh
 
 import (
+	"fmt"
+
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -47,4 +49,8 @@ const (
 
 func IsValidScp(command string) bool {
 	return string([]rune(command)[:4]) == scpWithSpace
+}
+
+func UnauthorizedCommandError(received string) string {
+	return fmt.Sprintf("unauthorized command: this user is only allowed to perform file transfer via scp, but recieved %s", received)
 }

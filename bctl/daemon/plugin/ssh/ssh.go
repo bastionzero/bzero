@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"fmt"
-	"io"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/opaquessh"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/transparentssh"
@@ -28,10 +27,10 @@ type SshDaemonPlugin struct {
 	action       ISshAction
 	identityFile string
 	filIo        bzio.BzFileIo
-	stdIo        io.ReadWriter
+	stdIo        bzio.BzIo
 }
 
-func New(logger *logger.Logger, identityFile string, filIo bzio.BzFileIo, stdIo io.ReadWriter) *SshDaemonPlugin {
+func New(logger *logger.Logger, identityFile string, filIo bzio.BzFileIo, stdIo bzio.StdIo) *SshDaemonPlugin {
 	return &SshDaemonPlugin{
 		logger:       logger,
 		outboxQueue:  make(chan bzplugin.ActionWrapper, 10),
@@ -59,7 +58,7 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 
 	// Start the ssh action
 	if err := s.action.Start(); err != nil {
-		return fmt.Errorf("error starting the default ssh action: %s", err)
+		return fmt.Errorf("error starting the ssh action: %s", err)
 	} else {
 		return nil
 	}
