@@ -1,3 +1,2 @@
 /etc/init/$BZERO_PKG_NAME.conf
 /lib/systemd/system/$BZERO_PKG_NAME.service
-/etc/bzero/vault.json
