@@ -128,20 +128,4 @@ var _ = Describe("Agent Authorized Keys", Ordered, func() {
 			Expect(strings.Contains(string(fileBytes), testString)).To(BeTrue())
 		})
 	})
-
-	// Context("Testing transition functionality", func() {
-	// 	It("it allows you to add to an existing authorized keys file created by ssm-agent", func() {
-	// 		doneChan := make(chan struct{})
-	// 		err := os.MkdirAll(path.Join(testUser.HomeDir, authorizedKeyFolder), 0700)
-	// 		Expect(err).To(BeNil())
-
-	// 		_, err = os.OpenFile(authorizedKeysFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0700)
-	// 		Expect(err).To(BeNil())
-
-	// 		authKeyService, err := New(logger, doneChan, testUser, authorizedKeyFolder, authorizedKeyFolder, 30*time.Second)
-	// 		Expect(err).To(BeNil())
-	// 		err = authKeyService.Add(fakePubKey)
-	// 		Expect(err).To(BeNil())
-	// 	})
-	// })
 })
