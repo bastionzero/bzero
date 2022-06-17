@@ -193,6 +193,7 @@ func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action str
 		// otherwise we use the hash of the previous value to maintain the hash chain and immutability
 		nonce := util.Nonce()
 		if k.lastDataMessage != nil {
+			// TODO-Yuval: Bug. Change to Hash()
 			if hpointer, err := k.lastDataMessage.GetHpointer(); err != nil {
 				return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to get hpointer of last ack: %s", err)
 			} else {

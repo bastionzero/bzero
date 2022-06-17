@@ -218,15 +218,16 @@ var _ = Describe("Agent keysplitting", func() {
 				var validateError error
 
 				AssertFailedBehavior := func() {
-					It("SynAck nonce should not refer to invalid Data message", func() {
-						By("Building SynAck without error")
+					It("RSynAck nonce should not refer to invalid Data message", func() {
+						By("Building RSynAck without error")
 						synAck, err := sut.BuildAck(synMsg, testAction, []byte{})
 						Expect(err).ShouldNot(HaveOccurred())
 
+						// TODO-Yuval: Bug. Change to Hash()
 						invalidDataMsgHPointer, err := msgUnderTest.GetHpointer()
 						Expect(err).ShouldNot(HaveOccurred())
 
-						Expect(synAck.KeysplittingPayload.(ksmsg.SynAckPayload).Nonce).ShouldNot(Equal(invalidDataMsgHPointer), "because if the Data message failed to validate, the SynAck should not build off an invalid Data message")
+						Expect(synAck.KeysplittingPayload.(ksmsg.SynAckPayload).Nonce).ShouldNot(Equal(invalidDataMsgHPointer), "because if the Data message failed to validate, the RSynAck's nonce should not refer to an invalid Data message")
 					})
 				}
 
