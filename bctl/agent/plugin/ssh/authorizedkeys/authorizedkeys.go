@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/filelock"
@@ -129,6 +131,21 @@ func (a *AuthorizedKeys) addKeyToFile(contents string) error {
 	defer lock.Unlock()
 
 	file, err := a.usr.OpenFile(a.keyFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, authorizedKeysFilePermission)
+
+	// for backwards compatability with the bzero-ssm-agent where we allowed the authorized keys file to be created as root
+	// we do additional checks if we get a permissions error which checks if the user has create permissions in their home
+	// directory and the authorized keys file was created by root
+	var permissionError unixuser.PermissionDeniedError
+	if errors.As(err, &permissionError) {
+		if ok, rerr := a.usr.CanCreate(a.usr.HomeDir); rerr != nil || !ok {
+			return err
+		} else if info, rerr := os.Stat(a.keyFilePath); rerr != nil || info.Sys() == nil {
+			return err
+		} else if info.Sys().(*syscall.Stat_t).Uid != 0 { // if the authorized keys owner is root
+			return err
+		}
+		file, err = os.OpenFile(a.keyFilePath, os.O_APPEND|os.O_WRONLY, authorizedKeysFilePermission)
+	}
 	if err != nil {
 		return err
 	}
