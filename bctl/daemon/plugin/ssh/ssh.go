@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"fmt"
+	"net"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/opaquessh"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/transparentssh"
@@ -53,7 +54,12 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 	case string(bzssh.OpaqueSsh):
 		s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
 	case string(bzssh.TransparentSsh):
-		s.action = transparentssh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
+		// action is responsible for closing this
+		listener, err := net.Listen("tcp", ":2222")
+		if err != nil {
+			s.logger.Errorf("failed to listen for connection: ", err)
+		}
+		s.action = transparentssh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo, listener)
 	}
 
 	// Start the ssh action

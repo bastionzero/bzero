@@ -17,10 +17,6 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
-var (
-	DEFAULT_SHELL string = "sh"
-)
-
 const (
 	InputBufferSize = int(64 * 1024)
 	endedByUser     = "SSH session ended"
@@ -40,7 +36,9 @@ type TransparentSsh struct {
 	filIo bzio.BzFileIo
 	stdIo bzio.BzIo
 
-	sshChannel io.ReadWriteCloser
+	// used to communicate directly with the SSH process
+	sshListener net.Listener
+	sshChannel  io.ReadWriteCloser
 }
 
 func New(
@@ -50,6 +48,7 @@ func New(
 	identityFile string,
 	filIo bzio.BzFileIo,
 	stdIo bzio.BzIo,
+	listener net.Listener,
 ) *TransparentSsh {
 
 	return &TransparentSsh{
@@ -59,6 +58,7 @@ func New(
 		identityFile: identityFile,
 		filIo:        filIo,
 		stdIo:        stdIo,
+		sshListener:  listener,
 	}
 }
 
@@ -106,13 +106,9 @@ func (t *TransparentSsh) Start() error {
 	// An SSH server is represented by a ServerConfig, which holds
 	// certificate details and handles authentication of ServerConns.
 	config := &gossh.ServerConfig{
+		NoClientAuth: true, // TODO: is this okay? Shows in the logs as "authentication (none)", which we know is fine but may look alarming
 		PublicKeyCallback: func(c gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
-			return &gossh.Permissions{
-				// Record the public key used for authentication.
-				Extensions: map[string]string{
-					"pubkey-fp": gossh.FingerprintSHA256(pubKey),
-				},
-			}, nil
+			return &gossh.Permissions{}, nil
 		},
 	}
 
@@ -120,17 +116,12 @@ func (t *TransparentSsh) Start() error {
 	private, _ := gossh.ParsePrivateKey(newPrivate)
 	config.AddHostKey(private)
 	go func() {
+		defer t.sshListener.Close()
+
 		// Once a ServerConfig has been configured, tell ZLI we can accept connections
-		// TODO: should be passed a listener
-		listener, err := net.Listen("tcp", ":2222")
-		if err != nil {
-			t.logger.Errorf("failed to listen for connection: ", err)
-		}
 		t.stdIo.Write([]byte(readyMsg))
 
-		defer listener.Close()
-
-		nConn, _ := listener.Accept()
+		nConn, _ := t.sshListener.Accept()
 		// Before use, a handshake must be performed on the incoming net.Conn.
 		_, chans, reqs, err := gossh.NewServerConn(nConn, config)
 
@@ -161,13 +152,11 @@ func (t *TransparentSsh) Start() error {
 				// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 				go func(in <-chan *gossh.Request) {
 					for req := range in {
-						t.logger.Errorf("What I am is %s and what I have is %s", req.Type, req.Payload)
 						ok := false
 						switch req.Type {
 						// handles scp and other exec
 						case "exec":
 							command := string(req.Payload[4 : req.Payload[3]+4])
-							t.logger.Infof("Lucie, the command is %s", command)
 							if !bzssh.IsValidScp(command) {
 								errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command))
 								t.logger.Errorf(errMsg)
@@ -227,11 +216,10 @@ func (t *TransparentSsh) readFromChannel() {
 				if err == io.EOF {
 					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
 					t.logger.Errorf("finished reading from stdin")
-					t.Kill()
 					return
 				} else {
+					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: err.Error()})
 					t.logger.Errorf("error reading from Stdin: %s", err)
-					t.Kill()
 					return
 				}
 			} else if n > 0 {
@@ -265,12 +253,15 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		// let the ZLI know if the agent encountered a policy error
 		t.logger.Errorf("received an error from the agent")
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
-			t.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
+			t.logger.Errorf("error decoding ssh StdOut stream content: %s", err)
 		} else {
 			t.stdIo.WriteErr([]byte(contentBytes))
 		}
 		t.Kill()
 		return
+	case smsg.Stop:
+		t.logger.Infof("received stop message from agent. Shutting down...")
+		t.Kill()
 	default:
 		t.logger.Errorf("unhandled stream type: %s", smessage.Type)
 	}

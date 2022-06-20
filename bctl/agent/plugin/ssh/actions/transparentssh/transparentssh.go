@@ -38,7 +38,7 @@ type TransparentSsh struct {
 
 	stdInChan     chan []byte
 	targetUser    string
-	remoteADdress string
+	remoteAddress string
 }
 
 func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, authKeys authorizedkeys.IAuthorizedKeys, targetUser string, remoteAddress string) *TransparentSsh {
@@ -50,7 +50,7 @@ func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessa
 		authorizedKeys:   authKeys,
 		targetUser:       targetUser,
 		stdInChan:        make(chan []byte, 10),
-		remoteADdress:    remoteAddress,
+		remoteAddress:    remoteAddress,
 	}
 }
 
@@ -62,7 +62,6 @@ func (t *TransparentSsh) Kill() {
 	if t.conn != nil {
 		t.conn.Close()
 	}
-	t.tmb.Wait()
 }
 
 func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
@@ -93,16 +92,14 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		}
 
 		if !bzssh.IsValidScp(execRequest.Command) {
-			// TODO: tell daemon to tell ZLI about this...
 			errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
-			t.sendStreamMessage(0, smsg.Error, false, []byte(errMsg))
+			t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
 			return nil, fmt.Errorf(errMsg)
 		}
 
 		// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
 		t.exec(execRequest.Command)
 
-		// FIXME: doesn't seem like we're receiving this
 	case bzssh.SshClose:
 		// Deserialize the action payload
 		var closeRequest bzssh.SshCloseMessage
@@ -112,6 +109,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 		}
 
 		t.logger.Infof("Ending SSH session because we received this close message from daemon: %s", closeRequest.Reason)
+		t.sendStreamMessage(smsg.Stop, false, []byte{})
 		t.Kill()
 		return actionPayload, nil
 
@@ -147,7 +145,7 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 		},
 	}
 
-	t.conn, err = gossh.Dial("tcp", t.remoteADdress, conf)
+	t.conn, err = gossh.Dial("tcp", t.remoteAddress, conf)
 	if err != nil {
 		return nil, fmt.Errorf("dial error: %s", err)
 	}
@@ -186,7 +184,6 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 					return
 				}
 				t.logger.Errorf("error writing to stdin: %s", err)
-				t.Kill()
 				return
 			}
 		}
@@ -204,15 +201,14 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 				} else if err != nil {
 					if err == io.EOF {
 						t.logger.Infof("Finished reading from stdout")
-						t.sendStreamMessage(0, smsg.StdOut, false, b[:n])
+						t.sendStreamMessage(smsg.StdOut, false, b[:n])
 						return
 					}
 					t.logger.Errorf("error reading from stdout: %s", err)
-					t.Kill()
 					return
 				} else if n > 0 {
 					t.logger.Debugf("Read %d bytes from local SSH stdout", n)
-					t.sendStreamMessage(0, smsg.StdOut, true, b[:n])
+					t.sendStreamMessage(smsg.StdOut, true, b[:n])
 				}
 			}
 		}
@@ -229,10 +225,9 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 					return
 				} else if err != nil && n > 0 {
 					t.logger.Debugf("Read %d bytes from local SSH stderr", n)
-					t.sendStreamMessage(0, smsg.StdErr, true, b[:n])
+					t.sendStreamMessage(smsg.StdErr, true, b[:n])
 				} else if err != nil && err != io.EOF {
 					t.logger.Errorf("error reading from stderr: %s", err)
-					t.Kill()
 					return
 				}
 			}
@@ -246,24 +241,23 @@ func (t *TransparentSsh) exec(command string) {
 	t.session.Start(command)
 	go func() {
 		err := t.session.Wait()
-		// TODO: scp seems to end silently without a status, which is fine for us but bothers Wait
-		// this seems like too brittle a way to check for this message but I'm not sure how else we would
-		if err != nil && err.Error() != "wait: remote command exited without exit status or exit signal" {
-			t.logger.Errorf("command exited with nonzero exit status: %s", err)
-
+		if err != nil {
+			// Start returns this error if the server does not return an exit code, which appears to be the case for scp
+			if _, ok := err.(*gossh.ExitMissingError); !ok {
+				t.logger.Errorf("command exited with nonzero exit status: %s", err)
+			}
 		} else {
 			t.logger.Debugf("finished execution")
 		}
 	}()
 }
 
-func (t *TransparentSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
+func (t *TransparentSsh) sendStreamMessage(streamType smsg.StreamType, more bool, contentBytes []byte) {
 	t.streamOutputChan <- smsg.StreamMessage{
-		SchemaVersion:  t.streamMessageVersion,
-		SequenceNumber: sequenceNumber,
-		Action:         string(bzssh.TransparentSsh),
-		Type:           streamType,
-		More:           more,
-		Content:        base64.StdEncoding.EncodeToString(contentBytes),
+		SchemaVersion: t.streamMessageVersion,
+		Action:        string(bzssh.TransparentSsh),
+		Type:          streamType,
+		More:          more,
+		Content:       base64.StdEncoding.EncodeToString(contentBytes),
 	}
 }
