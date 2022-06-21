@@ -132,7 +132,6 @@ func (t *TransparentSsh) Start() error {
 		go gossh.DiscardRequests(reqs)
 
 		go func() {
-			t.stdIo.Write([]byte("And even more"))
 			for newChannel := range chans {
 				// Channels have a type, depending on the application level
 				// protocol intended. In the case of a shell, the type is
