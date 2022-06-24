@@ -62,6 +62,10 @@ func New(logger *logger.Logger,
 }
 
 func (d *Dial) Kill() {
+	if !d.tmb.Alive() {
+		return
+	}
+
 	d.tmb.Kill(nil)
 	if d.remoteConnection != nil {
 		(*d.remoteConnection).Close()
