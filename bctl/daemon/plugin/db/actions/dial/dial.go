@@ -25,7 +25,6 @@ type DialAction struct {
 	logger    *logger.Logger
 	tmb       tomb.Tomb
 	requestId string
-	started   bool
 
 	// input and output channels relative to this plugin
 	outputChan      chan plugin.ActionWrapper
@@ -55,6 +54,13 @@ func New(
 }
 
 func (d *DialAction) Start(lconn *net.TCPConn) error {
+	// Build and send the action payload to start the tcp connection on the agent
+	payload := dial.DialActionPayload{
+		RequestId:            d.requestId,
+		StreamMessageVersion: smsg.CurrentSchema,
+	}
+	d.sendOutputMessage(dial.DialStart, payload)
+
 	// Listen to stream messages coming from the agent, and forward to our local connection
 	d.tmb.Go(func() error {
 		defer lconn.Close()
@@ -85,16 +91,6 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 
 					return nil
 				} else {
-					if !d.started {
-						// Build and send the action payload to start the tcp connection on the agent
-						payload := dial.DialActionPayload{
-							RequestId:            d.requestId,
-							StreamMessageVersion: smsg.CurrentSchema,
-						}
-						d.sendOutputMessage(dial.DialStart, payload)
-						d.started = true
-					}
-
 					// Build and send whatever we get from the local tcp connection to the agent
 					dataToSend := base64.StdEncoding.EncodeToString(buf[:n])
 					payload := dial.DialInputActionPayload{
