@@ -76,8 +76,6 @@ func (d *Dial) Kill() {
 func (d *Dial) Receive(action string, actionPayload []byte) ([]byte, error) {
 	var err error
 
-	// Update the logger action
-	d.logger = d.logger.GetActionLogger(action)
 	switch dial.DialSubAction(action) {
 	case dial.DialStart:
 		var dialActionRequest dial.DialActionPayload
