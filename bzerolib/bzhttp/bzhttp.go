@@ -320,7 +320,7 @@ func getHttpClient() *http.Client {
 func defaultBackoffParams() *backoff.ExponentialBackOff {
 	// Define our exponential backoff params
 	backoffParams := backoff.NewExponentialBackOff()
-	backoffParams.MaxElapsedTime = 0 // never stop never stopping
-	backoffParams.MaxInterval = time.Hour
+	backoffParams.MaxElapsedTime = 72 * time.Hour
+	backoffParams.MaxInterval = 15 * time.Minute
 	return backoffParams
 }
