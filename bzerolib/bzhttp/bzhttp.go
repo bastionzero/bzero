@@ -155,7 +155,7 @@ func (b *bzhttp) patch() (*http.Response, error) {
 
 		if response, err := httpClient.Do(req); err != nil {
 			b.logger.Errorf("error making PATCH request: %s", err)
-			return nil, err
+			continue
 		} else if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
 			return response, err
@@ -205,7 +205,7 @@ func (b *bzhttp) post() (*http.Response, error) {
 
 		if err != nil {
 			b.logger.Errorf("error making POST request: %s", err)
-			return nil, err
+			continue
 		} else if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
 			return response, err
@@ -255,7 +255,7 @@ func (b *bzhttp) get() (*http.Response, error) {
 
 		if err != nil {
 			b.logger.Errorf("error making GET request: %s", err)
-			return nil, err
+			continue
 		} else if err := checkBadStatusCode(response); err != nil {
 			ticker.Stop()
 			return response, err
