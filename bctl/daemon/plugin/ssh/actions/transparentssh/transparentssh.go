@@ -159,7 +159,7 @@ func (t *TransparentSsh) Start() error {
 							if !bzssh.IsValidScp(command) {
 								errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command))
 								t.logger.Errorf(errMsg)
-								t.stdIo.Write([]byte(errMsg))
+								t.stdIo.WriteErr([]byte(errMsg))
 								t.Kill()
 								return
 							}
