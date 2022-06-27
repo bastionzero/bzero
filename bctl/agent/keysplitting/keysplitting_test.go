@@ -100,6 +100,14 @@ var _ = Describe("Agent keysplitting", func() {
 		Expect(err).ShouldNot(HaveOccurred())
 	}
 
+	BuildSynAndValidate := func() *ksmsg.KeysplittingMessage {
+		synMsg := BuildSyn()
+		SignDaemonMsg(synMsg)
+		mockBzCertVerifier.On("Verify", synMsg.KeysplittingPayload.(ksmsg.SynPayload).BZCert).Return(bzCertHash, bzCertExpirationTime, nil)
+		ValidateDaemonMsg(synMsg)
+		return synMsg
+	}
+
 	// Setup SUT that is used by all tests
 	BeforeEach(func() {
 		// Setup keypairs to use for agent and daemon
@@ -114,7 +122,7 @@ var _ = Describe("Agent keysplitting", func() {
 		// Set BZCert expiration time to the future
 		bzCertExpirationTime = time.Now().Add(1 * time.Hour)
 
-		// Set schema version to use when building daemon+agent messages
+		// Set schema version to use when building daemon messages
 		daemonSchemaVersion = ksmsg.SchemaVersion
 
 		// Setup mocks here
@@ -130,6 +138,168 @@ var _ = Describe("Agent keysplitting", func() {
 	AfterEach(func() {
 		mockAgentKeysplittingConfig.AssertExpectations(GinkgoT())
 		mockBzCertVerifier.AssertExpectations(GinkgoT())
+	})
+
+	Describe("build agent acks", func() {
+		Describe("the happy path", func() {
+			var agentSchemaVersion string
+			var expectedSchemaVersion string
+
+			CommonAssertBehavior := func() {
+				var daemonMsg *ksmsg.KeysplittingMessage
+
+				Context("when the daemon message is a Syn", func() {
+					var validatedDataMessage *ksmsg.KeysplittingMessage
+
+					BeforeEach(func() {
+						// Must re-init, so parallel specs don't leak into each
+						// other
+						validatedDataMessage = nil
+					})
+
+					AssertBehavior := func() {
+						It("SynAck is built correctly", func() {
+							payload := []byte{}
+							synAck, err := sut.BuildAck(daemonMsg, testAction, payload)
+							Expect(err).ShouldNot(HaveOccurred())
+
+							By("Asserting the keysplitting message is correct")
+							Expect(synAck.Type).To(Equal(ksmsg.SynAck))
+							Expect(synAck.Signature).NotTo(BeEmpty())
+							synAckPayload, ok := synAck.KeysplittingPayload.(ksmsg.SynAckPayload)
+							Expect(ok).To(BeTrue())
+
+							By("Asserting the keysplitting message payload details are correct")
+							Expect(synAckPayload.SchemaVersion).To(Equal(expectedSchemaVersion))
+							Expect(synAckPayload.Type).To(BeEquivalentTo(ksmsg.SynAck))
+							Expect(synAckPayload.Action).To(Equal(testAction))
+							Expect(synAckPayload.ActionResponsePayload).To(Equal(payload))
+							Expect(synAckPayload.Timestamp).NotTo(BeEmpty())
+							Expect(synAckPayload.TargetPublicKey).To(Equal(agentKeypair.Base64EncodedPublicKey))
+							if validatedDataMessage == nil {
+								Expect(synAckPayload.Nonce).NotTo(BeEmpty())
+							} else {
+								// The RSynAck's nonce is defined to equal the
+								// hash of the last validated Data messaage in
+								// order to preserve the hash chain.
+								Expect(synAckPayload.Nonce).Should(Equal(validatedDataMessage.Hash()), "because the hash chain should be maintained when data has already been validated")
+							}
+							Expect(synAckPayload.HPointer).Should(Equal(daemonMsg.Hash()), fmt.Sprintf("The HPointer should point to the daemon message that was validated: %#v", daemonMsg))
+
+							By("Asserting the message signature validates")
+							Expect(synAck.VerifySignature(agentKeypair.Base64EncodedPublicKey)).ShouldNot(HaveOccurred())
+						})
+					}
+
+					Context("when no data messages have been validated", func() {
+						BeforeEach(func() {
+							daemonMsg = BuildSynAndValidate()
+						})
+
+						AssertBehavior()
+					})
+
+					Context("when one data message has been validated", func() {
+						BeforeEach(func() {
+							validatedSynMessage := BuildSynAndValidate()
+
+							// Build Data message and validate
+							By("Building SynAck without error")
+							var err error
+							synAck, err := sut.BuildAck(validatedSynMessage, testAction, []byte{})
+							Expect(err).ShouldNot(HaveOccurred())
+							By("Building Data message without error")
+							dataMsg := BuildData(&synAck)
+							SignDaemonMsg(dataMsg)
+							By("Validating Data message without error")
+							err = sut.Validate(dataMsg)
+							Expect(err).ShouldNot(HaveOccurred())
+
+							daemonMsg = BuildSynAndValidate()
+							validatedDataMessage = dataMsg
+						})
+
+						AssertBehavior()
+					})
+				})
+
+				Context("when the daemon message is a Data", func() {
+					BeforeEach(func() {
+						// We must validate a Syn message before we can build an
+						// ack for Data, otherwise daemonSchemaVersion will be
+						// nil
+						validatedSyn := BuildSynAndValidate()
+
+						// We need some Ack (SynAck in this case) in order to
+						// build Data
+						synAck, err := sut.BuildAck(validatedSyn, testAction, []byte{})
+						Expect(err).ShouldNot(HaveOccurred())
+
+						daemonMsg = BuildData(&synAck)
+					})
+
+					It("DataAck is built correctly", func() {
+						payload := []byte{}
+						dataAck, err := sut.BuildAck(daemonMsg, testAction, payload)
+						Expect(err).ShouldNot(HaveOccurred())
+
+						By("Asserting the keysplitting message is correct")
+						Expect(dataAck.Type).To(Equal(ksmsg.DataAck))
+						Expect(dataAck.Signature).NotTo(BeEmpty())
+						dataAckPayload, ok := dataAck.KeysplittingPayload.(ksmsg.DataAckPayload)
+						Expect(ok).To(BeTrue())
+
+						By("Asserting the keysplitting message payload details are correct")
+						Expect(dataAckPayload.SchemaVersion).To(Equal(expectedSchemaVersion))
+						Expect(dataAckPayload.Type).To(BeEquivalentTo(ksmsg.DataAck))
+						Expect(dataAckPayload.Action).To(Equal(testAction))
+						Expect(dataAckPayload.Timestamp).To(Equal(""))
+						Expect(dataAckPayload.TargetPublicKey).To(Equal(agentKeypair.Base64EncodedPublicKey))
+						Expect(dataAckPayload.HPointer).Should(Equal(daemonMsg.Hash()), fmt.Sprintf("The HPointer should point to the daemon message that was validated: %#v", daemonMsg))
+						Expect(dataAckPayload.ActionResponsePayload).To(Equal(payload))
+
+						By("Asserting the message signature validates")
+						Expect(dataAck.VerifySignature(agentKeypair.Base64EncodedPublicKey)).ShouldNot(HaveOccurred())
+					})
+				})
+			}
+
+			Context("when daemon schema version is less than agent schema version", func() {
+				BeforeEach(func() {
+					daemonSchemaVersion = "1.0.0"
+					agentSchemaVersion = "2.0.0"
+
+					expectedSchemaVersion = daemonSchemaVersion
+
+					// Init the SUT with the agent schema version
+					var err error
+					sut, err = agentKs.New(agentKs.KeysplittingParameters{Config: mockAgentKeysplittingConfig, Verifier: mockBzCertVerifier, SchemaVersion: agentSchemaVersion})
+					Expect(err).ShouldNot(HaveOccurred())
+				})
+
+				CommonAssertBehavior()
+			})
+
+			Context("when daemon schema version is not less than agent schema version", func() {
+				BeforeEach(func() {
+					daemonSchemaVersion = "2.1.0"
+					agentSchemaVersion = "2.0.0"
+
+					expectedSchemaVersion = agentSchemaVersion
+
+					// Init the SUT with the agent schema version
+					var err error
+					sut, err = agentKs.New(agentKs.KeysplittingParameters{Config: mockAgentKeysplittingConfig, Verifier: mockBzCertVerifier, SchemaVersion: agentSchemaVersion})
+					Expect(err).ShouldNot(HaveOccurred())
+				})
+
+				CommonAssertBehavior()
+			})
+		})
+
+		// Describe("the failure path", func() {
+
+		// })
 	})
 
 	Describe("validate daemon messages", func() {
@@ -223,11 +393,9 @@ var _ = Describe("Agent keysplitting", func() {
 						synAck, err := sut.BuildAck(synMsg, testAction, []byte{})
 						Expect(err).ShouldNot(HaveOccurred())
 
-						// TODO-Yuval: Bug. Change to Hash()
-						invalidDataMsgHPointer, err := msgUnderTest.GetHpointer()
-						Expect(err).ShouldNot(HaveOccurred())
+						invalidDataMsgHash := msgUnderTest.Hash()
 
-						Expect(synAck.KeysplittingPayload.(ksmsg.SynAckPayload).Nonce).ShouldNot(Equal(invalidDataMsgHPointer), "because if the Data message failed to validate, the RSynAck's nonce should not refer to an invalid Data message")
+						Expect(synAck.KeysplittingPayload.(ksmsg.SynAckPayload).Nonce).ShouldNot(Equal(invalidDataMsgHash), "because if the Data message failed to validate, the RSynAck's nonce should not refer to an invalid Data message")
 					})
 				}
 
