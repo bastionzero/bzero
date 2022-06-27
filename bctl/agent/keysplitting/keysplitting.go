@@ -182,10 +182,7 @@ func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action str
 	var responseMessage ksmsg.KeysplittingMessage
 	var err error
 
-	schemaVersion, err := k.getSchemaVersionToUse()
-	if err != nil {
-		return responseMessage, err
-	}
+	schemaVersion := k.getSchemaVersionToUse()
 
 	switch ksMessage.Type {
 	case ksmsg.Syn:
@@ -221,10 +218,10 @@ func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action str
 	}
 }
 
-func (k *Keysplitting) getSchemaVersionToUse() (*semver.Version, error) {
+func (k *Keysplitting) getSchemaVersionToUse() *semver.Version {
 	if k.daemonSchemaVersion.LessThan(k.agentSchemaVersion) {
-		return k.daemonSchemaVersion, nil
+		return k.daemonSchemaVersion
 	} else {
-		return k.agentSchemaVersion, nil
+		return k.agentSchemaVersion
 	}
 }
