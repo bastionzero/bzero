@@ -67,7 +67,9 @@ func (t *TransparentSsh) Done() <-chan struct{} {
 }
 
 func (t *TransparentSsh) Kill() {
-	t.sshChannel.Close()
+	if t.sshChannel != nil {
+		t.sshChannel.Close()
+	}
 	t.tmb.Kill(nil)
 }
 
@@ -153,7 +155,7 @@ func (t *TransparentSsh) Start() error {
 					for req := range in {
 						ok := false
 						switch req.Type {
-						// handles scp and other exec
+						// handle scp (and someday, other exec)
 						case "exec":
 							command := string(req.Payload[4 : req.Payload[3]+4])
 							if !bzssh.IsValidScp(command) {
@@ -165,11 +167,31 @@ func (t *TransparentSsh) Start() error {
 							}
 
 							ok = true
-
 							go t.readFromChannel()
 
 							sshExecMessage := bzssh.SshExecMessage{
 								Command: command,
+							}
+							t.sendOutputMessage(bzssh.SshExec, sshExecMessage)
+
+						// handle sftp (looks like git works over this kind of system too)
+						case "subsystem":
+							command := string(req.Payload[4 : req.Payload[3]+4])
+
+							if !bzssh.IsValidSftp(command) {
+								errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command))
+								t.logger.Errorf(errMsg)
+								t.stdIo.WriteErr([]byte(errMsg))
+								t.Kill()
+								return
+							}
+
+							ok = true
+							go t.readFromChannel()
+
+							sshExecMessage := bzssh.SshExecMessage{
+								Command: command,
+								Sftp:    true,
 							}
 							t.sendOutputMessage(bzssh.SshExec, sshExecMessage)
 

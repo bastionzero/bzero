@@ -91,14 +91,23 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 			return nil, fmt.Errorf("unable to unmarshal transparent SSH exec message: %s", err)
 		}
 
-		if !bzssh.IsValidScp(execRequest.Command) {
+		if execRequest.Sftp {
+			if !bzssh.IsValidSftp(execRequest.Command) {
+				errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
+				t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
+				return nil, fmt.Errorf(errMsg)
+			} else {
+				// if using sftp, we have nothing to exec; just tell the server what protocol to use
+				t.session.RequestSubsystem(execRequest.Command)
+			}
+		} else if !bzssh.IsValidScp(execRequest.Command) {
 			errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
 			t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
 			return nil, fmt.Errorf(errMsg)
+		} else {
+			// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
+			t.exec(execRequest.Command)
 		}
-
-		// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
-		t.exec(execRequest.Command)
 
 	case bzssh.SshClose:
 		// Deserialize the action payload

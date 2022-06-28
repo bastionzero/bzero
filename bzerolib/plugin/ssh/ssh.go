@@ -12,6 +12,7 @@ const (
 	OpaqueSsh      SshAction = "opaque"
 	TransparentSsh SshAction = "transparent"
 	scpWithSpace   string    = "scp "
+	sftp           string    = "sftp"
 )
 
 type SshActionParams struct {
@@ -32,6 +33,7 @@ type SshInputMessage struct {
 
 type SshExecMessage struct {
 	Command string `json:"command"`
+	Sftp    bool   `json:"sftp"` // true in the special case of an sftp request
 }
 
 type SshCloseMessage struct {
@@ -51,6 +53,10 @@ func IsValidScp(command string) bool {
 	return string([]rune(command)[:4]) == scpWithSpace
 }
 
+func IsValidSftp(command string) bool {
+	return string([]rune(command)[:4]) == sftp
+}
+
 func UnauthorizedCommandError(received string) string {
-	return fmt.Sprintf("unauthorized command: this user is only allowed to perform file transfer via scp, but recieved %s", received)
+	return fmt.Sprintf("unauthorized command: this user is only allowed to perform file transfer via scp or sftp, but recieved %s", received)
 }
