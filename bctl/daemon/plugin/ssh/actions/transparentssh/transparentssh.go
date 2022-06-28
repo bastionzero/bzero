@@ -38,7 +38,7 @@ type TransparentSsh struct {
 
 	// used to communicate directly with the SSH process
 	sshListener net.Listener
-	sshChannel  io.ReadWriteCloser
+	sshChannel  gossh.Channel
 }
 
 func New(
@@ -64,6 +64,13 @@ func New(
 
 func (t *TransparentSsh) Done() <-chan struct{} {
 	return t.doneChan
+}
+
+// internal pre-kill function on success
+func (t *TransparentSsh) signalSuccess() {
+	if t.sshChannel != nil {
+		t.sshChannel.SendRequest("exit-status", false, []byte{0, 0, 0, 0})
+	}
 }
 
 func (t *TransparentSsh) Kill() {
@@ -108,7 +115,7 @@ func (t *TransparentSsh) Start() error {
 	// An SSH server is represented by a ServerConfig, which holds
 	// certificate details and handles authentication of ServerConns.
 	config := &gossh.ServerConfig{
-		NoClientAuth: true, // TODO: is this okay? Shows in the logs as "authentication (none)", which we know is fine but may look alarming
+		NoClientAuth: true, // TODO: is this acceptable? Shows in the logs as "authentication (none)", which we know is fine but may look alarming
 		PublicKeyCallback: func(c gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
 			return &gossh.Permissions{}, nil
 		},
@@ -235,8 +242,11 @@ func (t *TransparentSsh) readFromChannel() {
 			n, err := t.sshChannel.Read(b)
 			if err != nil {
 				if err == io.EOF {
-					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
+					// when UPLOADING, we need to tell Agent we're done
+					// if we reach this point we assume success
+					t.signalSuccess()
 					t.logger.Errorf("finished reading from stdin")
+					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
 					return
 				} else {
 					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: err.Error()})
@@ -253,7 +263,8 @@ func (t *TransparentSsh) readFromChannel() {
 
 func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	switch smsg.StreamType(smessage.Type) {
-	// TODO: we don't expect any stderr messages to come -- treat them the same as stdout?
+	// TODO: we don't expect any stderr messages to come in the case of scp,
+	// and at any rate I don't think ssh treats them any differently from stdout messages
 	case smsg.StdErr:
 		t.logger.Errorf("received bytes from remote stderr")
 		fallthrough
@@ -266,8 +277,10 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 				t.logger.Errorf("Error writing to Stdout: %s", err)
 			}
 			if !smessage.More {
+				// when DOWNLOADING, we rely on Agent to tell us it's done
+				// if we've reached this point we assume success
 				t.logger.Errorf("received ssh close stream message")
-				t.Kill()
+				t.signalSuccess()
 			}
 		}
 	case smsg.Error:
