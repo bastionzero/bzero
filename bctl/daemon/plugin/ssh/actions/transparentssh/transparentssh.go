@@ -133,7 +133,7 @@ func (t *TransparentSsh) Start() error {
 		nConn, _ := t.sshListener.Accept()
 		_, chans, reqs, err := gossh.NewServerConn(nConn, config)
 		if err != nil {
-			t.logger.Errorf("failed to handshake: ", err)
+			t.logger.Errorf("failed to handshake: %s", err)
 		}
 
 		go gossh.DiscardRequests(reqs)
