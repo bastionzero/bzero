@@ -32,8 +32,7 @@ type TransparentSsh struct {
 	conn    *gossh.Client
 	session *gossh.Session
 
-	stdInChan     chan []byte
-	subsystemChan chan string
+	stdInChan chan []byte
 }
 
 func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *gossh.Client) *TransparentSsh {
@@ -90,19 +89,16 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 				return nil, fmt.Errorf(errMsg)
 			} else {
 				// if using sftp, we have nothing to exec; just tell the server what protocol to use
-				// we use a channel here to avoid a race in the case that Exec arrives before Open
-				t.subsystemChan <- execRequest.Command
+				// session will be initialized since Open will always come before Exec
+				t.session.RequestSubsystem(execRequest.Command)
 			}
+		} else if !bzssh.IsValidScp(execRequest.Command) {
+			errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
+			t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
+			return nil, fmt.Errorf(errMsg)
 		} else {
-			t.subsystemChan <- ""
-			if !bzssh.IsValidScp(execRequest.Command) {
-				errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
-				t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
-				return nil, fmt.Errorf(errMsg)
-			} else {
-				// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
-				t.exec(execRequest.Command)
-			}
+			// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
+			t.exec(execRequest.Command)
 		}
 
 	case bzssh.SshClose:
@@ -136,12 +132,6 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 	if err != nil {
 		return nil, fmt.Errorf("session err: %s", err)
 	}
-	go func() {
-		subsystem := <-t.subsystemChan
-		if subsystem != "" {
-			t.session.RequestSubsystem(subsystem)
-		}
-	}()
 
 	stdin, err := t.session.StdinPipe()
 	if err != nil {
