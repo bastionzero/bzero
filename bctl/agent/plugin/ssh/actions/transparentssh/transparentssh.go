@@ -9,7 +9,6 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -30,27 +29,20 @@ type TransparentSsh struct {
 	streamOutputChan     chan smsg.StreamMessage
 	streamMessageVersion smsg.SchemaVersion
 
-	//stdInReader *StdReader
 	conn    *gossh.Client
 	session *gossh.Session
 
-	authorizedKeys authorizedkeys.IAuthorizedKeys
-
 	stdInChan     chan []byte
-	targetUser    string
-	remoteAddress string
+	subsystemChan chan string
 }
 
-func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, authKeys authorizedkeys.IAuthorizedKeys, targetUser string, remoteAddress string) *TransparentSsh {
-
+func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *gossh.Client) *TransparentSsh {
 	return &TransparentSsh{
 		logger:           logger,
 		doneChan:         doneChan,
 		streamOutputChan: ch,
-		authorizedKeys:   authKeys,
-		targetUser:       targetUser,
 		stdInChan:        make(chan []byte, 10),
-		remoteAddress:    remoteAddress,
+		conn:             conn,
 	}
 }
 
@@ -98,15 +90,19 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 				return nil, fmt.Errorf(errMsg)
 			} else {
 				// if using sftp, we have nothing to exec; just tell the server what protocol to use
-				t.session.RequestSubsystem(execRequest.Command)
+				// we use a channel here to avoid a race in the case that Exec arrives before Open
+				t.subsystemChan <- execRequest.Command
 			}
-		} else if !bzssh.IsValidScp(execRequest.Command) {
-			errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
-			t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
-			return nil, fmt.Errorf(errMsg)
 		} else {
-			// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
-			t.exec(execRequest.Command)
+			t.subsystemChan <- ""
+			if !bzssh.IsValidScp(execRequest.Command) {
+				errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
+				t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
+				return nil, fmt.Errorf(errMsg)
+			} else {
+				// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
+				t.exec(execRequest.Command)
+			}
 		}
 
 	case bzssh.SshClose:
@@ -131,53 +127,33 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 
 func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) ([]byte, error) {
 
-	privateBytes, publicBytes, _ := bzssh.GenerateKeys()
-	t.authorizedKeys.Add(string(publicBytes))
-
-	// the following implementation of an ssh client is heavily based on thsi example:
+	// the following implementation of an ssh client is heavily based on this example:
 	// https://medium.com/@marcus.murray/go-ssh-client-shell-session-c4d40daa46cd
 
 	var err error
-	var signer gossh.Signer
-
-	signer, err = gossh.ParsePrivateKey(privateBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	conf := &gossh.ClientConfig{
-		User: t.targetUser,
-		// FIXME: figure out how to actually do this...
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
-		Auth: []gossh.AuthMethod{
-			gossh.PublicKeys(signer),
-		},
-	}
-
-	t.conn, err = gossh.Dial("tcp", t.remoteAddress, conf)
-	if err != nil {
-		return nil, fmt.Errorf("dial error: %s", err)
-	}
-
-	var stdin io.WriteCloser
-	var stdout, stderr io.Reader
 
 	t.session, err = t.conn.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("session err: %s", err)
 	}
+	go func() {
+		subsystem := <-t.subsystemChan
+		if subsystem != "" {
+			t.session.RequestSubsystem(subsystem)
+		}
+	}()
 
-	stdin, err = t.session.StdinPipe()
+	stdin, err := t.session.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe err: %s", err)
 	}
 
-	stdout, err = t.session.StdoutPipe()
+	stdout, err := t.session.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe err: %s", err)
 	}
 
-	stderr, err = t.session.StderrPipe()
+	stderr, err := t.session.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stderr pipe err: %s", err)
 	}
@@ -198,50 +174,9 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 		}
 	}()
 
-	go func() {
-		b := make([]byte, chunkSize)
-		for {
-			select {
-			case <-t.tmb.Dying():
-				return
-			default:
-				if n, err := stdout.Read(b); !t.tmb.Alive() {
-					return
-				} else if err != nil {
-					if err == io.EOF {
-						t.logger.Infof("Finished reading from stdout")
-						t.sendStreamMessage(smsg.StdOut, false, b[:n])
-						return
-					}
-					t.logger.Errorf("error reading from stdout: %s", err)
-					return
-				} else if n > 0 {
-					t.logger.Debugf("Read %d bytes from local SSH stdout", n)
-					t.sendStreamMessage(smsg.StdOut, true, b[:n])
-				}
-			}
-		}
-	}()
+	go t.readPipe(stdout, smsg.StdOut, "stdout")
+	go t.readPipe(stderr, smsg.StdErr, "stderr")
 
-	go func() {
-		b := make([]byte, chunkSize)
-		for {
-			select {
-			case <-t.tmb.Dying():
-				return
-			default:
-				if n, err := stderr.Read(b); !t.tmb.Alive() {
-					return
-				} else if err != nil && n > 0 {
-					t.logger.Debugf("Read %d bytes from local SSH stderr", n)
-					t.sendStreamMessage(smsg.StdErr, true, b[:n])
-				} else if err != nil && err != io.EOF {
-					t.logger.Errorf("error reading from stderr: %s", err)
-					return
-				}
-			}
-		}
-	}()
 	// Update our remote connection
 	return []byte{}, nil
 }
@@ -259,6 +194,31 @@ func (t *TransparentSsh) exec(command string) {
 			t.logger.Debugf("finished execution")
 		}
 	}()
+}
+
+func (t *TransparentSsh) readPipe(pipe io.Reader, messageType smsg.StreamType, pipeName string) {
+	b := make([]byte, chunkSize)
+	for {
+		select {
+		case <-t.tmb.Dying():
+			return
+		default:
+			if n, err := pipe.Read(b); !t.tmb.Alive() {
+				return
+			} else if err != nil {
+				if err == io.EOF {
+					t.logger.Infof("Finished reading from %s", pipeName)
+					t.sendStreamMessage(messageType, false, b[:n])
+					return
+				}
+				t.logger.Errorf("error reading from %s: %s", pipeName, err)
+				return
+			} else if n > 0 {
+				t.logger.Debugf("Read %d bytes from local SSH %s", n, pipeName)
+				t.sendStreamMessage(messageType, true, b[:n])
+			}
+		}
+	}
 }
 
 func (t *TransparentSsh) sendStreamMessage(streamType smsg.StreamType, more bool, contentBytes []byte) {

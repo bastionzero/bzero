@@ -83,7 +83,11 @@ func (t *TransparentSsh) Kill() {
 func (t *TransparentSsh) Start() error {
 
 	var privateKey []byte
-	// FIXME: stopgap so that there is always an identityfile
+	// although we don't use keys for authentication, the local ssh process will
+	// throw an error if it's told to look for an invalid IdentityFile
+	// so unfortunately we still need to create one if it doesn't exist
+	//
+	// we then re-use this private key as our "host key" when we terminate the ssh connection
 	if publicKeyRsa, err := bzssh.ReadPublicKeyRsa(t.identityFile, t.filIo); err == nil {
 		if _, err = bzssh.GeneratePublicKey(publicKeyRsa); err != nil {
 			return fmt.Errorf("error decoding temporary public key: %s", err)
@@ -91,6 +95,7 @@ func (t *TransparentSsh) Start() error {
 			t.logger.Debugf("using existing temporary keys")
 		}
 	} else {
+		// can I avoid this?
 		t.logger.Debugf("generating new temporary keys")
 		privateKey, _, err = bzssh.GenerateKeys()
 		if err != nil {
@@ -100,9 +105,7 @@ func (t *TransparentSsh) Start() error {
 		}
 	}
 
-	sshOpenMessage := bzssh.SshOpenMessage{}
-
-	t.sendOutputMessage(bzssh.SshOpen, sshOpenMessage)
+	t.sendOutputMessage(bzssh.SshOpen, bzssh.SshOpenMessage{})
 
 	go func() {
 		defer close(t.doneChan)
@@ -115,25 +118,25 @@ func (t *TransparentSsh) Start() error {
 	// An SSH server is represented by a ServerConfig, which holds
 	// certificate details and handles authentication of ServerConns.
 	config := &gossh.ServerConfig{
-		NoClientAuth: true, // TODO: is this acceptable? Shows in the logs as "authentication (none)", which we know is fine but may look alarming
+		// TODO: is using NoClientAuth acceptable? Shows in the ssh logs as "authentication (none)", which we know is fine but may look alarming
+		// however if we remove this, the ssh logs show authentication with the public key, which looks like a long-lived credential!
+		NoClientAuth: true,
 		PublicKeyCallback: func(c gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
 			return &gossh.Permissions{}, nil
 		},
 	}
-
-	newPrivate, _, _ := bzssh.GenerateKeys()
-	private, _ := gossh.ParsePrivateKey(newPrivate)
+	private, _ := gossh.ParsePrivateKey(privateKey)
 	config.AddHostKey(private)
+
 	go func() {
 		defer t.sshListener.Close()
 
 		// Once a ServerConfig has been configured, tell ZLI we can accept connections
 		t.stdIo.Write([]byte(readyMsg))
 
-		nConn, _ := t.sshListener.Accept()
 		// Before use, a handshake must be performed on the incoming net.Conn.
+		nConn, _ := t.sshListener.Accept()
 		_, chans, reqs, err := gossh.NewServerConn(nConn, config)
-
 		if err != nil {
 			t.logger.Errorf("failed to handshake: ", err)
 		}
@@ -142,14 +145,12 @@ func (t *TransparentSsh) Start() error {
 
 		go func() {
 			for newChannel := range chans {
-				// Channels have a type, depending on the application level
-				// protocol intended. In the case of a shell, the type is
-				// "session" and ServerShell may be used to present a simple
-				// terminal interface.
+				// Channels have a type, depending on the application level protocol intended.
 				if t := newChannel.ChannelType(); t != "session" {
 					newChannel.Reject(gossh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", t))
 					continue
 				}
+
 				channel, requests, err := newChannel.Accept()
 				t.sshChannel = channel
 				if err != nil {
@@ -202,6 +203,7 @@ func (t *TransparentSsh) Start() error {
 							}
 							t.sendOutputMessage(bzssh.SshExec, sshExecMessage)
 
+						// maybe someday we will allow these!
 						case "shell":
 							errMsg := bzssh.UnauthorizedCommandError("shell request")
 							t.logger.Errorf(errMsg)
@@ -263,10 +265,10 @@ func (t *TransparentSsh) readFromChannel() {
 
 func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	switch smsg.StreamType(smessage.Type) {
-	// TODO: we don't expect any stderr messages to come in the case of scp,
+	// we don't expect any stderr messages to come in the case of scp,
 	// and at any rate I don't think ssh treats them any differently from stdout messages
 	case smsg.StdErr:
-		t.logger.Errorf("received bytes from remote stderr")
+		t.logger.Errorf("received bytes from remote stderr; writing them to local ssh channel")
 		fallthrough
 	case smsg.StdOut:
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
@@ -274,13 +276,14 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		} else {
 			t.logger.Infof("sending %d bytes to channel", len(contentBytes))
 			if _, err = t.sshChannel.Write(contentBytes); err != nil {
-				t.logger.Errorf("Error writing to Stdout: %s", err)
+				t.logger.Errorf("Error writing to channel: %s", err)
 			}
 			if !smessage.More {
 				// when DOWNLOADING, we rely on Agent to tell us it's done
 				// if we've reached this point we assume success
 				t.logger.Errorf("received ssh close stream message")
 				t.signalSuccess()
+				t.Kill()
 			}
 		}
 	case smsg.Error:

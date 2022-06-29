@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	gossh "golang.org/x/crypto/ssh"
+
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/opaquessh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/transparentssh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
@@ -17,7 +19,7 @@ import (
 )
 
 const (
-	sshFolder      = ".ssh"
+	sshDir         = ".ssh"
 	maxKeyLifetime = 30 * time.Second
 )
 
@@ -67,7 +69,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 
 		// we place the authorized keys lock file inside the user's /home/.ssh/ directory because that is the least bad place for it
 		// source: https://i.stack.imgur.com/BlpRb.png
-		authKeys, err := authorizedkeys.New(subSubLogger, plugin.doneChan, usr, sshFolder, sshFolder, maxKeyLifetime)
+		authKeys, err := authorizedkeys.New(subSubLogger, plugin.doneChan, usr, sshDir, sshDir, maxKeyLifetime)
 		if err != nil {
 			rerr = fmt.Errorf("failed to set up authorized_keys file: %s", err)
 		}
@@ -97,13 +99,39 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 				)
 
 			case bzssh.TransparentSsh:
+				// we need to add a key for when we "authenticate" our own local connection
+				// this doesn't apply to virtual targets, which we will need to consider separately
+				privateBytes, publicBytes, _ := bzssh.GenerateKeys()
+				authKeys.Add(string(publicBytes))
+
+				signer, err := gossh.ParsePrivateKey(privateBytes)
+				if err != nil {
+					return nil, err
+				}
+
+				conf := &gossh.ClientConfig{
+					User: synPayload.TargetUser,
+					HostKeyCallback: func(hostname string, remote net.Addr, key gossh.PublicKey) error {
+						// in future, when we are connecting to remote targets with the agent, we may wish to
+						// do something with this key. However, in the current use case we are assured to be
+						// connecting to localhost, which makes the host key pretty meaningless.
+						// Therefore, we ignore it for now
+						return nil
+					},
+					Auth: []gossh.AuthMethod{
+						gossh.PublicKeys(signer),
+					},
+				}
+
+				conn, err := gossh.Dial("tcp", remoteAddress, conf)
+				if err != nil {
+					return nil, fmt.Errorf("dial error: %s", err)
+				}
 				plugin.action = transparentssh.New(
 					subLogger,
 					plugin.doneChan,
 					plugin.streamOutputChan,
-					authKeys,
-					synPayload.TargetUser,
-					remoteAddress,
+					conn,
 				)
 
 			default:
