@@ -178,6 +178,7 @@ func New(logger *logger.Logger,
 						ws.processOutput(msg)
 					}
 				}
+				time.Sleep(time.Second)
 			}
 			return nil
 		})

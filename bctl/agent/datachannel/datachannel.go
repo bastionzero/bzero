@@ -92,6 +92,7 @@ func New(
 
 	// listener for incoming messages
 	datachannel.tmb.Go(func() error {
+		defer logger.Infof("Datachannel is dead")
 		defer websocket.Unsubscribe(id) // causes decoupling from websocket
 
 		datachannel.tmb.Go(func() error {
