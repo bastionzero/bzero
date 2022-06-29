@@ -109,7 +109,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 					return nil, err
 				}
 
-				conf := &gossh.ClientConfig{
+				config := &gossh.ClientConfig{
 					User: synPayload.TargetUser,
 					HostKeyCallback: func(hostname string, remote net.Addr, key gossh.PublicKey) error {
 						// in future, when we are connecting to remote targets with the agent, we may wish to
@@ -123,7 +123,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 					},
 				}
 
-				conn, err := gossh.Dial("tcp", remoteAddress, conf)
+				conn, err := gossh.Dial("tcp", remoteAddress, config)
 				if err != nil {
 					return nil, fmt.Errorf("dial error: %s", err)
 				}
