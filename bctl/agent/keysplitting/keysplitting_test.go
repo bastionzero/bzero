@@ -359,14 +359,8 @@ var _ = Describe("Agent keysplitting", func() {
 			BeforeEachBehavior := func() {
 				// We must build a Syn, validate it, and build a SynAck, so that
 				// we can send Data successfully
-				By("Building a Syn message without error")
-				synMsg = BuildSyn()
-				By("Signing Syn message without error")
-				SignDaemonMsg(synMsg)
-				// Mock the BZCertVerifier so that Verify succeeds on our Syn's
-				// BZCert
-				mockBzCertVerifier.On("Verify", synMsg.KeysplittingPayload.(ksmsg.SynPayload).BZCert).Return(bzCertHash, bzCertExpirationTime, nil)
-				ValidateDaemonMsg(synMsg)
+				By("Building and validating a Syn message without error")
+				synMsg = BuildSynAndValidate()
 				// Sets expected HPointer which our Data must set correctly in
 				// order to validate
 				synAck, err := sut.BuildAck(synMsg, testAction, []byte{})
