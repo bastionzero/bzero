@@ -54,8 +54,9 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 	case string(bzssh.OpaqueSsh):
 		s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
 	case string(bzssh.TransparentSsh):
+		// listen for a connection from the ZLI
 		// action is responsible for closing this
-		listener, err := net.Listen("tcp", ":2222")
+		listener, err := net.Listen("tcp", ":2221")
 		if err != nil {
 			s.logger.Errorf("failed to listen for connection: ", err)
 		}

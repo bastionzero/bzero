@@ -67,6 +67,10 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			_, err = gossh.Dial("tcp", "localhost:22222", config)
 			Expect(err).To(BeNil())
 
+			// now what? I guess I follow the agent's lead:
+			// - get a session, start some pipes
+			// - write bytes, make sure the daemon writes them
+
 		})
 
 	})
