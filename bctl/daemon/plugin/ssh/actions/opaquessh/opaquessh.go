@@ -117,7 +117,7 @@ func (s *OpaqueSsh) Start() error {
 					}
 					return fmt.Errorf("error reading from Stdin: %s", err)
 				} else if n > 0 {
-					s.logger.Debugf("Read %s bytes from local SSH", n)
+					s.logger.Debugf("Read %d bytes from local SSH", n)
 					s.sendSshInputMessage(b[:n])
 				}
 			}
