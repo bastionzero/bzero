@@ -23,7 +23,7 @@ const maxErrorRecoveryTries = 3
 
 // the number of messages we're allowed to precalculate and send without having
 // received an ack
-var pipelineLimit = 8
+var pipelineLimit = 2
 
 type ZLIConfig struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`

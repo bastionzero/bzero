@@ -109,7 +109,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 }
 
 func (s *SshPlugin) Receive(action string, actionPayload []byte) ([]byte, error) {
-	s.logger.Debugf("Ssh plugin received message with %s action", action)
+	//s.logger.Debugf("Ssh plugin received message with %s action", action)
 
 	if payload, err := s.action.Receive(action, actionPayload); err != nil {
 		s.logger.Error(err)

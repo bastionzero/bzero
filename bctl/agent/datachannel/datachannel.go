@@ -193,7 +193,7 @@ func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 }
 
 func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
-	d.logger.Info("received message type: " + agentMessage.MessageType)
+	//d.logger.Info("received message type: " + agentMessage.MessageType)
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.Keysplitting:
@@ -284,7 +284,7 @@ func (d *DataChannel) startPlugin(pluginName bzplugin.PluginName, action string,
 			case <-d.tmb.Dying():
 				return
 			case streamMessage := <-streamOutputChan:
-				d.logger.Infof("Sending %s - %s - %t stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
+				//d.logger.Infof("Sending %s - %s - %t stream message", streamMessage.Action, streamMessage.Type, streamMessage.More)
 				d.send(am.Stream, streamMessage)
 			}
 		}

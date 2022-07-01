@@ -128,12 +128,13 @@ func (d *OpaqueSsh) Start() error {
 }
 
 func (d *OpaqueSsh) ReceiveStream(smessage smsg.StreamMessage) {
-	d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
+	//d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
 	switch smsg.StreamType(smessage.Type) {
 	case smsg.StdOut:
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 		} else {
+			//d.logger.Debugf("Trying to write %d bytes", len(contentBytes))
 			if _, err = d.stdIo.Write(contentBytes); err != nil {
 				d.logger.Errorf("Error writing to Stdout: %s", err)
 			}

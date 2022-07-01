@@ -283,6 +283,8 @@ func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 
 func (d *DataChannel) processInputMessage(agentMessage *am.AgentMessage) error {
 	d.logger.Debugf("Datachannel received %v message", agentMessage.MessageType)
+	//TODO: what have we here?
+	d.logger.Debugf("and then what happened?")
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.Error:
@@ -327,6 +329,7 @@ func (d *DataChannel) handleStream(agentMessage *am.AgentMessage) error {
 }
 
 func (d *DataChannel) handleKeysplitting(agentMessage *am.AgentMessage) error {
+
 	// unmarshal the keysplitting message
 	var ksMessage ksmsg.KeysplittingMessage
 	if err := json.Unmarshal(agentMessage.MessagePayload, &ksMessage); err != nil {
@@ -335,12 +338,16 @@ func (d *DataChannel) handleKeysplitting(agentMessage *am.AgentMessage) error {
 
 	// validate keysplitting message
 	if err := d.keysplitter.Validate(&ksMessage); err != nil {
+		//d.logger.Errorf("invalid!?!?!?")
 		return fmt.Errorf("invalid keysplitting message: %s", err)
 	}
+
+	//d.logger.Errorf("so I'm just here really")
 
 	switch ksMessage.KeysplittingPayload.(type) {
 	case ksmsg.SynAckPayload:
 	case ksmsg.DataAckPayload:
+		//d.logger.Errorf("Data!?!?!? ACK??????")
 		// Send message to plugin's input message handler
 		if err := d.plugin.ReceiveKeysplitting(ksMessage.GetAction(), ksMessage.GetActionPayload()); err != nil {
 			return err

@@ -137,7 +137,7 @@ func (d *OpaqueSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte
 					}
 					return err
 				} else {
-					d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
+					//d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
 
 					// Now send this to daemon
 					d.sendStreamMessage(sequenceNumber, smsg.StdOut, true, buff[:n])
