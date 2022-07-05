@@ -148,10 +148,11 @@ func (k *Keysplitting) BuildAck(ksMessage *ksmsg.KeysplittingMessage, action str
 		// otherwise we use the hash of the previous value to maintain the hash chain and immutability
 		nonce := util.Nonce()
 		if k.lastDataMessage != nil {
-			if hpointer, err := k.lastDataMessage.GetHpointer(); err != nil {
-				return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to get hpointer of last ack: %s", err)
+			hashLastValidDataMessage := k.lastDataMessage.Hash()
+			if hashLastValidDataMessage == "" {
+				return ksmsg.KeysplittingMessage{}, fmt.Errorf("failed to get hash of last validated data message")
 			} else {
-				nonce = hpointer
+				nonce = hashLastValidDataMessage
 			}
 		}
 
