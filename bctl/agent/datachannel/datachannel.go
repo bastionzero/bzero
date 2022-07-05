@@ -193,7 +193,7 @@ func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 }
 
 func (d *DataChannel) processInput(agentMessage am.AgentMessage) {
-	//d.logger.Info("received message type: " + agentMessage.MessageType)
+	d.logger.Info("received message type: " + agentMessage.MessageType)
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.Keysplitting:

@@ -59,7 +59,6 @@ func (d *OpaqueSsh) Kill() {
 }
 
 func (d *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
-
 	switch ssh.SshSubAction(action) {
 	case ssh.SshOpen:
 		var openRequest ssh.SshOpenMessage

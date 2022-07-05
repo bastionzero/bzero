@@ -282,7 +282,7 @@ func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 }
 
 func (d *DataChannel) processInputMessage(agentMessage *am.AgentMessage) error {
-	d.logger.Debugf("Datachannel received %v message", agentMessage.MessageType)
+	// d.logger.Debugf("Datachannel received %v message", agentMessage.MessageType)
 	//TODO: what have we here?
 	//d.logger.Debugf("and then what happened?")
 
@@ -329,6 +329,7 @@ func (d *DataChannel) handleStream(agentMessage *am.AgentMessage) error {
 }
 
 func (d *DataChannel) handleKeysplitting(agentMessage *am.AgentMessage) error {
+	// d.logger.Infof("handling keysplitting message")
 
 	// unmarshal the keysplitting message
 	var ksMessage ksmsg.KeysplittingMessage
@@ -342,7 +343,7 @@ func (d *DataChannel) handleKeysplitting(agentMessage *am.AgentMessage) error {
 		return fmt.Errorf("invalid keysplitting message: %s", err)
 	}
 
-	//d.logger.Errorf("so I'm just here really")
+	// d.logger.Errorf("so I'm just here really")
 
 	switch ksMessage.KeysplittingPayload.(type) {
 	case ksmsg.SynAckPayload:

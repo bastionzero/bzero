@@ -23,7 +23,7 @@ const maxErrorRecoveryTries = 3
 
 // the number of messages we're allowed to precalculate and send without having
 // received an ack
-var pipelineLimit = 2
+var PipelineLimit = 8
 
 type ZLIConfig struct {
 	KSConfig KeysplittingConfig `json:"keySplitting"`
@@ -57,7 +57,7 @@ type Keysplitting struct {
 
 	// ordered hash map to keep track of sent keysplitting messages
 	pipelineMap  *orderedmap.OrderedMap
-	pipelineLock sync.Mutex
+	stateLock    sync.Mutex
 	pipelineOpen *sync.Cond
 
 	// a channel for all the messages we give the datachannel to send
@@ -77,6 +77,8 @@ type Keysplitting struct {
 
 	// keep track of how many times we've tried to recover
 	errorRecoveryAttempt int
+	pipelineLimit        int
+	isHandshakeComplete  bool
 }
 
 func New(
@@ -94,18 +96,22 @@ func New(
 		agentPubKey:            agentPubKey,
 		ackPublicKey:           "",
 		pipelineMap:            orderedmap.New(),
-		outboxQueue:            make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
+		outboxQueue:            make(chan *ksmsg.KeysplittingMessage, PipelineLimit),
 		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
 		recovering:             false,
 		synAction:              "initial",
 		errorRecoveryAttempt:   0,
+		pipelineLimit:          PipelineLimit,
+		isHandshakeComplete:    false,
 	}
-	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
+	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.stateLock)
 
 	return keysplitter, nil
 }
 
 func (k *Keysplitting) Recovering() bool {
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
 	return k.recovering
 }
 
@@ -118,6 +124,9 @@ func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
 }
 
 func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
+
 	// only recover from this error message if it corresponds to a message we've actually sent
 	// our old error messages weren't setting hpointers correctly
 	// TODO: CWC-1818: remove schema version check
@@ -188,6 +197,9 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		}
 	}
 
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
+
 	// Check this messages is in response to one we've sent
 	if hpointer, err := ksMessage.GetHpointer(); err != nil {
 		return err
@@ -195,8 +207,6 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		switch ksMessage.Type {
 		case ksmsg.SynAck:
 			if msg, ok := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload); ok {
-				defer k.pipelineLock.Unlock()
-
 				k.lastAck = ksMessage
 				k.pipelineMap.Delete(hpointer) // delete syn from map
 
@@ -225,9 +235,11 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 					k.prePipeliningAgent = c.Check(v)
 
 					if k.prePipeliningAgent {
-						pipelineLimit = 1
+						k.pipelineLimit = 1
 					}
 				}
+
+				k.isHandshakeComplete = true
 			}
 		case ksmsg.DataAck:
 			// check if incoming message corresponds to our most recently sent data
@@ -235,7 +247,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				return fmt.Errorf("we received an ack but we're not waiting for a response to any messages")
 			} else if pair.Key != hpointer {
 				k.logger.Info("Received an out-of-order ack message")
-				if len(k.outOfOrderAcks) > pipelineLimit {
+				if len(k.outOfOrderAcks) > k.pipelineLimit {
 					// we're missing an ack sometime in the past, let's try to recover
 					if _, err := k.BuildSyn("", []byte{}, true); err != nil {
 						k.recovering = true
@@ -253,9 +265,10 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				// If we're here, it means that the previous data message that caused the error was accepted
 				k.errorRecoveryAttempt = 0
 
-				k.pipelineOpen.Broadcast()
 			}
 		}
+
+		k.pipelineOpen.Broadcast()
 	} else {
 		return fmt.Errorf("%T message did not correspond to a previously sent message", ksMessage.KeysplittingPayload)
 	}
@@ -275,14 +288,13 @@ func (k *Keysplitting) processOutOfOrderAcks() {
 }
 
 func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
-	k.pipelineLock.Lock()
-	defer k.pipelineLock.Unlock()
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
 
-	// we only want to pipeline up to the maximum allowed amount
-	if k.pipelineMap.Len() >= pipelineLimit {
-		k.logger.Debug("Pipeline full, waiting to send next message")
+	// Wait if pipeline is full OR if handshake is not complete
+	for k.pipelineMap.Len() >= k.pipelineLimit || !k.isHandshakeComplete {
+		// k.logger.Debug(fmt.Sprintf("Pipeline length: %v, Pipeline full: %v, Handshake complete: %v. Waiting to send next message...", k.pipelineMap.Len(), k.pipelineMap.Len() >= k.pipelineLimit, k.isHandshakeComplete))
 		k.pipelineOpen.Wait()
-		k.logger.Debug("Pipeline open, sending message")
 	}
 
 	return k.pipeline(action, actionPayload)
@@ -365,7 +377,9 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 
 func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
 	// lock our pipeline because nothing can be calculated until we get our synack
-	k.pipelineLock.Lock()
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
+
 	if k.synAction == "initial" {
 		k.synAction = action
 	}

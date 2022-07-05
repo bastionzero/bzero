@@ -86,7 +86,7 @@ func (d *DbDaemonPlugin) Outbox() <-chan plugin.ActionWrapper {
 }
 
 func (d *DbDaemonPlugin) ReceiveStream(smessage smsg.StreamMessage) {
-	d.logger.Debugf("db plugin received %v stream", smessage.Type)
+	d.logger.Infof("db plugin received %v stream", smessage.Type)
 
 	if d.action != nil {
 		d.action.ReceiveStream(smessage)
