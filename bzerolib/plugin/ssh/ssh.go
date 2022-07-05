@@ -58,5 +58,5 @@ func IsValidSftp(command string) bool {
 }
 
 func UnauthorizedCommandError(received string) string {
-	return fmt.Sprintf("unauthorized command: this user is only allowed to perform file transfer via scp or sftp, but recieved %s", received)
+	return fmt.Sprintf("unauthorized command: this user is only allowed to perform file transfer via scp or sftp, but received %s", received)
 }

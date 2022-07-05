@@ -114,6 +114,8 @@ type Websocket struct {
 
 	// Base url to make request
 	baseUrl string
+
+	readyLock sync.Mutex
 }
 
 // Constructor to create a new common websocket client object that can be shared by the daemon and server
@@ -170,7 +172,7 @@ func New(logger *logger.Logger,
 		// Listener for any messages that need to be sent
 		ws.tmb.Go(func() error {
 			for ws.tmb.Alive() {
-				for ws.ready { // Might want a sync.Cond in the future if we're doing optimization
+				for ws.getReady() { // Might want a sync.Cond in the future if we're doing optimization
 					select {
 					case <-ws.tmb.Dying():
 						return nil
@@ -241,7 +243,11 @@ func (w *Websocket) SubscriberCount() int {
 // Returns error on websocket closed
 func (w *Websocket) receive() error {
 	// Read incoming message(s)
-	_, rawMessage, err := w.client.ReadMessage()
+	var rawMessage []byte
+	var err error
+	if w.getReady() {
+		_, rawMessage, err = w.client.ReadMessage()
+	}
 
 	// We check to make sure the tmb is still alive and not being actively
 	// killed because otherwise an error in receive will call w.Close which will
@@ -416,6 +422,8 @@ func (w *Websocket) Send(agentMessage am.AgentMessage) {
 // NOTE: with the exception of negotiate(), underlying bzhttp requests have their own 8-hour
 // exponential backoff, and so their errors are considered fatal
 func (w *Websocket) connect() error {
+	w.readyLock.Lock()
+	defer w.readyLock.Unlock()
 
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
@@ -673,4 +681,16 @@ func (w *Websocket) getAgentMessageFromInvocationId(invocationId string) am.Agen
 // can be used by other processes to check if our connection is open
 func (w *Websocket) Ready() bool {
 	return w.ready
+}
+
+func (w *Websocket) getReady() bool {
+	w.readyLock.Lock()
+	defer w.readyLock.Unlock()
+	return w.ready
+}
+
+func (w *Websocket) setReady(ready bool) {
+	w.readyLock.Lock()
+	defer w.readyLock.Unlock()
+	w.ready = ready
 }
