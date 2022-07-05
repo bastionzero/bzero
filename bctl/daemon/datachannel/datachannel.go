@@ -284,7 +284,7 @@ func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
 func (d *DataChannel) processInputMessage(agentMessage *am.AgentMessage) error {
 	d.logger.Debugf("Datachannel received %v message", agentMessage.MessageType)
 	//TODO: what have we here?
-	d.logger.Debugf("and then what happened?")
+	//d.logger.Debugf("and then what happened?")
 
 	switch am.MessageType(agentMessage.MessageType) {
 	case am.Error:

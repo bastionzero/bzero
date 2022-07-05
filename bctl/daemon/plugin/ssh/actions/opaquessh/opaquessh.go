@@ -34,6 +34,8 @@ type OpaqueSsh struct {
 
 	filIo bzio.BzFileIo
 	stdIo io.ReadWriter
+
+	streamInputChan chan smsg.StreamMessage
 }
 
 func New(
@@ -46,13 +48,14 @@ func New(
 ) *OpaqueSsh {
 
 	return &OpaqueSsh{
-		logger:       logger,
-		outboxQueue:  outboxQueue,
-		doneChan:     doneChan,
-		stdInChan:    make(chan []byte, InputBufferSize),
-		identityFile: identityFile,
-		filIo:        filIo,
-		stdIo:        stdIo,
+		logger:          logger,
+		outboxQueue:     outboxQueue,
+		doneChan:        doneChan,
+		stdInChan:       make(chan []byte, InputBufferSize),
+		streamInputChan: make(chan smsg.StreamMessage, 10),
+		identityFile:    identityFile,
+		filIo:           filIo,
+		stdIo:           stdIo,
 	}
 }
 
@@ -117,38 +120,73 @@ func (d *OpaqueSsh) Start() error {
 					}
 					return fmt.Errorf("error reading from Stdin: %s", err)
 				} else if n > 0 {
-					d.logger.Debugf("Read %d bytes from local SSH", n)
+					//d.logger.Debugf("Read %d bytes from local SSH", n)
 					d.sendSshInputMessage(b[:n])
 				}
 			}
 		}
 	})
 
+	go func() {
+
+		// variables for ensuring we receive stream messages in order
+		expectedSequenceNumber := 0
+		streamMessages := make(map[int]smsg.StreamMessage)
+
+		for {
+			select {
+			case <-d.tmb.Dying():
+				return
+			case data := <-d.streamInputChan:
+				if !d.tmb.Alive() {
+					return
+				}
+				streamMessages[data.SequenceNumber] = data
+				if data.SequenceNumber != expectedSequenceNumber {
+					d.logger.Infof(" ----------------------------> ----------------------------> GOT %d EXPECTED %d", data.SequenceNumber, expectedSequenceNumber)
+					d.tmb.Kill(fmt.Errorf("OOO"))
+					return
+				}
+
+				// process the incoming stream messages *in order*
+				for streamMessage, ok := streamMessages[expectedSequenceNumber]; ok; streamMessage, ok = streamMessages[expectedSequenceNumber] {
+					//d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
+					switch smsg.StreamType(streamMessage.Type) {
+					case smsg.StdOut:
+						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
+							d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
+						} else {
+							//d.logger.Debugf("Trying to write %d bytes", len(contentBytes))
+							if _, err = d.stdIo.Write(contentBytes); err != nil {
+								d.logger.Errorf("Error writing to Stdout: %s", err)
+							}
+							if !streamMessage.More {
+								d.tmb.Kill(fmt.Errorf("received ssh close stream message"))
+								return
+							}
+						}
+					case smsg.Error:
+						d.tmb.Kill(fmt.Errorf("received an error from the agent"))
+						return
+					default:
+						d.logger.Errorf("unhandled stream type: %s", streamMessage.Type)
+					}
+
+					// remove the message we've already processed
+					delete(streamMessages, expectedSequenceNumber)
+
+					// increment our sequence number
+					expectedSequenceNumber += 1
+				}
+			}
+		}
+	}()
+
 	return nil
 }
 
 func (d *OpaqueSsh) ReceiveStream(smessage smsg.StreamMessage) {
-	//d.logger.Debugf("Default ssh received %+v stream", smessage.Type)
-	switch smsg.StreamType(smessage.Type) {
-	case smsg.StdOut:
-		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
-			d.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
-		} else {
-			//d.logger.Debugf("Trying to write %d bytes", len(contentBytes))
-			if _, err = d.stdIo.Write(contentBytes); err != nil {
-				d.logger.Errorf("Error writing to Stdout: %s", err)
-			}
-			if !smessage.More {
-				d.tmb.Kill(fmt.Errorf("received ssh close stream message"))
-				return
-			}
-		}
-	case smsg.Error:
-		d.tmb.Kill(fmt.Errorf("received an error from the agent"))
-		return
-	default:
-		d.logger.Errorf("unhandled stream type: %s", smessage.Type)
-	}
+	d.streamInputChan <- smessage
 }
 
 func (d *OpaqueSsh) sendSshInputMessage(bs []byte) {
