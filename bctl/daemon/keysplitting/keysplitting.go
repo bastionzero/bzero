@@ -18,11 +18,11 @@ import (
 )
 
 // Max number of times we will try to resend after an error message
-const MaxErrorRecoveryTries = 3
+const maxErrorRecoveryTries = 3
 
 // The number of messages we're allowed to precalculate and send without having
 // received an ack
-const PipelineLimit = 8
+const maxPipelineLimit = 8
 
 type TokenRefresher interface {
 	Refresh() (*tokenrefresh.ZLIKeysplittingConfig, error)
@@ -56,7 +56,7 @@ type Keysplitting struct {
 	// isHandshakeComplete is true when SynAck has been received. It is reset to
 	// false during recovery
 	isHandshakeComplete bool
-	// not the last ack we've received but the last ack we've received *in order*
+	// not the last ack we've received but the last ack we've received
 	lastAck *ksmsg.KeysplittingMessage
 	// bool variable for letting the datachannel know when to start processing
 	// incoming messages again
@@ -83,7 +83,7 @@ func New(
 		tokenRefresher:       tokenRefresher,
 		ackPublicKey:         "",
 		pipelineMap:          orderedmap.New(),
-		outboxQueue:          make(chan *ksmsg.KeysplittingMessage, PipelineLimit),
+		outboxQueue:          make(chan *ksmsg.KeysplittingMessage, maxPipelineLimit),
 		recovering:           false,
 		synAction:            "initial",
 		errorRecoveryAttempt: 0,
@@ -92,7 +92,7 @@ func New(
 	}
 	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.stateLock)
 	// Default to global constant
-	keysplitter.pipelineLimit = PipelineLimit
+	keysplitter.pipelineLimit = maxPipelineLimit
 
 	return keysplitter, nil
 }
@@ -132,7 +132,7 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 		}
 	}
 
-	if k.errorRecoveryAttempt >= MaxErrorRecoveryTries {
+	if k.errorRecoveryAttempt >= maxErrorRecoveryTries {
 		return fmt.Errorf("retried too many times to fix error: %s", errMessage.Message)
 	} else {
 		k.errorRecoveryAttempt++
@@ -263,7 +263,7 @@ func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
 
 	// Wait if pipeline is full OR if handshake is not complete
 	for k.pipelineMap.Len() >= k.pipelineLimit || !k.isHandshakeComplete {
-		k.logger.Debug(fmt.Sprintf("Pipeline length: %v, Pipeline full: %v, Handshake complete: %v. Waiting to send next message...", k.pipelineMap.Len(), k.pipelineMap.Len() >= k.pipelineLimit, k.isHandshakeComplete))
+		k.logger.Debugf("Pipeline full: %t, Handshake complete: %t. Waiting to send next message...", k.pipelineMap.Len() >= k.pipelineLimit, k.isHandshakeComplete)
 		k.pipelineOpen.Wait()
 	}
 

@@ -766,7 +766,7 @@ var _ = Describe("Daemon keysplitting", func() {
 						BeforeEach(func() {
 							// Send enough Data to fill the pipeline to its max
 							// capacity
-							RepeatSendDataAndTrack(PipelineLimit - 1)
+							RepeatSendDataAndTrack(maxPipelineLimit - 1)
 
 							// Send the message that causes Inbox() to block
 							// (because pipeline is full) on a separate
@@ -777,7 +777,7 @@ var _ = Describe("Daemon keysplitting", func() {
 								defer GinkgoRecover()
 
 								By("Sending a message that causes Inbox() to block because pipeline is full")
-								SendDataAndTrack(PipelineLimit)
+								SendDataAndTrack(maxPipelineLimit)
 
 								// We only close the channel once
 								// SendDataAndTrack() returns.
@@ -1117,7 +1117,7 @@ var _ = Describe("Daemon keysplitting", func() {
 							By("Performing handshake without error")
 							PerformHandshake()
 
-							for i := 0; i < MaxErrorRecoveryTries; i++ {
+							for i := 0; i < maxErrorRecoveryTries; i++ {
 								By(fmt.Sprintf("Recover() without error: #%v", i))
 								agentErrorMessage := SendDataAndBuildErrorMessage()
 								err := sut.Recover(agentErrorMessage)
