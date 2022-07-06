@@ -2,7 +2,6 @@ package keysplitting
 
 import (
 	"fmt"
-	"time"
 
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
@@ -15,17 +14,11 @@ import (
 // schema version <= this value doesn't set targetId to the agent's pubkey
 const schemaVersionTargetIdNotSet string = "1.0"
 
-type BZCertMetadata struct {
-	Hash       string
-	Cert       bzcrt.BZCert
-	Expiration time.Time
-}
-
 type Keysplitting struct {
 	logger           *logger.Logger
 	lastDataMessage  *ksmsg.KeysplittingMessage
 	expectedHPointer string
-	bzCert           BZCertMetadata // only for one client
+	clientBZCert     *bzcrt.BZCert // only for one client
 	publickey        string
 	privatekey       string
 	idpProvider      string
@@ -96,27 +89,22 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			}
 		}
 
-		// All checks have passed. Make this BZCert that of the active user
-		k.bzCert = BZCertMetadata{
-			Hash:       bzcert.Hash(),
-			Cert:       synPayload.BZCert,
-			Expiration: bzcert.Expiration(),
-		}
+		k.clientBZCert = &bzcert
 	case ksmsg.Data:
 		dataPayload := ksMessage.KeysplittingPayload.(ksmsg.DataPayload)
 
 		// Check BZCert matches one we have stored
-		if k.bzCert.Hash != dataPayload.BZCertHash {
+		if k.clientBZCert.Hash() != dataPayload.BZCertHash {
 			return fmt.Errorf("DATA's BZCert does not match the active user's")
 		}
 
 		// Verify the signature
-		if err := ksMessage.VerifySignature(k.bzCert.Cert.ClientPublicKey); err != nil {
+		if err := ksMessage.VerifySignature(k.clientBZCert.ClientPublicKey); err != nil {
 			return err
 		}
 
 		// Check that BZCert isn't expired
-		if time.Now().After(k.bzCert.Expiration) {
+		if k.clientBZCert.Expired() {
 			return fmt.Errorf("DATA's referenced BZCert has expired")
 		}
 

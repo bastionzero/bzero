@@ -9,6 +9,12 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 )
 
+type IBZCert interface {
+	Hash() string
+	PrivateKey() string
+	Expiration() time.Time
+}
+
 type BZCert struct {
 	InitialIdToken  string `json:"initialIdToken"`
 	CurrentIdToken  string `json:"currentIdToken"`
@@ -43,8 +49,8 @@ func (b *BZCert) PrivateKey() string {
 	return b.privateKey
 }
 
-func (b *BZCert) Expiration() time.Time {
-	return b.expiration
+func (b *BZCert) Expired() bool {
+	return time.Now().After(b.expiration)
 }
 
 // This function verifies the user's bzcert. The function returns the hash the bzcert, the
