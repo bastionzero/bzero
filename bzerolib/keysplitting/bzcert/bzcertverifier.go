@@ -16,10 +16,6 @@ const (
 	googleUrl    = "https://accounts.google.com"
 	microsoftUrl = "https://login.microsoftonline.com"
 
-	// this is the tenant id Microsoft uses when the account is a personal account (not a work/school account)
-	// https://docs.microsoft.com/en-us/azure/active-directory/develop/id-tokens#payload-claims)
-	microsoftPersonalAccountTenantId = "9188040d-6c67-4c5b-b112-36a304b66dad"
-
 	// LUCIE: we should make this 2 weeks
 	initialIdTokenLifetime = time.Hour * 24 * 365 * 5 // 5 years
 )
@@ -65,8 +61,9 @@ func NewVerifier(idpProvider string, idpOrgId string) (*BZCertVerifier, error) {
 		return nil, fmt.Errorf("unrecognized SSO provider: %s", idpProvider)
 	}
 
-	// TODO: context with timeout
-	ctx := context.TODO() // Gives us non-nil empty context
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(60*time.Second))
+	defer cancel()
+
 	provider, err := oidc.NewProvider(ctx, issuerUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish connection with SSO provider %s: %w", idpProvider, err)
@@ -89,16 +86,7 @@ func (v *BZCertVerifier) Verify(bzcert *BZCert) (exp time.Time, err error) {
 	}
 }
 
-func buildMicrosoftIssUrl(orgId string) string {
-	// Handles personal accounts by using microsoftPersonalAccountTenantId as the tenantId
-	// see https://github.com/coreos/go-oidc/issues/121
-	tenantId := ""
-	if orgId == "None" {
-		tenantId = microsoftPersonalAccountTenantId
-	} else {
-		tenantId = orgId
-	}
-
+func buildMicrosoftIssUrl(tenantId string) string {
 	return fmt.Sprintf("%s/%s/v2.0", microsoftUrl, tenantId)
 }
 
@@ -151,11 +139,14 @@ func (v *BZCertVerifier) verifyInitialIdToken(token string, bzcert *BZCert) erro
 }
 
 func (v *BZCertVerifier) getTokenClaims(idtoken string, config *oidc.Config) (*idTokenClaims, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(60*time.Second))
+	defer cancel()
+
 	// This checks formatting and signature validity
 	verifier := v.ssoProvider.Verifier(config)
-	token, err := verifier.Verify(context.TODO(), idtoken)
+	token, err := verifier.Verify(ctx, idtoken)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to verify id token with SSO provider: %w", err)
 	}
 
 	// Extract claims from token
