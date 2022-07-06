@@ -64,7 +64,9 @@ type Keysplitting struct {
 	outboxQueue chan *ksmsg.KeysplittingMessage
 
 	// not the last ack we've received but the last ack we've received *in order*
-	lastAck        *ksmsg.KeysplittingMessage
+	lastAck *ksmsg.KeysplittingMessage
+	// the most recently acked Data message
+	lastAckedData  *ksmsg.KeysplittingMessage
 	outOfOrderAcks map[string]*ksmsg.KeysplittingMessage
 
 	// bool variable for letting the datachannel know when to start processing incoming messages again
@@ -153,8 +155,16 @@ func (k *Keysplitting) resend(hpointer string) {
 	recoveryMap := *k.pipelineMap
 	k.pipelineMap = orderedmap.New()
 
+	pair := (&recoveryMap).GetPair(hpointer)
+
+	if pair == nil && hpointer != k.lastAckedData.Hash() {
+		// The pipeline map is emptied and we don't attempt to recover because
+		// the RSynAck's nonce is unknown
+		return
+	}
+
 	// figure out where we need to start resending from
-	if pair := (&recoveryMap).GetPair(hpointer); pair == nil {
+	if pair == nil {
 
 		// if the referenced message was acked, we won't have it in our map so we assume we
 		// have to resend everything
@@ -191,7 +201,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	// Check this messages is in response to one we've sent
 	if hpointer, err := ksMessage.GetHpointer(); err != nil {
 		return err
-	} else if _, ok := k.pipelineMap.Get(hpointer); ok {
+	} else if ackedMsg, ok := k.pipelineMap.Get(hpointer); ok {
 		switch ksMessage.Type {
 		case ksmsg.SynAck:
 			if msg, ok := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload); ok {
@@ -246,6 +256,8 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				}
 				k.outOfOrderAcks[hpointer] = ksMessage
 			} else {
+				ackedDataMsg := ackedMsg.(ksmsg.KeysplittingMessage)
+				k.lastAckedData = &ackedDataMsg
 				k.lastAck = ksMessage
 				k.pipelineMap.Delete(hpointer)
 				k.processOutOfOrderAcks()
