@@ -210,7 +210,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 	// create a websocket
 	wsId := uuid.New().String()
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
-	websocket, err := websocket.New(wsLogger, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.AgentControl)
+	websocket, err := websocket.New(wsLogger, serviceUrl, params, headers, ccTargetSelectHandler, true, true, websocket.AgentControl)
 	if err != nil {
 		return nil, err
 	}
