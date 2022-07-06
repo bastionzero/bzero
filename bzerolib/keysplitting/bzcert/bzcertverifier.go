@@ -16,7 +16,6 @@ const (
 	googleUrl    = "https://accounts.google.com"
 	microsoftUrl = "https://login.microsoftonline.com"
 
-	// LUCIE: we should make this 2 weeks
 	initialIdTokenLifetime = time.Hour * 24 * 365 * 5 // 5 years
 )
 
@@ -41,7 +40,7 @@ const (
 	Google    ProviderType = "google"
 	Microsoft ProviderType = "microsoft"
 	Okta      ProviderType = "okta"
-	// Custom    ProviderType = "custom" // TODO: support custom IdPs
+	// Custom    ProviderType = "custom" // plan for custom IdP support
 )
 
 func NewVerifier(idpProvider string, idpOrgId string) (*BZCertVerifier, error) {
@@ -52,9 +51,9 @@ func NewVerifier(idpProvider string, idpOrgId string) (*BZCertVerifier, error) {
 	case Google:
 		issuerUrl = googleUrl
 	case Microsoft:
-		issuerUrl = buildMicrosoftIssUrl(idpOrgId)
+		issuerUrl = fmt.Sprintf("%s/%s/v2.0", microsoftUrl, idpOrgId)
 	case Okta:
-		issuerUrl = buildOktaIssUrl(idpOrgId)
+		issuerUrl = fmt.Sprintf("https://%s.okta.com", idpOrgId)
 	// case Custom:
 	// 	issUrl = customIss
 	default:
@@ -84,14 +83,6 @@ func (v *BZCertVerifier) Verify(bzcert *BZCert) (exp time.Time, err error) {
 	} else {
 		return
 	}
-}
-
-func buildMicrosoftIssUrl(tenantId string) string {
-	return fmt.Sprintf("%s/%s/v2.0", microsoftUrl, tenantId)
-}
-
-func buildOktaIssUrl(orgId string) string {
-	return "https://" + orgId + ".okta.com"
 }
 
 // this function verifies the current id token and will return that token's

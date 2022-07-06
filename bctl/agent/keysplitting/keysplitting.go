@@ -45,7 +45,7 @@ type IKeysplittingConfig interface {
 }
 
 func New(logger *logger.Logger, config IKeysplittingConfig) (*Keysplitting, error) {
-	shouldCheckTargetIdConstraint, err := semver.NewConstraint(fmt.Sprintf("> %v", schemaVersionTargetIdNotSet))
+	shouldCheckTargetIdConstraint, err := semver.NewConstraint(fmt.Sprintf("> %s", schemaVersionTargetIdNotSet))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create check target id constraint: %w", err)
 	}
