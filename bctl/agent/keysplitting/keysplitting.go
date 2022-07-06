@@ -65,15 +65,15 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	switch ksMessage.Type {
 	case ksmsg.Syn:
 		synPayload := ksMessage.KeysplittingPayload.(ksmsg.SynPayload)
+		bzcert := synPayload.BZCert
 
 		// Verify the BZCert
-		hash, exp, err := synPayload.BZCert.Verify(k.idpProvider, k.idpOrgId)
-		if err != nil {
+		if err := bzcert.Verify(k.idpProvider, k.idpOrgId); err != nil {
 			return fmt.Errorf("failed to verify SYN's BZCert: %w", err)
 		}
 
 		// Verify the signature
-		if err := ksMessage.VerifySignature(synPayload.BZCert.ClientPublicKey); err != nil {
+		if err := ksMessage.VerifySignature(bzcert.ClientPublicKey); err != nil {
 			return fmt.Errorf("failed to verify SYN's signature: %w", err)
 		}
 
@@ -98,9 +98,9 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 
 		// All checks have passed. Make this BZCert that of the active user
 		k.bzCert = BZCertMetadata{
-			Hash:       hash,
+			Hash:       bzcert.Hash(),
 			Cert:       synPayload.BZCert,
-			Expiration: exp,
+			Expiration: bzcert.Expiration(),
 		}
 	case ksmsg.Data:
 		dataPayload := ksMessage.KeysplittingPayload.(ksmsg.DataPayload)

@@ -9,7 +9,6 @@ import (
 	"github.com/Masterminds/semver"
 	orderedmap "github.com/wk8/go-ordered-map"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
@@ -24,24 +23,15 @@ const maxErrorRecoveryTries = 3
 // received an ack
 const maxPipelineLimit = 8
 
-type TokenRefresher interface {
-	Refresh() (*tokenrefresh.ZLIKeysplittingConfig, error)
-}
-
 type Keysplitting struct {
 	logger *logger.Logger
 
-	clientPubKey    string
-	clientSecretKey string
-	bzcertHash      string
+	bzcert *bzcrt.BZCert
 
 	agentPubKey  string
 	ackPublicKey string
 
 	synAction string
-
-	// for grabbing and updating id tokens
-	tokenRefresher TokenRefresher
 
 	// a channel for all the messages we give the datachannel to send
 	outboxQueue chan *ksmsg.KeysplittingMessage
@@ -73,14 +63,13 @@ type Keysplitting struct {
 func New(
 	logger *logger.Logger,
 	agentPubKey string,
-	tokenRefresher TokenRefresher,
+	bzcert *bzcrt.BZCert,
 ) (*Keysplitting, error) {
 
-	// TODO: load keys from storage
 	keysplitter := &Keysplitting{
 		logger:               logger,
+		bzcert:               bzcert,
 		agentPubKey:          agentPubKey,
-		tokenRefresher:       tokenRefresher,
 		ackPublicKey:         "",
 		pipelineMap:          orderedmap.New(),
 		outboxQueue:          make(chan *ksmsg.KeysplittingMessage, maxPipelineLimit),
@@ -89,10 +78,9 @@ func New(
 		errorRecoveryAttempt: 0,
 		isHandshakeComplete:  false,
 		lastAck:              nil,
+		pipelineLimit:        maxPipelineLimit,
 	}
 	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.stateLock)
-	// Default to global constant
-	keysplitter.pipelineLimit = maxPipelineLimit
 
 	return keysplitter, nil
 }
@@ -247,8 +235,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 			k.errorRecoveryAttempt = 0
 		}
 
-		// Condition variable changed. We must call Broadcast() to prevent
-		// deadlock
+		// Condition variable changed. We must call Broadcast() to prevent deadlock
 		k.pipelineOpen.Broadcast()
 	} else {
 		return fmt.Errorf("%w: %T message did not correspond to a previously sent message", ErrUnknownHPointer, ksMessage.KeysplittingPayload)
@@ -325,9 +312,9 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 	}
 
 	// Use the agreed upon schema version from the synack when building data messages
-	if responseMessage, err := ksMessage.BuildUnsignedData(action, payload, k.bzcertHash, k.schemaVersion.String()); err != nil {
+	if responseMessage, err := ksMessage.BuildUnsignedData(action, payload, k.bzcert.Hash(), k.schemaVersion.String()); err != nil {
 		return responseMessage, err
-	} else if err := responseMessage.Sign(k.clientSecretKey); err != nil {
+	} else if err := responseMessage.Sign(k.bzcert.PrivateKey()); err != nil {
 		return responseMessage, fmt.Errorf("%w: %s", ErrFailedToSign, err)
 	} else {
 		return responseMessage, nil
@@ -366,16 +353,9 @@ func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (
 		return nil, fmt.Errorf("failed to marshal action params")
 	}
 
-	// Build the BZero Certificate then store hash for future messages
-	bzCert, err := k.buildBZCert()
-	if err != nil {
-		return nil, fmt.Errorf("error building bzecert: %w", err)
-	} else {
-		if hash, ok := bzCert.Hash(); ok {
-			k.bzcertHash = hash
-		} else {
-			return nil, fmt.Errorf("could not hash BZ Certificate")
-		}
+	// Refresh our BZCert
+	if err := k.bzcert.Refresh(); err != nil {
+		return nil, fmt.Errorf("failed to build new BastionZero certificate: %w", err)
 	}
 
 	// Build the keysplitting message
@@ -386,7 +366,7 @@ func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (
 		ActionPayload: payloadBytes,
 		TargetId:      k.agentPubKey,
 		Nonce:         util.Nonce(),
-		BZCert:        bzCert,
+		BZCert:        *k.bzcert,
 	}
 
 	ksMessage := ksmsg.KeysplittingMessage{
@@ -395,7 +375,7 @@ func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (
 	}
 
 	// Sign it and add it to our hash map
-	if err := ksMessage.Sign(k.clientSecretKey); err != nil {
+	if err := ksMessage.Sign(k.bzcert.PrivateKey()); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrFailedToSign, err)
 	} else if err := k.addToPipelineMap(ksMessage); err != nil {
 		return nil, err
@@ -405,34 +385,4 @@ func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (
 		}
 		return &ksMessage, nil
 	}
-}
-
-func (k *Keysplitting) buildBZCert() (bzcrt.BZCert, error) {
-
-	zliConfig, err := k.tokenRefresher.Refresh()
-	if err != nil {
-		return bzcrt.BZCert{}, fmt.Errorf("failed to refresh keysplitting token: %w", err)
-	}
-
-	// Set public and private keys because someone maybe have logged out and
-	// logged back in again
-	k.clientPubKey = zliConfig.KSConfig.PublicKey
-
-	// The golang ed25519 library uses a length 64 private key because the
-	// private key is the concatenated form privatekey = privatekey + publickey.
-	// So if it was generated as length 32, we can correct for that here
-	if privatekeyBytes, _ := base64.StdEncoding.DecodeString(zliConfig.KSConfig.PrivateKey); len(privatekeyBytes) == 32 {
-		publickeyBytes, _ := base64.StdEncoding.DecodeString(k.clientPubKey)
-		k.clientSecretKey = base64.StdEncoding.EncodeToString(append(privatekeyBytes, publickeyBytes...))
-	} else {
-		k.clientSecretKey = zliConfig.KSConfig.PrivateKey
-	}
-
-	return bzcrt.BZCert{
-		InitialIdToken:  zliConfig.KSConfig.InitialIdToken,
-		CurrentIdToken:  zliConfig.TokenSet.CurrentIdToken,
-		ClientPublicKey: zliConfig.KSConfig.PublicKey,
-		Rand:            zliConfig.KSConfig.CerRand,
-		SignatureOnRand: zliConfig.KSConfig.CerRandSignature,
-	}, nil
 }

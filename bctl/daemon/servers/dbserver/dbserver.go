@@ -11,10 +11,10 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
-	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
@@ -39,14 +39,13 @@ type DbServer struct {
 	remoteHost string
 
 	// fields for new datachannels
-	localPort           string
-	localHost           string
-	params              map[string]string
-	headers             map[string]string
-	serviceUrl          string
-	refreshTokenCommand string
-	configPath          string
-	agentPubKey         string
+	localPort   string
+	localHost   string
+	params      map[string]string
+	headers     map[string]string
+	serviceUrl  string
+	agentPubKey string
+	cert        *bzcert.BZCert
 }
 
 func StartDbServer(logger *logger.Logger,
@@ -54,8 +53,7 @@ func StartDbServer(logger *logger.Logger,
 	localHost string,
 	remotePort int,
 	remoteHost string,
-	refreshTokenCommand string,
-	configPath string,
+	cert *bzcert.BZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
@@ -68,8 +66,7 @@ func StartDbServer(logger *logger.Logger,
 		params:              params,
 		headers:             headers,
 		targetSelectHandler: targetSelectHandler,
-		configPath:          configPath,
-		refreshTokenCommand: refreshTokenCommand,
+		cert:                cert,
 		localPort:           localPort,
 		localHost:           localHost,
 		remoteHost:          remoteHost,
@@ -134,7 +131,7 @@ func StartDbServer(logger *logger.Logger,
 // for creating new websockets
 func (d *DbServer) newWebsocket(wsId string) error {
 	subLogger := d.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, d.serviceUrl, d.params, d.headers, d.targetSelectHandler, autoReconnect, getChallenge, d.refreshTokenCommand, websocket.Db); err != nil {
+	if wsClient, err := websocket.New(subLogger, d.serviceUrl, d.params, d.headers, d.targetSelectHandler, autoReconnect, getChallenge, websocket.Db); err != nil {
 		return err
 	} else {
 		d.websocket = wsClient
@@ -144,7 +141,6 @@ func (d *DbServer) newWebsocket(wsId string) error {
 
 // for creating new datachannels
 func (d *DbServer) newDataChannel(dcId string, action string, websocket *websocket.Websocket, plugin *db.DbDaemonPlugin) error {
-	attach := false
 	subLogger := d.logger.GetDatachannelLogger(dcId)
 
 	d.logger.Infof("Creating new datachannel id: %s", dcId)
@@ -155,34 +151,38 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 		RemoteHost: d.remoteHost,
 	}
 
-	action = "db/" + action
 	ksLogger := d.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, d.agentPubKey, tokenrefresh.NewMRZAPTokenRefresher(d.configPath, d.refreshTokenCommand)); err != nil {
+	keysplitter, err := keysplitting.New(ksLogger, d.agentPubKey, d.cert)
+	if err != nil {
 		return err
-	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true); err != nil {
-		return err
-	} else {
-
-		// create a function to listen to the datachannel dying and then laugh
-		go func() {
-			for {
-				select {
-				case <-d.tmb.Dying():
-					dc.Close(errors.New("db server closing"))
-					return
-				case <-dcTmb.Dead():
-					// notify agent to close the datachannel
-					d.logger.Info("Sending DataChannel Close")
-					cdMessage := am.AgentMessage{
-						ChannelId:   dcId,
-						MessageType: string(am.CloseDataChannel),
-					}
-					d.websocket.Send(cdMessage)
-
-					return
-				}
-			}
-		}()
-		return nil
 	}
+
+	action = "db/" + action
+	attach := false
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	if err != nil {
+		return err
+	}
+
+	// create a function to listen to the datachannel dying and then laugh
+	go func() {
+		for {
+			select {
+			case <-d.tmb.Dying():
+				dc.Close(errors.New("db server closing"))
+				return
+			case <-dcTmb.Dead():
+				// notify agent to close the datachannel
+				d.logger.Info("Sending DataChannel Close")
+				cdMessage := am.AgentMessage{
+					ChannelId:   dcId,
+					MessageType: string(am.CloseDataChannel),
+				}
+				d.websocket.Send(cdMessage)
+
+				return
+			}
+		}
+	}()
+	return nil
 }
