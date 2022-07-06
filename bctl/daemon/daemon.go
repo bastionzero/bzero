@@ -167,6 +167,7 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 		identityFile,
 		remoteHost,
 		remotePort,
+		localPort,
 		sshAction,
 	)
 }

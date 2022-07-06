@@ -27,17 +27,19 @@ type SshDaemonPlugin struct {
 	killed       bool
 	action       ISshAction
 	identityFile string
+	localPort    string
 	filIo        bzio.BzFileIo
 	stdIo        bzio.BzIo
 }
 
-func New(logger *logger.Logger, identityFile string, filIo bzio.BzFileIo, stdIo bzio.StdIo) *SshDaemonPlugin {
+func New(logger *logger.Logger, identityFile string, localPort string, filIo bzio.BzFileIo, stdIo bzio.StdIo) *SshDaemonPlugin {
 	return &SshDaemonPlugin{
 		logger:       logger,
 		outboxQueue:  make(chan bzplugin.ActionWrapper, 10),
 		doneChan:     make(chan struct{}),
 		killed:       false,
 		identityFile: identityFile,
+		localPort:    localPort,
 		filIo:        filIo,
 		stdIo:        stdIo,
 	}
@@ -56,7 +58,8 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 	case string(bzssh.TransparentSsh):
 		// listen for a connection from the ZLI
 		// action is responsible for closing this
-		listener, err := net.Listen("tcp", ":2221")
+		listener, err := net.Listen("tcp", fmt.Sprintf(":%s", s.localPort))
+		s.logger.Errorf("Opened up on %s", s.localPort)
 		if err != nil {
 			s.logger.Errorf("failed to listen for connection: ", err)
 		}

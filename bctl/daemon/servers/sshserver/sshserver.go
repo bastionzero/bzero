@@ -35,6 +35,7 @@ type SshServer struct {
 
 	remoteHost   string
 	remotePort   int
+	localPort    string
 	targetUser   string
 	identityFile string
 
@@ -61,6 +62,7 @@ func StartSshServer(
 	identityFile string,
 	remoteHost string,
 	remotePort int,
+	localPort string,
 	action string,
 ) error {
 
@@ -77,6 +79,7 @@ func StartSshServer(
 		identityFile:        identityFile,
 		remoteHost:          remoteHost,
 		remotePort:          remotePort,
+		localPort:           localPort,
 	}
 
 	// Create a new websocket
@@ -114,7 +117,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
 
-	plugin := ssh.New(pluginLogger, s.identityFile, bzio.OsFileIo{}, bzio.StdIo{})
+	plugin := ssh.New(pluginLogger, s.identityFile, s.localPort, bzio.OsFileIo{}, bzio.StdIo{})
 	if err := plugin.StartAction(action); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)
 	}
