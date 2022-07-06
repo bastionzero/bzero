@@ -61,58 +61,54 @@ func DefaultLoggerConfig(logLevel string) *LoggerConfig {
 	}
 }
 
-func NewWithStdOutConsoleWriter(config *LoggerConfig, logFilePath string) (*Logger, error) {
-	return New(config, logFilePath, []io.Writer{os.Stdout})
+func New(config *LoggerConfig, logFilePath string) (*Logger, error) {
+	return createLogger(config, logFilePath, []io.Writer{})
 }
 
-func NewWithNoConsoleWriters(config *LoggerConfig, logFilePath string) (*Logger, error) {
-	return New(config, logFilePath, []io.Writer{})
+func NewWithStdOut(config *LoggerConfig, logFilePath string) (*Logger, error) {
+	return createLogger(config, logFilePath, []io.Writer{os.Stdout})
 }
 
-func New(config *LoggerConfig, logFilePath string, consoleWriterDestinations []io.Writer) (*Logger, error) {
+func createLogger(config *LoggerConfig, logFilePath string, consoleWriters []io.Writer) (*Logger, error) {
 	// Let's us display stack info on errors
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	zerolog.TimeFieldFormat = time.StampMilli
 	zerolog.SetGlobalLevel(config.LogLevel)
 
-	// If the log file doesn't exist, create it, or append to the file
-	if logFilePath != "" {
-		// make our directory if it doesn't exist already
-		// TODO: do this in our install process
-		logDir := filepath.Dir(logFilePath)
-		if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
-			return nil, fmt.Errorf("failed to create log directory %s", logDir)
-		}
-
-		logFileWithRotation := &lumberjack.Logger{
-			Filename:   logFilePath,
-			MaxSize:    config.MaxSize, // megabytes
-			MaxBackups: config.MaxBackups,
-			MaxAge:     config.MaxAge, //days
-			// Compress:   true
-		}
-
-		writers := []io.Writer{logFileWithRotation}
-
-		// Add console writers for all specified io.Writer destinations
-		for _, dest := range consoleWriterDestinations {
-			consoleWriter := zerolog.ConsoleWriter{Out: dest}
-			writers = append(writers, consoleWriter)
-		}
-		multi := zerolog.MultiLevelWriter(writers...)
-
-		logger := Logger{
-			logger: zerolog.New(multi).With().Timestamp().Logger(),
-			ready:  true,
-		}
-
-		return &logger, nil
-	} else {
-		return &Logger{
-			logger: zerolog.New(os.Stdout).With().Timestamp().Logger(),
-			ready:  true,
-		}, nil
+	if logFilePath == "" {
+		return nil, fmt.Errorf("cannot instantiate logger with empty path")
 	}
+
+	// make our directory if it doesn't exist already
+	logDir := filepath.Dir(logFilePath)
+	if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
+		return nil, fmt.Errorf("failed to create log directory %s", logDir)
+	}
+
+	logFileWithRotation := &lumberjack.Logger{
+		Filename:   logFilePath,
+		MaxSize:    config.MaxSize, // megabytes
+		MaxBackups: config.MaxBackups,
+		MaxAge:     config.MaxAge, //days
+		// Compress:   true
+	}
+
+	writers := []io.Writer{logFileWithRotation}
+
+	// Add console writers for all specified io.Writer's
+	for _, dest := range consoleWriters {
+		consoleWriter := zerolog.ConsoleWriter{Out: dest}
+		writers = append(writers, consoleWriter)
+	}
+	multi := zerolog.MultiLevelWriter(writers...)
+
+	logger := Logger{
+		logger: zerolog.New(multi).With().Timestamp().Logger(),
+		ready:  true,
+	}
+
+	return &logger, nil
+
 }
 
 func (l *Logger) AddAgentVersion(version string) {
