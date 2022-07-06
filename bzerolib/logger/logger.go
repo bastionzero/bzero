@@ -61,15 +61,15 @@ func DefaultLoggerConfig(logLevel string) *LoggerConfig {
 	}
 }
 
-func NewWithStdOutConsoleWriter(config *LoggerConfig, logFilePath string) (*Logger, error) {
-	return New(config, logFilePath, []io.Writer{os.Stdout})
+func New(config *LoggerConfig, logFilePath string) (*Logger, error) {
+	return createLogger(config, logFilePath, []io.Writer{})
 }
 
-func NewWithNoConsoleWriters(config *LoggerConfig, logFilePath string) (*Logger, error) {
-	return New(config, logFilePath, []io.Writer{})
+func NewWithStdOut(config *LoggerConfig, logFilePath string) (*Logger, error) {
+	return createLogger(config, logFilePath, []io.Writer{os.Stdout})
 }
 
-func New(config *LoggerConfig, logFilePath string, consoleWriterDestinations []io.Writer) (*Logger, error) {
+func createLogger(config *LoggerConfig, logFilePath string, consoleWriters []io.Writer) (*Logger, error) {
 	// Let's us display stack info on errors
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	zerolog.TimeFieldFormat = time.StampMilli
@@ -78,7 +78,6 @@ func New(config *LoggerConfig, logFilePath string, consoleWriterDestinations []i
 	// If the log file doesn't exist, create it, or append to the file
 	if logFilePath != "" {
 		// make our directory if it doesn't exist already
-		// TODO: do this in our install process
 		logDir := filepath.Dir(logFilePath)
 		if err := os.MkdirAll(logDir, os.ModePerm); err != nil {
 			return nil, fmt.Errorf("failed to create log directory %s", logDir)
@@ -94,8 +93,8 @@ func New(config *LoggerConfig, logFilePath string, consoleWriterDestinations []i
 
 		writers := []io.Writer{logFileWithRotation}
 
-		// Add console writers for all specified io.Writer destinations
-		for _, dest := range consoleWriterDestinations {
+		// Add console writers for all specified io.Writer's
+		for _, dest := range consoleWriters {
 			consoleWriter := zerolog.ConsoleWriter{Out: dest}
 			writers = append(writers, consoleWriter)
 		}
