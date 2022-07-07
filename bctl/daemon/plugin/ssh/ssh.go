@@ -61,7 +61,7 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 		listener, err := net.Listen("tcp", fmt.Sprintf(":%s", s.localPort))
 		s.logger.Errorf("Opened up on %s", s.localPort)
 		if err != nil {
-			s.logger.Errorf("failed to listen for connection: ", err)
+			s.logger.Errorf("failed to listen for connection: %s", err)
 		}
 		s.action = transparentssh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo, listener)
 	}
