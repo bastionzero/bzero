@@ -10,9 +10,12 @@ import (
 )
 
 type IBZCert interface {
+	Verify(idpProvider string, idpOrgId string) error
+	Refresh() error
 	Hash() string
 	PrivateKey() string
-	Expiration() time.Time
+	Expired() bool
+	Cert() *BZCert
 }
 
 type BZCert struct {
@@ -51,6 +54,10 @@ func (b *BZCert) PrivateKey() string {
 
 func (b *BZCert) Expired() bool {
 	return time.Now().After(b.expiration)
+}
+
+func (b *BZCert) Cert() *BZCert {
+	return b
 }
 
 // This function verifies the user's bzcert. The function returns the hash the bzcert, the

@@ -26,7 +26,7 @@ const maxPipelineLimit = 8
 type Keysplitting struct {
 	logger *logger.Logger
 
-	bzcert *bzcrt.BZCert
+	bzcert bzcrt.IBZCert
 
 	agentPubKey  string
 	ackPublicKey string
@@ -63,7 +63,7 @@ type Keysplitting struct {
 func New(
 	logger *logger.Logger,
 	agentPubKey string,
-	bzcert *bzcrt.BZCert,
+	bzcert bzcrt.IBZCert,
 ) (*Keysplitting, error) {
 
 	keysplitter := &Keysplitting{
@@ -337,8 +337,7 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 	return k.buildSyn(action, payload, send)
 }
 
-// It is the caller's responsibility to lock the stateLock mutex before calling
-// this function
+// It is the caller's responsibility to lock the stateLock mutex before calling this function
 func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
 	// Reset state
 	k.isHandshakeComplete = false
@@ -366,8 +365,11 @@ func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (
 		ActionPayload: payloadBytes,
 		TargetId:      k.agentPubKey,
 		Nonce:         util.Nonce(),
-		BZCert:        *k.bzcert,
+		BZCert:        *k.bzcert.Cert(),
 	}
+
+	b, _ := json.Marshal(synPayload)
+	k.logger.Infof("CERT: %s", b)
 
 	ksMessage := ksmsg.KeysplittingMessage{
 		Type:                ksmsg.Syn,
@@ -376,7 +378,7 @@ func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (
 
 	// Sign it and add it to our hash map
 	if err := ksMessage.Sign(k.bzcert.PrivateKey()); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrFailedToSign, err)
+		return nil, fmt.Errorf("%s: %w", ErrFailedToSign, err)
 	} else if err := k.addToPipelineMap(ksMessage); err != nil {
 		return nil, err
 	} else {
