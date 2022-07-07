@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	InputBufferSize = int(64 * 1024)
-	endedByUser     = "SSH session ended"
+	InputBufferSize  = int(64 * 1024)
+	endedByUser      = "SSH session ended"
+	sshPayloadOffset = 4
 )
 
 const readyMsg = "BZERO-DAEMON READY-TO-CONNECT"
@@ -82,15 +83,24 @@ func (t *TransparentSsh) Kill() {
 
 func (t *TransparentSsh) Start() error {
 
-	var err error
 	var privateKey []byte
+	var err error
+	var useExistingKeys bool
+
 	// although we don't use keys for authentication, the local ssh process will
 	// throw an error if it's told to look for an invalid IdentityFile
 	// so unfortunately we still need to create one if it doesn't exist
 	//
 	// we then re-use this private key as our "host key" when we terminate the ssh connection
-	if privateKey, err = bzssh.ReadPrivateKeyBytes(t.identityFile, t.filIo); err != nil {
-		// can I avoid this?
+	if publicKeyRsa, err := bzssh.ReadPublicKeyRsa(t.identityFile, t.filIo); err == nil {
+		if _, err = bzssh.GeneratePublicKey(publicKeyRsa); err != nil {
+			t.logger.Errorf("error decoding temporary public key: %s", err)
+		} else if privateKey, err = t.filIo.ReadFile(t.identityFile); err == nil {
+			t.logger.Debugf("using existing temporary keys")
+			useExistingKeys = true
+		}
+	}
+	if !useExistingKeys {
 		t.logger.Debugf("generating new temporary keys")
 		privateKey, _, err = bzssh.GenerateKeys()
 		if err != nil {
@@ -154,13 +164,16 @@ func (t *TransparentSsh) Start() error {
 				}
 
 				// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
-				go func(in <-chan *gossh.Request) {
-					for req := range in {
-						ok := false
+				go func(requests <-chan *gossh.Request) {
+					for req := range requests {
+						var ok bool
+						var payloadSize int
+
 						switch req.Type {
 						// handle scp (and someday, other exec)
 						case "exec":
-							command := string(req.Payload[4 : req.Payload[3]+4])
+							payloadSize = int(req.Payload[3])
+							command := string(req.Payload[sshPayloadOffset : sshPayloadOffset+payloadSize])
 							if !bzssh.IsValidScp(command) {
 								errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command))
 								t.logger.Errorf(errMsg)
@@ -177,9 +190,10 @@ func (t *TransparentSsh) Start() error {
 							}
 							t.sendOutputMessage(bzssh.SshExec, sshExecMessage)
 
-						// handle sftp (looks like git works over this kind of system too)
+						// handle sftp (NOTE: looks like git works over this kind of system too)
 						case "subsystem":
-							command := string(req.Payload[4 : req.Payload[3]+4])
+							payloadSize = int(req.Payload[3])
+							command := string(req.Payload[sshPayloadOffset : sshPayloadOffset+payloadSize])
 
 							if !bzssh.IsValidSftp(command) {
 								errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command))
@@ -259,18 +273,22 @@ func (t *TransparentSsh) readFromChannel() {
 }
 
 func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
+	//default to stdout
+	var writer io.Writer = t.sshChannel
+	stream := "stdout"
+
 	switch smsg.StreamType(smessage.Type) {
-	// we don't expect any stderr messages to come in the case of scp,
-	// and at any rate I don't think ssh treats them any differently from stdout messages
 	case smsg.StdErr:
-		t.logger.Errorf("received bytes from remote stderr; writing them to local ssh channel")
+		// we treat the same as stdout but flag accordingly
+		writer = t.sshChannel.Stderr()
+		stream = "stderr"
 		fallthrough
 	case smsg.StdOut:
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			t.logger.Errorf("Error decoding ssh StdOut stream content: %s", err)
 		} else {
-			t.logger.Infof("sending %d bytes to channel", len(contentBytes))
-			if _, err = t.sshChannel.Write(contentBytes); err != nil {
+			t.logger.Infof("sending %d bytes to channel %s", len(contentBytes), stream)
+			if _, err = writer.Write(contentBytes); err != nil {
 				t.logger.Errorf("Error writing to channel: %s", err)
 			}
 			if !smessage.More {

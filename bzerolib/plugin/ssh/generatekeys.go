@@ -101,12 +101,3 @@ func ReadPublicKeyRsa(privateKeyPath string, fileIo bzio.BzFileIo) (*rsa.PublicK
 		return &privateKey.PublicKey, privateKey.Validate()
 	}
 }
-
-//  takes a private key path and returns the PEM bytes of that key
-func ReadPrivateKeyBytes(privateKeyPath string, fileIo bzio.BzFileIo) ([]byte, error) {
-	if privatePem, err := fileIo.ReadFile(privateKeyPath); err != nil {
-		return nil, err
-	} else {
-		return privatePem, nil
-	}
-}

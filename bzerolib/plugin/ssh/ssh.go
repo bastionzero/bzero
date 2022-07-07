@@ -49,12 +49,14 @@ const (
 	SshClose SshSubAction = "ssh/close"
 )
 
+// verify that the command begins with "scp "
 func IsValidScp(command string) bool {
 	return string([]rune(command)[:4]) == scpWithSpace
 }
 
+// verify that the entire command is "sftp"
 func IsValidSftp(command string) bool {
-	return string([]rune(command)[:4]) == sftp
+	return string([]rune(command)) == sftp
 }
 
 func UnauthorizedCommandError(received string) string {

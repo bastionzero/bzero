@@ -67,6 +67,8 @@ func (s *OpaqueSsh) Kill() {
 func (s *OpaqueSsh) Start() error {
 
 	var privateKey, publicKey []byte
+	var err error
+	var useExistingKeys bool
 
 	// if we already have a private key, use it. Otherwise, create a new one
 	// NOTE: it is technically possible for this to create a one-time race if two SSH processes
@@ -74,11 +76,13 @@ func (s *OpaqueSsh) Start() error {
 	// if/when we upgrade the SSH architecture
 	if publicKeyRsa, err := bzssh.ReadPublicKeyRsa(s.identityFile, s.filIo); err == nil {
 		if publicKey, err = bzssh.GeneratePublicKey(publicKeyRsa); err != nil {
-			return fmt.Errorf("error decoding temporary public key: %s", err)
+			s.logger.Errorf("error decoding temporary public key: %s", err)
 		} else {
 			s.logger.Debugf("using existing temporary keys")
+			useExistingKeys = true
 		}
-	} else {
+	}
+	if !useExistingKeys {
 		s.logger.Debugf("generating new temporary keys")
 		privateKey, publicKey, err = bzssh.GenerateKeys()
 		if err != nil {

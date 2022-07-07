@@ -59,7 +59,6 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 		// listen for a connection from the ZLI
 		// action is responsible for closing this
 		listener, err := net.Listen("tcp", fmt.Sprintf(":%s", s.localPort))
-		s.logger.Errorf("Opened up on %s", s.localPort)
 		if err != nil {
 			s.logger.Errorf("failed to listen for connection: %s", err)
 		}
