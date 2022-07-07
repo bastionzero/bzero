@@ -10,6 +10,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -80,6 +81,7 @@ func StartShellServer(
 	// create our new datachannel
 	if err := server.newDataChannel(string(bzshell.DefaultShell), server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	return nil

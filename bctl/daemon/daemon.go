@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/shellserver"
@@ -142,6 +144,24 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 	cert, err := bzcert.New(config)
 	if err != nil {
 		return err
+	}
+
+	err = cert.Verify(config.CertConfig.OrgProvider, config.CertConfig.OrgIssuerId)
+	if err != nil {
+		logger.Errorf("Error constructing BastionZero certificate: %s", err)
+
+		// https://go.dev/blog/go1.13-errors target
+		// Check if the error is either a bzcert.InitialIdTokenError (IdP key
+		// rotation) or bzcert.CurrentIdTokenError (id token needs to be
+		// refreshed) token error and prompt user to re-login
+		var initialIdTokenError *bzcert.InitialIdTokenError
+		var currentIdTokenError *bzcert.InitialIdTokenError
+		if errors.As(err, &initialIdTokenError) || errors.As(err, &currentIdTokenError) {
+			logger.Errorf("IdP tokens are invalid/expired. Please try to re-login with the zli.")
+			os.Exit(exitcodes.BZCERT_ID_TOKEN_ERROR)
+		}
+
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	switch bzplugin.PluginName(plugin) {

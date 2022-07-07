@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
@@ -96,7 +97,7 @@ func StartSshServer(
 	// create our new datachannel
 	if err := server.newDataChannel(action, server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
-		return err
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	return nil

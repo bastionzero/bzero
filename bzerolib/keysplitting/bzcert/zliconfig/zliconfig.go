@@ -27,6 +27,8 @@ type BZCertConfig struct {
 	CerRand          string `json:"cerRand"`
 	CerRandSignature string `json:"cerRandSig"`
 	InitialIdToken   string `json:"initialIdToken"`
+	OrgIssuerId      string `json:"orgIssuerId"`
+	OrgProvider      string `json:"orgProvider"`
 }
 
 func New(configPath string, refreshCommand string) (*ZLIConfig, error) {
