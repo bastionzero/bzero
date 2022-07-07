@@ -88,7 +88,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 		It("rejects an invalid subsystem request", func() {
 			badSftp := "sftpfake"
-			shellReqErrMsg := bzssh.UnauthorizedCommandError("shell request")
+			badSftpErrMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", badSftp))
 
 			doneChan := make(chan struct{})
 			outboxQueue := make(chan plugin.ActionWrapper, 1)
@@ -99,7 +99,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
-			mockIoService.On("WriteErr", []byte(shellReqErrMsg)).Return(len(shellReqErrMsg), nil)
+			mockIoService.On("WriteErr", []byte(badSftpErrMsg)).Return(len(badSftpErrMsg), nil)
 
 			// I guess I then need to make a client that also talks to this?
 			listener, _ := net.Listen("tcp", ":22221")
@@ -127,8 +127,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 		})
 
 		It("rejects all shell requests", func() {
-			badSftp := "sftpfake"
-			badSftpErrMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", badSftp))
+			shellReqErrMsg := bzssh.UnauthorizedCommandError("shell request")
 
 			doneChan := make(chan struct{})
 			outboxQueue := make(chan plugin.ActionWrapper, 1)
@@ -139,7 +138,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
-			mockIoService.On("WriteErr", []byte(badSftpErrMsg)).Return(len(badSftpErrMsg), nil)
+			mockIoService.On("WriteErr", []byte(shellReqErrMsg)).Return(len(shellReqErrMsg), nil)
 
 			// I guess I then need to make a client that also talks to this?
 			listener, _ := net.Listen("tcp", ":22226")
