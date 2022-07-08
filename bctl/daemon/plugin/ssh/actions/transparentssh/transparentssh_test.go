@@ -20,6 +20,32 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/tests"
 )
 
+func startSession(s *TransparentSsh, port string, config *gossh.ClientConfig) (*gossh.Client, *gossh.Session) {
+	By("starting without error")
+	err := s.Start()
+	Expect(err).To(BeNil())
+
+	By("executing the SSH handshake")
+	conn, err := gossh.Dial("tcp", fmt.Sprintf("localhost:%s", port), config)
+	Expect(err).To(BeNil())
+
+	session, err := conn.NewSession()
+	Expect(err).To(BeNil())
+
+	return conn, session
+}
+
+func readPipe(pipe io.Reader, outputChan chan []byte) {
+	b := make([]byte, 100)
+	for {
+		if n, err := pipe.Read(b); err != nil {
+			return
+		} else if n > 0 {
+			outputChan <- b[:n]
+		}
+	}
+}
+
 func TestDefaultSsh(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Daemon TransparentSsh Suite")
@@ -45,8 +71,18 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 	})
 
 	Context("rejects unauthorized requests", func() {
+
+		var conn *gossh.Client
+		var session *gossh.Session
+
+		AfterEach(func() {
+			conn.Close()
+			session.Close()
+		})
+
 		It("rejects an invalid exec request", func() {
 			badScp := "scpfake"
+			port := "22220"
 			badScpErrMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", badScp))
 
 			doneChan := make(chan struct{})
@@ -60,22 +96,9 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(badScpErrMsg)).Return(len(badScpErrMsg), nil)
 
-			// I guess I then need to make a client that also talks to this?
-			listener, _ := net.Listen("tcp", ":22222")
-
+			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
 			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-
-			By("starting without error")
-			err := s.Start()
-			Expect(err).To(BeNil())
-
-			By("executing the SSH handshake")
-			conn, err := gossh.Dial("tcp", "localhost:22222", config)
-			Expect(err).To(BeNil())
-			defer conn.Close()
-
-			session, err := conn.NewSession()
-			Expect(err).To(BeNil())
+			conn, session = startSession(s, port, config)
 
 			By("rejecting the invalid request")
 			ok, err := session.SendRequest("exec", true, []byte(fmt.Sprintf("\u0000\u0000\u0000\u0007%s", badScp)))
@@ -88,6 +111,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 		It("rejects an invalid subsystem request", func() {
 			badSftp := "sftpfake"
+			port := "22221"
 			badSftpErrMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", badSftp))
 
 			doneChan := make(chan struct{})
@@ -101,25 +125,12 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(badSftpErrMsg)).Return(len(badSftpErrMsg), nil)
 
-			// I guess I then need to make a client that also talks to this?
-			listener, _ := net.Listen("tcp", ":22221")
-
+			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
 			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-
-			By("starting without error")
-			err := s.Start()
-			Expect(err).To(BeNil())
-
-			By("executing the SSH handshake")
-			conn, err := gossh.Dial("tcp", "localhost:22221", config)
-			Expect(err).To(BeNil())
-			defer conn.Close()
-
-			session, err := conn.NewSession()
-			Expect(err).To(BeNil())
+			conn, session = startSession(s, port, config)
 
 			By("rejecting the invalid request")
-			err = session.RequestSubsystem(badSftp)
+			err := session.RequestSubsystem(badSftp)
 			Expect(err).To(Equal(io.EOF))
 
 			mockFileService.AssertExpectations(GinkgoT())
@@ -127,6 +138,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 		})
 
 		It("rejects all shell requests", func() {
+			port := "22222"
 			shellReqErrMsg := bzssh.UnauthorizedCommandError("shell request")
 
 			doneChan := make(chan struct{})
@@ -140,22 +152,9 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(shellReqErrMsg)).Return(len(shellReqErrMsg), nil)
 
-			// I guess I then need to make a client that also talks to this?
-			listener, _ := net.Listen("tcp", ":22226")
-
+			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
 			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-
-			By("starting without error")
-			err := s.Start()
-			Expect(err).To(BeNil())
-
-			By("executing the SSH handshake")
-			conn, err := gossh.Dial("tcp", "localhost:22226", config)
-			Expect(err).To(BeNil())
-			defer conn.Close()
-
-			session, err := conn.NewSession()
-			Expect(err).To(BeNil())
+			conn, session = startSession(s, port, config)
 
 			By("rejecting the invalid request")
 			ok, err := session.SendRequest("shell", true, []byte{})
@@ -167,13 +166,21 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 		})
 	})
 
-	// NOTE: we can't make extensive use of the hierarchy here because we're evaluating messages being passed as state changes
 	Context("Happy path I: keys exist - scp - stdout - upload", func() {
 		agentReply := "testAgentReply"
 		channelInput := "testChannelInput"
 
-		It("rejects an invalid exec request", func() {
+		var conn *gossh.Client
+		var session *gossh.Session
+
+		AfterEach(func() {
+			conn.Close()
+			session.Close()
+		})
+
+		It("handles the request from start to finish", func() {
 			scp := "scp -f testFile.txt"
+			port := "22223"
 
 			doneChan := make(chan struct{})
 			outboxQueue := make(chan plugin.ActionWrapper, 1)
@@ -186,28 +193,16 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 
-			listener, _ := net.Listen("tcp", ":22220")
+			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
 			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-
-			By("starting without error")
-			err := s.Start()
-			Expect(err).To(BeNil())
+			conn, session = startSession(s, port, config)
 
 			By("sending an open message to the agent")
 			openMessage := <-outboxQueue
 			Expect(openMessage.Action).To(Equal(string(bzssh.SshOpen)))
 			var openPayload bzssh.SshOpenMessage
-			err = json.Unmarshal(openMessage.ActionPayload, &openPayload)
+			err := json.Unmarshal(openMessage.ActionPayload, &openPayload)
 			Expect(err).To(BeNil())
-
-			By("executing the SSH handshake")
-			conn, err := gossh.Dial("tcp", "localhost:22220", config)
-			Expect(err).To(BeNil())
-			defer conn.Close()
-
-			session, err := conn.NewSession()
-			Expect(err).To(BeNil())
-			defer session.Close()
 
 			// TODO: clean up and prove it's stdout
 			stdout, err := session.StdoutPipe()
@@ -273,8 +268,17 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 	Context("Happy path II: keys don't exist - sftp - stderr - download", func() {
 		agentReply := "testAgentReply"
 
-		It("rejects an invalid exec request", func() {
+		var conn *gossh.Client
+		var session *gossh.Session
+
+		AfterEach(func() {
+			conn.Close()
+			session.Close()
+		})
+
+		It("handles the request from start to finish", func() {
 			sftp := "sftp"
+			port := "22224"
 
 			doneChan := make(chan struct{})
 			outboxQueue := make(chan plugin.ActionWrapper, 1)
@@ -289,19 +293,12 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 
-			listener, _ := net.Listen("tcp", ":22225")
+			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
 			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			conn, session = startSession(s, port, config)
 
-			// take a few steps for granted since we already tested them
-			By("starting without error")
-			s.Start()
+			// take the open message for granted since we already tested
 			<-outboxQueue
-
-			By("executing the SSH handshake")
-			conn, _ := gossh.Dial("tcp", "localhost:22225", config)
-			defer conn.Close()
-			session, _ := conn.NewSession()
-			defer session.Close()
 
 			// TODO: cleanup and prove it's stderr
 			stdout, err := session.StdoutPipe()
@@ -348,14 +345,3 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 		})
 	})
 })
-
-func readPipe(pipe io.Reader, outputChan chan []byte) {
-	b := make([]byte, 100)
-	for {
-		if n, err := pipe.Read(b); err != nil {
-			return
-		} else if n > 0 {
-			outputChan <- b[:n]
-		}
-	}
-}
