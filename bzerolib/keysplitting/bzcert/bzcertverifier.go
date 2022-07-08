@@ -16,6 +16,10 @@ const (
 	googleUrl    = "https://accounts.google.com"
 	microsoftUrl = "https://login.microsoftonline.com"
 
+	// this is the tenant id Microsoft uses when the account is a personal account (not a work/school account)
+	// https://docs.microsoft.com/en-us/azure/active-directory/develop/id-tokens#payload-claims)
+	microsoftPersonalAccountTenantId = "9188040d-6c67-4c5b-b112-36a304b66dad"
+
 	initialIdTokenLifetime = time.Hour * 24 * 365 * 5 // 5 years
 )
 
@@ -27,11 +31,11 @@ type BZCertVerifier struct {
 
 // the claims we care about checking
 type idTokenClaims struct {
-	HD       string `json:"hd"`    // Google Org ID
-	Nonce    string `json:"nonce"` // BastionZero-issued nonce
-	TID      string `json:"tid"`   // Microsoft Tenant ID
-	IssuedAt int64  `json:"iat"`   // Unix datetime of issuance
-	Death    int64  `json:"exp"`   // Unix datetime of token expiry
+	HD         string `json:"hd"`    // Google Org ID
+	Nonce      string `json:"nonce"` // BastionZero-issued structured nonce
+	TID        string `json:"tid"`   // Microsoft Tenant ID
+	IssuedAt   int64  `json:"iat"`   // Unix datetime of issuance
+	Expiration int64  `json:"exp"`   // Unix datetime of token expiry
 }
 
 type ProviderType string
@@ -41,6 +45,7 @@ const (
 	Microsoft ProviderType = "microsoft"
 	Okta      ProviderType = "okta"
 	// Custom    ProviderType = "custom" // plan for custom IdP support
+	None ProviderType = "None"
 )
 
 func NewVerifier(idpProvider string, idpOrgId string) (*BZCertVerifier, error) {
@@ -51,7 +56,7 @@ func NewVerifier(idpProvider string, idpOrgId string) (*BZCertVerifier, error) {
 	case Google:
 		issuerUrl = googleUrl
 	case Microsoft:
-		issuerUrl = fmt.Sprintf("%s/%s/v2.0", microsoftUrl, idpOrgId)
+		issuerUrl = getMicrosoftIssUrl(idpOrgId)
 	case Okta:
 		issuerUrl = fmt.Sprintf("https://%s.okta.com", idpOrgId)
 	// case Custom:
@@ -75,6 +80,19 @@ func NewVerifier(idpProvider string, idpOrgId string) (*BZCertVerifier, error) {
 	}, nil
 }
 
+func getMicrosoftIssUrl(orgId string) string {
+	// Handles personal accounts by using microsoftPersonalAccountTenantId as the tenantId
+	// see https://github.com/coreos/go-oidc/issues/121
+	tenantId := ""
+	if orgId == "None" {
+		tenantId = microsoftPersonalAccountTenantId
+	} else {
+		tenantId = orgId
+	}
+
+	return fmt.Sprintf("%s/%s/v2.0", microsoftUrl, tenantId)
+}
+
 func (v *BZCertVerifier) Verify(bzcert *BZCert) (exp time.Time, err error) {
 	if err = v.verifyInitialIdToken(bzcert.InitialIdToken, bzcert); err != nil {
 		return exp, fmt.Errorf("error verifying initial id token: %w", err)
@@ -96,7 +114,7 @@ func (v *BZCertVerifier) verifyCurrentIdToken(token string) (time.Time, error) {
 	if claims, err := v.getTokenClaims(token, config); err != nil {
 		return time.Time{}, err
 	} else {
-		return time.Unix(claims.Death, 0), nil
+		return time.Unix(claims.Expiration, 0), nil
 	}
 }
 
