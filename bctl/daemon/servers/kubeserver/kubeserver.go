@@ -12,10 +12,10 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
-	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/tokenrefresh"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
@@ -53,11 +53,10 @@ type KubeServer struct {
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	// fields for new datachannels
-	refreshTokenCommand string
-	configPath          string
-	targetUser          string
-	targetGroups        []string
-	agentPubKey         string
+	cert         *bzcert.BZCert
+	targetUser   string
+	targetGroups []string
+	agentPubKey  string
 }
 
 func StartKubeServer(
@@ -66,8 +65,7 @@ func StartKubeServer(
 	localHost string,
 	certPath string,
 	keyPath string,
-	refreshTokenCommand string,
-	configPath string,
+	cert *bzcert.BZCert,
 	targetUser string,
 	targetGroups []string,
 	localhostToken string,
@@ -86,10 +84,9 @@ func StartKubeServer(
 		params:              params,
 		headers:             headers,
 		targetSelectHandler: targetSelectHandler,
-		configPath:          configPath,
+		cert:                cert,
 		targetUser:          targetUser,
 		targetGroups:        targetGroups,
-		refreshTokenCommand: refreshTokenCommand,
 		agentPubKey:         agentPubKey,
 	}
 
@@ -145,7 +142,7 @@ func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 // for creating new websockets
 func (k *KubeServer) newWebsocket(wsId string) error {
 	subLogger := k.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, k.serviceUrl, k.params, k.headers, k.targetSelectHandler, autoReconnect, getChallenge, k.refreshTokenCommand, websocket.Cluster); err != nil {
+	if wsClient, err := websocket.New(subLogger, k.serviceUrl, k.params, k.headers, k.targetSelectHandler, autoReconnect, getChallenge, websocket.Cluster); err != nil {
 		return err
 	} else {
 		k.websocket = wsClient
@@ -155,53 +152,56 @@ func (k *KubeServer) newWebsocket(wsId string) error {
 
 // for creating new datachannels
 func (k *KubeServer) newDataChannel(dcId string, action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin, writer http.ResponseWriter) error {
-	attach := false
 	subLogger := k.logger.GetDatachannelLogger(dcId)
 
-	k.logger.Infof("Creating new datachannel id: %v", dcId)
+	k.logger.Infof("Creating new datachannel id: %d", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := bzkube.KubeActionParams{
+	synPayload := bzkube.KubeActionParams{
 		TargetUser:   k.targetUser,
 		TargetGroups: k.targetGroups,
 	}
 
-	action = "kube/" + action
 	ksLogger := k.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, k.agentPubKey, tokenrefresh.NewMRZAPTokenRefresher(k.configPath, k.refreshTokenCommand)); err != nil {
+	keysplitter, err := keysplitting.New(ksLogger, k.agentPubKey, k.cert)
+	if err != nil {
 		return err
-	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &k.tmb, websocket, keysplitter, plugin, action, actionParams, attach, true); err != nil {
-		return err
-	} else {
-
-		// create a function to listen to the datachannel dying and then laugh
-		go func() {
-			for {
-				select {
-				case <-k.tmb.Dying():
-					datachannel.Close(errors.New("kube server closing"))
-					return
-				case <-dcTmb.Dead():
-					// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
-					if err := dcTmb.Err(); err != nil {
-						errs := strings.Split(dcTmb.Err().Error(), ": ")
-						msg := fmt.Sprintf("error: %s", errs[len(errs)-1])
-						k.bubbleUpError(writer, msg, 500)
-					}
-
-					// notify agent to close the datachannel
-					k.logger.Info("Sending DataChannel Close")
-					cdMessage := am.AgentMessage{
-						ChannelId:   dcId,
-						MessageType: string(am.CloseDataChannel),
-					}
-					k.websocket.Send(cdMessage)
-					return
-				}
-			}
-		}()
-		return nil
 	}
+
+	action = "kube/" + action
+	attach := false
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &k.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	if err != nil {
+		return err
+	}
+
+	// create a function to listen to the datachannel dying and then laugh
+	go func() {
+		for {
+			select {
+			case <-k.tmb.Dying():
+				dc.Close(errors.New("kube server closing"))
+				return
+			case <-dcTmb.Dead():
+				// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
+				if err := dcTmb.Err(); err != nil {
+					errs := strings.Split(dcTmb.Err().Error(), ": ")
+					msg := fmt.Sprintf("error: %s", errs[len(errs)-1])
+					k.bubbleUpError(writer, msg, 500)
+				}
+
+				// notify agent to close the datachannel
+				k.logger.Info("Sending DataChannel Close")
+				cdMessage := am.AgentMessage{
+					ChannelId:   dcId,
+					MessageType: string(am.CloseDataChannel),
+				}
+				k.websocket.Send(cdMessage)
+				return
+			}
+		}
+	}()
+	return nil
 }
 
 func (k *KubeServer) bubbleUpError(w http.ResponseWriter, msg string, statusCode int) {
