@@ -20,9 +20,9 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/tests"
 )
 
-func startSession(s *TransparentSsh, port string, config *gossh.ClientConfig) (*gossh.Client, *gossh.Session) {
+func startSession(t *TransparentSsh, port string, config *gossh.ClientConfig) (*gossh.Client, *gossh.Session) {
 	By("starting without error")
-	err := s.Start()
+	err := t.Start()
 	Expect(err).To(BeNil())
 
 	By("executing the SSH handshake")
@@ -115,8 +115,8 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("WriteErr", []byte(badScpErrMsg)).Return(len(badScpErrMsg), nil)
 
 			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
-			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-			conn, session = startSession(s, port, config)
+			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			conn, session = startSession(t, port, config)
 
 			By("rejecting the invalid request")
 			ok, err := session.SendRequest("exec", true, []byte(fmt.Sprintf("\u0000\u0000\u0000\u0007%s", badScp)))
@@ -144,8 +144,8 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("WriteErr", []byte(badSftpErrMsg)).Return(len(badSftpErrMsg), nil)
 
 			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
-			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-			conn, session = startSession(s, port, config)
+			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			conn, session = startSession(t, port, config)
 
 			By("rejecting the invalid request")
 			err := session.RequestSubsystem(badSftp)
@@ -171,8 +171,8 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("WriteErr", []byte(shellReqErrMsg)).Return(len(shellReqErrMsg), nil)
 
 			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
-			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-			conn, session = startSession(s, port, config)
+			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			conn, session = startSession(t, port, config)
 
 			By("rejecting the invalid request")
 			ok, err := session.SendRequest("shell", true, []byte{})
@@ -212,8 +212,8 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 
 			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
-			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-			conn, session = startSession(s, port, config)
+			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			conn, session = startSession(t, port, config)
 
 			By("sending an open message to the agent")
 			openMessage := <-outboxQueue
@@ -236,7 +236,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			By("writing the agent's response to the ssh channel's stdout")
 			messageContent := base64.StdEncoding.EncodeToString([]byte(agentReply))
-			s.ReceiveStream(smsg.StreamMessage{
+			t.ReceiveStream(smsg.StreamMessage{
 				Type:    smsg.StdOut,
 				Content: messageContent,
 				More:    true,
@@ -300,8 +300,8 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 
 			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
-			s := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
-			conn, session = startSession(s, port, config)
+			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			conn, session = startSession(t, port, config)
 
 			// take the open message for granted since we already tested
 			<-outboxQueue
@@ -319,7 +319,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			By("writing the agent's response to the ssh channel's stderr")
 			messageContent := base64.StdEncoding.EncodeToString([]byte(agentReply))
-			s.ReceiveStream(smsg.StreamMessage{
+			t.ReceiveStream(smsg.StreamMessage{
 				Type:    smsg.StdErr,
 				Content: messageContent,
 				More:    false,
