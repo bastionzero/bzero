@@ -35,6 +35,23 @@ func startSession(s *TransparentSsh, port string, config *gossh.ClientConfig) (*
 	return conn, session
 }
 
+func setupIo(session *gossh.Session) (io.WriteCloser, chan []byte, chan []byte) {
+	stdout, err := session.StdoutPipe()
+	Expect(err).To(BeNil())
+	stderr, err := session.StderrPipe()
+	Expect(err).To(BeNil())
+	stdin, err := session.StdinPipe()
+	Expect(err).To(BeNil())
+
+	stdoutChan := make(chan []byte)
+	stderrChan := make(chan []byte)
+
+	go readPipe(stdout, stdoutChan)
+	go readPipe(stderr, stderrChan)
+
+	return stdin, stdoutChan, stderrChan
+}
+
 func readPipe(pipe io.Reader, outputChan chan []byte) {
 	b := make([]byte, 100)
 	for {
@@ -204,13 +221,8 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			err := json.Unmarshal(openMessage.ActionPayload, &openPayload)
 			Expect(err).To(BeNil())
 
-			// TODO: clean up and prove it's stdout
-			stdout, err := session.StdoutPipe()
-			Expect(err).To(BeNil())
-			stderr, err := session.StderrPipe()
-			Expect(err).To(BeNil())
-			stdin, err := session.StdinPipe()
-			Expect(err).To(BeNil())
+			// TODO: can I move this?
+			stdin, stdoutChan, _ := setupIo(session)
 
 			By("sending a valid exec command to the agent")
 			// NOTE: don't forget that unicode codes are base-16, so to express "19" here, we use u+0013
@@ -226,10 +238,6 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			By("writing the agent's response to the ssh channel")
 
-			readChan := make(chan []byte)
-			go readPipe(stdout, readChan)
-			go readPipe(stderr, readChan)
-
 			messageContent := base64.StdEncoding.EncodeToString([]byte(agentReply))
 			s.ReceiveStream(smsg.StreamMessage{
 				Type:    smsg.StdOut,
@@ -237,7 +245,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 				More:    true,
 			})
 
-			output := <-readChan
+			output := <-stdoutChan
 			Expect(string(output)).To(Equal(agentReply))
 
 			By("sending the channel's input to the agent")
@@ -300,14 +308,11 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			// take the open message for granted since we already tested
 			<-outboxQueue
 
-			// TODO: cleanup and prove it's stderr
-			stdout, err := session.StdoutPipe()
-			Expect(err).To(BeNil())
-			stderr, err := session.StderrPipe()
-			Expect(err).To(BeNil())
+			// TODO: can I move this?
+			_, _, stderrChan := setupIo(session)
 
 			By("sending a valid exec command to the agent")
-			err = session.RequestSubsystem(sftp)
+			err := session.RequestSubsystem(sftp)
 			Expect(err).To(BeNil())
 
 			execMessage := <-outboxQueue
@@ -318,11 +323,6 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			Expect(execPayload.Sftp).To(BeTrue())
 
 			By("writing the agent's response to the ssh channel")
-
-			readChan := make(chan []byte)
-			go readPipe(stdout, readChan)
-			go readPipe(stderr, readChan)
-
 			messageContent := base64.StdEncoding.EncodeToString([]byte(agentReply))
 			s.ReceiveStream(smsg.StreamMessage{
 				Type:    smsg.StdErr,
@@ -330,7 +330,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 				More:    false,
 			})
 
-			output := <-readChan
+			output := <-stderrChan
 			Expect(string(output)).To(Equal(agentReply))
 
 			By("closing when the remote command finishes")
