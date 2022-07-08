@@ -10,8 +10,9 @@ import (
 
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
+	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
@@ -19,10 +20,6 @@ const (
 	chunkSize     = 64 * 1024
 	writeDeadline = 5 * time.Second
 )
-
-type AuthorizedKeysInterface interface {
-	Add(pubkey string) error
-}
 
 type OpaqueSsh struct {
 	tmb    tomb.Tomb
@@ -36,10 +33,10 @@ type OpaqueSsh struct {
 	streamMessageVersion smsg.SchemaVersion
 
 	remoteConnection *net.TCPConn
-	authorizedKeys   AuthorizedKeysInterface
+	authorizedKeys   authorizedkeys.IAuthorizedKeys
 }
 
-func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *net.TCPConn, authKeys AuthorizedKeysInterface) *OpaqueSsh {
+func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *net.TCPConn, authKeys authorizedkeys.IAuthorizedKeys) *OpaqueSsh {
 
 	return &OpaqueSsh{
 		logger:           logger,
@@ -50,53 +47,53 @@ func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessa
 	}
 }
 
-func (d *OpaqueSsh) Kill() {
-	d.tmb.Kill(nil)
-	if d.remoteConnection != nil {
-		(*d.remoteConnection).Close()
+func (s *OpaqueSsh) Kill() {
+	s.tmb.Kill(nil)
+	if s.remoteConnection != nil {
+		(*s.remoteConnection).Close()
 	}
-	d.tmb.Wait()
+	s.tmb.Wait()
 }
 
-func (d *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
+func (s *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
 
-	switch ssh.SshSubAction(action) {
+  switch ssh.SshSubAction(action) {
 	case ssh.SshOpen:
 		var openRequest ssh.SshOpenMessage
 		if err := json.Unmarshal(actionPayload, &openRequest); err != nil {
-			return nil, fmt.Errorf("malformed default SSH action payload %s", string(actionPayload))
-		} else if err = d.authorizedKeys.Add(string(openRequest.PublicKey)); err != nil {
+			return nil, fmt.Errorf("malformed opaque ssh action payload %s", string(actionPayload))
+		} else if err = s.authorizedKeys.Add(string(openRequest.PublicKey)); err != nil {
 			return nil, err
 		}
 
-		return d.start(openRequest, action)
-	case ssh.SshInput:
+		return s.start(openRequest, action)
 
+	case bzssh.SshInput:
 		// Deserialize the action payload, the only action passed is input
-		var inputRequest ssh.SshInputMessage
+		var inputRequest bzssh.SshInputMessage
 		if err := json.Unmarshal(actionPayload, &inputRequest); err != nil {
-			return nil, fmt.Errorf("unable to unmarshal default SSH input message: %s", err)
+			return nil, fmt.Errorf("unable to unmarshal opaque ssh input message: %s", err)
 		}
 
 		// Set a deadline for the write so we don't block forever
-		(*d.remoteConnection).SetWriteDeadline(time.Now().Add(writeDeadline))
-		if _, err := (*d.remoteConnection).Write(inputRequest.Data); !d.tmb.Alive() {
+		(*s.remoteConnection).SetWriteDeadline(time.Now().Add(writeDeadline))
+		if _, err := (*s.remoteConnection).Write(inputRequest.Data); !s.tmb.Alive() {
 			return []byte{}, nil
 		} else if err != nil {
-			d.logger.Errorf("error writing to local TCP connection: %s", err)
-			d.Kill()
+			s.logger.Errorf("error writing to local TCP connection: %s", err)
+			s.Kill()
 		}
 
-	case ssh.SshClose:
+	case bzssh.SshClose:
 		// Deserialize the action payload
-		var closeRequest ssh.SshCloseMessage
+		var closeRequest bzssh.SshCloseMessage
 		if jerr := json.Unmarshal(actionPayload, &closeRequest); jerr != nil {
 			// not a fatal error, we can still just close without a reason
-			d.logger.Errorf("unable to unmarshal default SSH close message: %s", jerr)
+			s.logger.Errorf("unable to unmarshal opaque ssh close message: %s", jerr)
 		}
 
-		d.logger.Infof("Ending TCP connection because we received this close message from daemon: %s", closeRequest.Reason)
-		d.Kill()
+		s.logger.Infof("Ending TCP connection because we received this close message from daemon: %s", closeRequest.Reason)
+		s.Kill()
 
 		return actionPayload, nil
 	default:
@@ -106,41 +103,41 @@ func (d *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error)
 	return []byte{}, nil
 }
 
-func (d *OpaqueSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte, error) {
-	d.streamMessageVersion = openRequest.StreamMessageVersion
-	d.logger.Debugf("Setting stream message version: %s", d.streamMessageVersion)
+func (s *OpaqueSsh) start(openRequest bzssh.SshOpenMessage, action string) ([]byte, error) {
+	s.streamMessageVersion = openRequest.StreamMessageVersion
+	s.logger.Debugf("Setting stream message version: %s", s.streamMessageVersion)
 
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
-	d.tmb.Go(func() error {
-		defer close(d.doneChan)
+	s.tmb.Go(func() error {
+		defer close(s.doneChan)
 
 		sequenceNumber := 0
 		buff := make([]byte, chunkSize)
 
 		for {
 			select {
-			case <-d.tmb.Dying():
-				d.logger.Errorf("got killed")
+			case <-s.tmb.Dying():
+				s.logger.Errorf("got killed")
 				return nil
 			default:
 				// this line blocks until it reads output or error
-				if n, err := (*d.remoteConnection).Read(buff); !d.tmb.Alive() {
+				if n, err := (*s.remoteConnection).Read(buff); !s.tmb.Alive() {
 					return nil
 				} else if err != nil {
 					if err == io.EOF {
-						d.logger.Errorf("connection closed (EOF)")
+						s.logger.Errorf("connection closed (EOF)")
 						// Let our daemon know that we have got the error and we need to close the connection
-						d.sendStreamMessage(sequenceNumber, smsg.StdOut, false, buff[:n])
+						s.sendStreamMessage(sequenceNumber, smsg.StdOut, false, buff[:n])
 					} else {
-						d.logger.Errorf("failed to read from tcp connection: %s", err)
-						d.sendStreamMessage(sequenceNumber, smsg.Error, false, buff[:n])
+						s.logger.Errorf("failed to read from tcp connection: %s", err)
+						s.sendStreamMessage(sequenceNumber, smsg.Error, false, buff[:n])
 					}
 					return err
 				} else {
-					d.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
+					s.logger.Debugf("Sending %d bytes from local tcp connection to daemon", n)
 
 					// Now send this to daemon
-					d.sendStreamMessage(sequenceNumber, smsg.StdOut, true, buff[:n])
+					s.sendStreamMessage(sequenceNumber, smsg.StdOut, true, buff[:n])
 
 					sequenceNumber += 1
 				}
@@ -152,11 +149,11 @@ func (d *OpaqueSsh) start(openRequest ssh.SshOpenMessage, action string) ([]byte
 	return []byte{}, nil
 }
 
-func (d *OpaqueSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
-	d.streamOutputChan <- smsg.StreamMessage{
-		SchemaVersion:  d.streamMessageVersion,
+func (s *OpaqueSsh) sendStreamMessage(sequenceNumber int, streamType smsg.StreamType, more bool, contentBytes []byte) {
+	s.streamOutputChan <- smsg.StreamMessage{
+		SchemaVersion:  s.streamMessageVersion,
 		SequenceNumber: sequenceNumber,
-		Action:         string(ssh.OpaqueSsh),
+		Action:         string(bzssh.OpaqueSsh),
 		Type:           streamType,
 		More:           more,
 		Content:        base64.StdEncoding.EncodeToString(contentBytes),
