@@ -154,7 +154,7 @@ func (k *KubeServer) newWebsocket(wsId string) error {
 func (k *KubeServer) newDataChannel(dcId string, action string, websocket *websocket.Websocket, plugin *kube.KubeDaemonPlugin, writer http.ResponseWriter) error {
 	subLogger := k.logger.GetDatachannelLogger(dcId)
 
-	k.logger.Infof("Creating new datachannel id: %d", dcId)
+	k.logger.Infof("Creating new datachannel id: %s", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
 	synPayload := bzkube.KubeActionParams{
