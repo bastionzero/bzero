@@ -35,6 +35,7 @@ func startSession(s *TransparentSsh, port string, config *gossh.ClientConfig) (*
 	return conn, session
 }
 
+// provide pipes for two-way communication with the server
 func setupIo(session *gossh.Session) (io.WriteCloser, chan []byte, chan []byte) {
 	stdout, err := session.StdoutPipe()
 	Expect(err).To(BeNil())
@@ -221,9 +222,6 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			err := json.Unmarshal(openMessage.ActionPayload, &openPayload)
 			Expect(err).To(BeNil())
 
-			// TODO: can I move this?
-			stdin, stdoutChan, _ := setupIo(session)
-
 			By("sending a valid exec command to the agent")
 			// NOTE: don't forget that unicode codes are base-16, so to express "19" here, we use u+0013
 			ok, err := session.SendRequest("exec", true, []byte(fmt.Sprintf("\u0000\u0000\u0000\u0013%s", scp)))
@@ -236,8 +234,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			json.Unmarshal(execMessage.ActionPayload, &execPayload)
 			Expect(execPayload.Command).To(Equal(scp))
 
-			By("writing the agent's response to the ssh channel")
-
+			By("writing the agent's response to the ssh channel's stdout")
 			messageContent := base64.StdEncoding.EncodeToString([]byte(agentReply))
 			s.ReceiveStream(smsg.StreamMessage{
 				Type:    smsg.StdOut,
@@ -245,6 +242,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 				More:    true,
 			})
 
+			stdin, stdoutChan, _ := setupIo(session)
 			output := <-stdoutChan
 			Expect(string(output)).To(Equal(agentReply))
 
@@ -308,9 +306,6 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			// take the open message for granted since we already tested
 			<-outboxQueue
 
-			// TODO: can I move this?
-			_, _, stderrChan := setupIo(session)
-
 			By("sending a valid exec command to the agent")
 			err := session.RequestSubsystem(sftp)
 			Expect(err).To(BeNil())
@@ -322,7 +317,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			Expect(execPayload.Command).To(Equal(sftp))
 			Expect(execPayload.Sftp).To(BeTrue())
 
-			By("writing the agent's response to the ssh channel")
+			By("writing the agent's response to the ssh channel's stderr")
 			messageContent := base64.StdEncoding.EncodeToString([]byte(agentReply))
 			s.ReceiveStream(smsg.StreamMessage{
 				Type:    smsg.StdErr,
@@ -330,6 +325,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 				More:    false,
 			})
 
+			_, _, stderrChan := setupIo(session)
 			output := <-stderrChan
 			Expect(string(output)).To(Equal(agentReply))
 
