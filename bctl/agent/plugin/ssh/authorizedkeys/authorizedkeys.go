@@ -26,6 +26,10 @@ const (
 	authorizedKeysDirPermission  = 0700 // only owner (user) can read/read/execute
 )
 
+type IAuthorizedKeys interface {
+	Add(pubkey string) error
+}
+
 type AuthorizedKeys struct {
 	logger   *logger.Logger
 	doneChan chan struct{}
