@@ -60,8 +60,6 @@ func (b *BZCert) Cert() *BZCert {
 	return b
 }
 
-// This function verifies the user's bzcert. The function returns the hash the bzcert, the
-// expiration time of the bzcert, and an error if there is one
 func (b *BZCert) Verify(idpProvider string, idpOrgId string) error {
 	// initialize a new verifier for BastionZero certificates
 	if verifier, err := NewVerifier(idpProvider, idpOrgId); err != nil {

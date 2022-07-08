@@ -30,6 +30,12 @@ type BZCertConfig struct {
 }
 
 func New(configPath string, refreshCommand string) (*ZLIConfig, error) {
+	if configPath == "" {
+		return nil, fmt.Errorf("no config path provided")
+	} else if splits := strings.Split(refreshCommand, " "); len(splits) >= 2 {
+		return nil, fmt.Errorf("malformed refresh command")
+	}
+
 	config := &ZLIConfig{
 		configPath:     configPath,
 		refreshCommand: refreshCommand,
