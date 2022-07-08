@@ -57,9 +57,9 @@ func (s *OpaqueSsh) Kill() {
 
 func (s *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
 
-  switch ssh.SshSubAction(action) {
-	case ssh.SshOpen:
-		var openRequest ssh.SshOpenMessage
+	switch bzssh.SshSubAction(action) {
+	case bzssh.SshOpen:
+		var openRequest bzssh.SshOpenMessage
 		if err := json.Unmarshal(actionPayload, &openRequest); err != nil {
 			return nil, fmt.Errorf("malformed opaque ssh action payload %s", string(actionPayload))
 		} else if err = s.authorizedKeys.Add(string(openRequest.PublicKey)); err != nil {
