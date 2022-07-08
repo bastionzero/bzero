@@ -197,7 +197,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 		})
 
 		It("handles the request from start to finish", func() {
-			scp := "scp -f testFile.txt"
+			scp := "scp -t testFile.txt"
 			port := "22223"
 
 			doneChan := make(chan struct{})

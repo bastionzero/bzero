@@ -84,7 +84,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 
 		if execRequest.Sftp {
 			if !bzssh.IsValidSftp(execRequest.Command) {
-				errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
+				errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", execRequest.Command))
 				t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
 				return nil, fmt.Errorf(errMsg)
 			} else {
@@ -93,7 +93,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 				t.session.RequestSubsystem(execRequest.Command)
 			}
 		} else if !bzssh.IsValidScp(execRequest.Command) {
-			errMsg := bzssh.UnauthorizedCommandError(execRequest.Command)
+			errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", execRequest.Command))
 			t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
 			return nil, fmt.Errorf(errMsg)
 		} else {
