@@ -368,9 +368,6 @@ func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (
 		BZCert:        *k.bzcert.Cert(),
 	}
 
-	b, _ := json.Marshal(synPayload)
-	k.logger.Infof("CERT: %s", b)
-
 	ksMessage := ksmsg.KeysplittingMessage{
 		Type:                ksmsg.Syn,
 		KeysplittingPayload: synPayload,
