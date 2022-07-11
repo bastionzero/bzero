@@ -36,7 +36,7 @@ const (
 	groupsFlag     = "--groups"
 	shellFlag      = "--shell"
 
-	// sudoers consts
+	// sudoers constants
 	defaultSudoersFolderName = "/etc/sudoers.d"
 	defaultSudoersFileName   = "bastionzero-users"
 )
