@@ -180,7 +180,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	params["connectionType"] = message.Type
 	params["connection_service_url"] = message.ConnectionServiceUrl
 
-	if ws, err := websocket.New(subLogger, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, "", websocket.AgentWebsocket); err != nil {
+	if ws, err := websocket.New(subLogger, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, websocket.AgentWebsocket); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary

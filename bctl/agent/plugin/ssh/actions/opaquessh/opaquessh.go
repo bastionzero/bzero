@@ -57,7 +57,6 @@ func (s *OpaqueSsh) Kill() {
 
 func (s *OpaqueSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
 
-	// Update the logger action
 	switch bzssh.SshSubAction(action) {
 	case bzssh.SshOpen:
 		var openRequest bzssh.SshOpenMessage

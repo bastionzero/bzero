@@ -182,7 +182,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			conn, session = startSession(t, port, config)
 
 			By("rejecting the invalid request")
-			ok, err := session.SendRequest("shell", true, []byte{})
+			ok, err := session.SendRequest("shell", true, []byte("\u0000\u0000\u0000\u000exterm-256color"))
 			Expect(err).To(Equal(io.EOF))
 			Expect(ok).To(BeFalse())
 
