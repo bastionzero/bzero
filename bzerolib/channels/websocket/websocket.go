@@ -41,6 +41,8 @@ const (
 	agentConnectionNodeHubEndpoint  = "hub/agent"
 
 	controlHubEndpoint = "/api/v1/hub/control"
+
+	AgentConnectedWebsocketTimeout = 30 * time.Second
 )
 
 // Connection Type enum
@@ -108,6 +110,13 @@ type Websocket struct {
 
 	// Base url to make request
 	baseUrl string
+
+	// Agent Ready Channel indicates when the agent has connected to the
+	// corresponding websocket. This is only used for daemon websocket.
+	agentReady chan bool
+
+	// True when websocket is ready to start sending output messages
+	sendQueueReady bool
 }
 
 // Constructor to create a new common websocket client object that can be shared by the daemon and server
@@ -133,6 +142,7 @@ func New(logger *logger.Logger,
 		subscribed:              false,
 		targetType:              targetType,
 		baseUrl:                 "",
+		agentReady:              make(chan bool, 1),
 	}
 
 	// Connect to the websocket in a go routine in case it takes a long time
@@ -155,7 +165,6 @@ func New(logger *logger.Logger,
 		}
 	}()
 
-	// Listener for any incoming messages
 	ws.tmb.Go(func() error {
 		// Listener for any messages that need to be sent
 		ws.tmb.Go(func() error {
@@ -165,6 +174,7 @@ func New(logger *logger.Logger,
 					case <-ws.tmb.Dying():
 						return nil
 					case msg := <-ws.sendQueue:
+						ws.waitForAgentWebsocketReady()
 						ws.processOutput(msg)
 					}
 				}
@@ -264,6 +274,18 @@ func (w *Websocket) receive() error {
 					rerr := errors.New("the bzero agent terminated the connection")
 					w.Close(rerr)
 					return rerr
+				case AgentConnected:
+					// Signal the agentReady channel when we receive a message
+					// from the connection node that the agent websocket is
+					// connected
+					var agentConnectedMessage AgentConnectedMessage
+					if err := json.Unmarshal(message.Arguments[0], &agentConnectedMessage); err != nil {
+						return fmt.Errorf("error unmarshalling agent connected message. Error: %s", err)
+					}
+
+					w.logger.Infof("Agent is connected and ready to receive methods in websocket for connection: %s", agentConnectedMessage.ConnectionId)
+
+					w.agentReady <- true
 				default:
 					w.ready = true
 
@@ -722,4 +744,29 @@ func (w *Websocket) getAgentMessageFromInvocationId(invocationId string) am.Agen
 // can be used by other processes to check if our connection is open
 func (w *Websocket) Ready() bool {
 	return w.ready
+}
+
+// returns true if this is a daemon websocket connect
+func (w *Websocket) isDaemonWebsocket() bool {
+	return w.targetType > 0
+}
+
+func (w *Websocket) waitForAgentWebsocketReady() {
+	// If agent websocket is already ready return right away
+	if w.sendQueueReady {
+		return
+	}
+
+	// If this is a daemon websocket connection wait for the agent to
+	// connect before sending any messages from the output queue
+	if w.isDaemonWebsocket() {
+		select {
+		case <-w.agentReady:
+			w.sendQueueReady = true
+		case <-time.After(AgentConnectedWebsocketTimeout):
+			w.Close(fmt.Errorf("Timed out waiting for agent websocket to connect"))
+		}
+	} else {
+		w.sendQueueReady = true
+	}
 }

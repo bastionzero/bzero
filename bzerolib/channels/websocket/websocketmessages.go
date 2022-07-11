@@ -38,3 +38,7 @@ const (
 	RequestBastionToAgentV1 SignalRWebsocketMethod = "RequestBastionToAgentV1"
 )
 
+// Websocket message types used directly by Connection Node (not contained within AgentMessage)
+type AgentConnectedMessage struct {
+	ConnectionId string `json:"connectionId"`
+}
