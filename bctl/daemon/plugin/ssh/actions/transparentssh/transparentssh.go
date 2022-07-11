@@ -168,10 +168,14 @@ func (t *TransparentSsh) Start() error {
 					for req := range requests {
 						ok := false
 						if len(req.Payload) < sshPayloadOffset {
-							t.rejectSshWithError(fmt.Sprintf("payload from ssh process must be at least length %d. Got length %d", sshPayloadOffset, len(req.Payload)))
+							t.rejectSshWithError(fmt.Sprintf("ssh payload must begin with %d bytes of metadata. Received %d bytes", sshPayloadOffset, len(req.Payload)))
 							return
 						}
 						payloadSize := int(req.Payload[sshPayloadOffset-1])
+						if len(req.Payload) < (sshPayloadOffset + payloadSize) {
+							t.rejectSshWithError(fmt.Sprintf("ssh payload metadata indicated body length of %d bytes. Received %d bytes", payloadSize, len(req.Payload)-sshPayloadOffset))
+							return
+						}
 
 						switch req.Type {
 						// handle scp (and someday, other exec)
