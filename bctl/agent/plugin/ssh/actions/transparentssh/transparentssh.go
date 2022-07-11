@@ -148,24 +148,34 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 		return nil, fmt.Errorf("stderr pipe err: %s", err)
 	}
 
-	go func() {
+	// track goroutines for how we communicate with stdin, stdout, stderr
+	t.tmb.Go(func() error {
+		t.tmb.Go(func() error {
+			return t.readPipe(stdout, smsg.StdOut, "stdout")
+		})
+		t.tmb.Go(func() error {
+			return t.readPipe(stderr, smsg.StdErr, "stderr")
+		})
+
 		for {
-			d := <-t.stdInChan
-			t.logger.Debugf("Writing %d bytes to stdin", len(d))
-			_, err := stdin.Write(d)
-			if err != nil {
-				if err == io.EOF {
-					t.logger.Infof("Finished writing to stdin")
-					return
+			select {
+			case <-t.tmb.Dying():
+				t.logger.Errorf("got killed")
+				return nil
+			case d := <-t.stdInChan:
+				t.logger.Debugf("Writing %d bytes to stdin", len(d))
+				_, err := stdin.Write(d)
+				if err != nil {
+					if err == io.EOF {
+						t.logger.Infof("Finished writing to stdin")
+						return nil
+					}
+					t.logger.Errorf("error writing to stdin: %s", err)
+					return err
 				}
-				t.logger.Errorf("error writing to stdin: %s", err)
-				return
 			}
 		}
-	}()
-
-	go t.readPipe(stdout, smsg.StdOut, "stdout")
-	go t.readPipe(stderr, smsg.StdErr, "stderr")
+	})
 
 	// Update our remote connection
 	return []byte{}, nil
@@ -186,23 +196,23 @@ func (t *TransparentSsh) exec(command string) {
 	}()
 }
 
-func (t *TransparentSsh) readPipe(pipe io.Reader, messageType smsg.StreamType, pipeName string) {
+func (t *TransparentSsh) readPipe(pipe io.Reader, messageType smsg.StreamType, pipeName string) error {
 	b := make([]byte, chunkSize)
 	for {
 		select {
 		case <-t.tmb.Dying():
-			return
+			return nil
 		default:
 			if n, err := pipe.Read(b); !t.tmb.Alive() {
-				return
+				return nil
 			} else if err != nil {
 				if err == io.EOF {
 					t.logger.Infof("Finished reading from %s", pipeName)
 					t.sendStreamMessage(messageType, false, b[:n])
-					return
+					return nil
 				}
 				t.logger.Errorf("error reading from %s: %s", pipeName, err)
-				return
+				return err
 			} else if n > 0 {
 				t.logger.Debugf("Read %d bytes from local SSH %s", n, pipeName)
 				t.sendStreamMessage(messageType, true, b[:n])
