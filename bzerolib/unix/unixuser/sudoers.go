@@ -14,19 +14,21 @@ const (
 	sudoersFilePermissions = 0640
 )
 
+// adds the given user to the given sudoers file if the user is not there already
 func addToSudoers(username string, sudoersFilePath string) error {
 	// first check if the user is in the file
 	if sudoers, err := parseSudoersFile(sudoersFilePath); err != nil {
 		return err
 	} else if _, ok := sudoers[username]; !ok {
 		// if not, add them
-		return addToSudoersFile(username, sudoersFilePath)
+		return appendSudoersFile(username, sudoersFilePath)
 	}
 	// if the user is there, we're all set
 	return nil
 }
 
-func addToSudoersFile(username string, sudoersFilePath string) error {
+// adds the given user to the end of the given sudoers file; creates the file if not exists
+func appendSudoersFile(username string, sudoersFilePath string) error {
 	sudoersEntry := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL\n", username)
 
 	// open the file as the current user so that we can bubble up any permissions errors
@@ -64,7 +66,7 @@ func parseSudoersFile(sudoersFilePath string) (map[string]struct{}, error) {
 
 	scanner := bufio.NewScanner(bytes.NewReader(fileBytes))
 	for scanner.Scan() {
-		entry := scanner.Text()
+		entry := strings.TrimSpace(scanner.Text())
 
 		// ignore blank lines
 		if len(entry) == 0 {

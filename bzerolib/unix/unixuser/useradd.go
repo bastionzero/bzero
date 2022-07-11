@@ -74,11 +74,11 @@ func LookupOrCreateFromList(username string) (*UnixUser, error) {
 	} else if err != nil {
 		return nil, err
 	} else {
-		// TODO: long-term we shouldn't need this behavior, but it acts as a failsafe
+		// TODO: (CWC-1982) long-term we shouldn't need this behavior, but it acts as a failsafe
 		// for users whose sudoers files are broken
 		// if this is a managed user, make sure it's in sudoers if it should be
 		if opts, ok := managedUsers[username]; ok {
-			addToSudoersIfAllowed(username, opts)
+			addUserToSudoers(username, opts)
 		}
 		return usr, nil
 	}
@@ -138,11 +138,11 @@ func userAdd(username string, options UserAddOptions) error {
 		return err
 	}
 
-	return addToSudoersIfAllowed(username, options)
+	return addUserToSudoers(username, options)
 }
 
-// TODO: please help, what should this be called
-func addToSudoersIfAllowed(username string, options UserAddOptions) error {
+// adds a user to the provided (or default) sudoers file, provided they are a sudoer
+func addUserToSudoers(username string, options UserAddOptions) error {
 	if options.Sudoer {
 		// determine our sudoers sudoersFile name
 		sudoersFile := strings.TrimSpace(options.SudoersFileName)
