@@ -3,7 +3,6 @@ package unixuser
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -12,7 +11,7 @@ import (
 )
 
 // These are the users we're allowed to create, if someone is trying to look them up
-var allowedToCreate = UserList{
+var managedUsers = UserList{
 	"ssm-user":   {Sudoer: true},
 	"bzero-user": {Sudoer: true},
 }
@@ -37,10 +36,9 @@ const (
 	groupsFlag     = "--groups"
 	shellFlag      = "--shell"
 
-	// sudoers constants
+	// sudoers consts
 	defaultSudoersFolderName = "/etc/sudoers.d"
 	defaultSudoersFileName   = "bastionzero-users"
-	sudoersFilePermissions   = 0640
 )
 
 // key'ed by user name
@@ -64,10 +62,8 @@ type UserAddOptions struct {
 func LookupOrCreateFromList(username string) (*UnixUser, error) {
 	// check that user doesn't exist before we try to create it
 	var unknownUser user.UnknownUserError
-	fmt.Printf("Something's happening here and what it is is %s\n", username)
 	if usr, err := Lookup(username); errors.As(err, &unknownUser) {
-		fmt.Printf("Sorry %s -- we couldn't find you!\n", username)
-		if opts, ok := allowedToCreate[username]; !ok {
+		if opts, ok := managedUsers[username]; !ok {
 			return nil, fmt.Errorf("%s does not exist", username)
 		} else if err := userAdd(username, opts); err != nil {
 			return nil, err
@@ -76,10 +72,14 @@ func LookupOrCreateFromList(username string) (*UnixUser, error) {
 			return validateUserCreation(username)
 		}
 	} else if err != nil {
-		fmt.Printf("Sorry %s -- something bad happened: %s!\n", username, err)
 		return nil, err
 	} else {
-		fmt.Printf("Congrats %s -- we did find you!\n", username)
+		// TODO: long-term we shouldn't need this behavior, but it acts as a failsafe
+		// for users whose sudoers files are broken
+		// if this is a managed user, make sure it's in sudoers if it should be
+		if opts, ok := managedUsers[username]; ok {
+			addToSudoersIfAllowed(username, opts)
+		}
 		return usr, nil
 	}
 }
@@ -138,6 +138,11 @@ func userAdd(username string, options UserAddOptions) error {
 		return err
 	}
 
+	return addToSudoersIfAllowed(username, options)
+}
+
+// TODO: please help, what should this be called
+func addToSudoersIfAllowed(username string, options UserAddOptions) error {
 	if options.Sudoer {
 		// determine our sudoers sudoersFile name
 		sudoersFile := strings.TrimSpace(options.SudoersFileName)
@@ -147,38 +152,12 @@ func userAdd(username string, options UserAddOptions) error {
 
 		// determine our sudoers folder name
 		sudoersFolder := strings.TrimSpace(options.SudoersFolderName)
-		if sudoersFile == "" {
+		if sudoersFolder == "" {
 			sudoersFolder = defaultSudoersFolderName
 		}
 
 		// add our user to the sudoers file
 		if err := addToSudoers(username, filepath.Join(sudoersFolder, sudoersFile)); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func addToSudoers(username string, sudoersFilePath string) error {
-	sudoersEntry := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL\n", username)
-
-	// open the file as the current user so that we can bubble up any permissions errors
-	if usr, err := Current(); err != nil {
-		return fmt.Errorf("failed to determine current user")
-	} else if file, err := usr.OpenFile(sudoersFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, sudoersFilePermissions); err != nil {
-		return err
-	} else {
-		// if the file was previously empty, then we make sure to add a comment
-		if fi, err := file.Stat(); err == nil && fi.Size() == 0 {
-			sudoersFileComment := fmt.Sprintf("# Created by BastionZero on %s\n\n", time.Now().Round(time.Second))
-			if _, err := file.WriteString(sudoersFileComment); err != nil {
-				return err
-			}
-		}
-
-		// add our sudoers entry
-		if _, err := file.WriteString(sudoersEntry); err != nil {
 			return err
 		}
 	}
