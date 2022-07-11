@@ -5,8 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
-	"os/exec"
 	"strings"
 
 	"golang.org/x/crypto/sha3"
@@ -44,15 +42,4 @@ func Nonce() string {
 	b := make([]byte, 32) // 32-length byte array, to make it same length as hash pointer
 	rand.Read(b)          // populate with random bytes
 	return base64.StdEncoding.EncodeToString(b)
-}
-
-func RunRefreshAuthCommand(refreshCommand string) error {
-	if splits := strings.Split(refreshCommand, " "); len(splits) >= 2 {
-		if out, err := exec.Command(splits[0], splits[1:]...).CombinedOutput(); err != nil {
-			return fmt.Errorf("%s while executing zli refresh token command: %s", err, string(out))
-		}
-	} else {
-		return fmt.Errorf("not enough arguments to refresh token zli command: %v", len(splits))
-	}
-	return nil
 }

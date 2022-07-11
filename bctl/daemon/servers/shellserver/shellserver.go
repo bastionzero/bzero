@@ -14,6 +14,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
@@ -44,14 +45,14 @@ type ShellServer struct {
 	refreshTokenCommand string
 	configPath          string
 	agentPubKey         string
+	cert                *bzcert.BZCert
 }
 
 func StartShellServer(
 	logger *logger.Logger,
 	targetUser string,
 	dataChannelId string,
-	refreshTokenCommand string,
-	configPath string,
+	cert *bzcert.BZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
@@ -64,8 +65,7 @@ func StartShellServer(
 		params:              params,
 		headers:             headers,
 		targetSelectHandler: targetSelectHandler,
-		configPath:          configPath,
-		refreshTokenCommand: refreshTokenCommand,
+		cert:                cert,
 		targetUser:          targetUser,
 		dataChannelId:       dataChannelId,
 		agentPubKey:         agentPubKey,
@@ -88,7 +88,7 @@ func StartShellServer(
 // for creating new websockets
 func (ss *ShellServer) newWebsocket(wsId string) error {
 	subLogger := ss.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, ss.serviceUrl, ss.params, ss.headers, ss.targetSelectHandler, autoReconnect, getChallenge, ss.refreshTokenCommand, websocket.Shell); err != nil {
+	if wsClient, err := websocket.New(subLogger, ss.serviceUrl, ss.params, ss.headers, ss.targetSelectHandler, autoReconnect, getChallenge, websocket.Shell); err != nil {
 		return err
 	} else {
 		ss.websocket = wsClient
@@ -119,38 +119,41 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	}
 
 	// Build the action payload to send in the syn message when opening the datachannel
-	actionParams := bzshell.ShellActionParams{
+	synPayload := bzshell.ShellActionParams{
 		TargetUser: ss.targetUser,
 	}
 
-	action = "shell/" + action
 	ksLogger := ss.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, ss.agentPubKey, ss.configPath, ss.refreshTokenCommand); err != nil {
+	keysplitter, err := keysplitting.New(ksLogger, ss.agentPubKey, ss.cert)
+	if err != nil {
 		return err
-	} else if dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, actionParams, attach, false); err != nil {
-		return err
-	} else {
-
-		// create a function to listen to the datachannel dying and then exit the shell daemon process
-		go func() {
-			for {
-				select {
-				case <-ss.tmb.Dying():
-					dc.Close(errors.New("shell server exiting...closing datachannel"))
-					return
-				case <-dcTmb.Dead():
-					// bubble up our error to the user
-					if dcTmb.Err() != nil {
-						// let's just take our innermost error to give the user
-						errs := strings.Split(dcTmb.Err().Error(), ": ")
-						errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
-						os.Stdout.Write([]byte(errorString))
-					}
-					errorCode := 1
-					os.Exit(errorCode)
-				}
-			}
-		}()
-		return nil
 	}
+
+	action = "shell/" + action
+	dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	if err != nil {
+		return err
+	}
+
+	// create a function to listen to the datachannel dying and then exit the shell daemon process
+	go func() {
+		for {
+			select {
+			case <-ss.tmb.Dying():
+				dc.Close(errors.New("shell server exiting...closing datachannel"))
+				return
+			case <-dcTmb.Dead():
+				// bubble up our error to the user
+				if dcTmb.Err() != nil {
+					// let's just take our innermost error to give the user
+					errs := strings.Split(dcTmb.Err().Error(), ": ")
+					errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
+					os.Stdout.Write([]byte(errorString))
+				}
+				errorCode := 1
+				os.Exit(errorCode)
+			}
+		}
+	}()
+	return nil
 }

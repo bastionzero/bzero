@@ -14,6 +14,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
@@ -43,14 +44,13 @@ type WebServer struct {
 	targetHost string
 
 	// fields for new datachannels
-	localPort           string
-	localHost           string
-	params              map[string]string
-	headers             map[string]string
-	serviceUrl          string
-	refreshTokenCommand string
-	configPath          string
-	agentPubKey         string
+	localPort   string
+	localHost   string
+	params      map[string]string
+	headers     map[string]string
+	serviceUrl  string
+	agentPubKey string
+	cert        *bzcert.BZCert
 }
 
 func StartWebServer(logger *logger.Logger,
@@ -58,8 +58,7 @@ func StartWebServer(logger *logger.Logger,
 	localHost string,
 	targetPort int,
 	targetHost string,
-	refreshTokenCommand string,
-	configPath string,
+	cert *bzcert.BZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
@@ -72,8 +71,7 @@ func StartWebServer(logger *logger.Logger,
 		params:              params,
 		headers:             headers,
 		targetSelectHandler: targetSelectHandler,
-		configPath:          configPath,
-		refreshTokenCommand: refreshTokenCommand,
+		cert:                cert,
 		localPort:           localPort,
 		localHost:           localHost,
 		targetHost:          targetHost,
@@ -159,7 +157,7 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 // for creating new websockets
 func (h *WebServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := bzwebsocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, h.refreshTokenCommand, bzwebsocket.Web); err != nil {
+	if wsClient, err := bzwebsocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, bzwebsocket.Web); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient
@@ -175,38 +173,41 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 	w.logger.Infof("Creating new datachannel for web with id: %s", dcId)
 
 	// Build the actionParams to send to the datachannel to start the plugin
-	actionParams := bzweb.WebActionParams{
+	synPayload := bzweb.WebActionParams{
 		RemotePort: w.targetPort,
 		RemoteHost: w.targetHost,
 	}
 
-	actString := "web/" + string(action)
-	mrzapLogger := w.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(mrzapLogger, w.agentPubKey, w.configPath, w.refreshTokenCommand); err != nil {
+	ksLogger := w.logger.GetComponentLogger("mrzap")
+	keysplitter, err := keysplitting.New(ksLogger, w.agentPubKey, w.cert)
+	if err != nil {
 		return err
-	} else if datachannel, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, actionParams, attach, true); err != nil {
-		return err
-	} else {
-
-		// create a function to listen to the datachannel dying and then laugh
-		go func() {
-			for {
-				select {
-				case <-w.tmb.Dying():
-					datachannel.Close(errors.New("web server closing"))
-					return
-				case <-dcTmb.Dead():
-					// notify agent to close the datachannel
-					w.logger.Info("Sending DataChannel Close")
-					cdMessage := am.AgentMessage{
-						ChannelId:   dcId,
-						MessageType: string(am.CloseDataChannel),
-					}
-					w.websocket.Send(cdMessage)
-					return
-				}
-			}
-		}()
-		return nil
 	}
+
+	actString := "web/" + string(action)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, synPayload, attach, true)
+	if err != nil {
+		return err
+	}
+
+	// create a function to listen to the datachannel dying and then laugh
+	go func() {
+		for {
+			select {
+			case <-w.tmb.Dying():
+				dc.Close(errors.New("web server closing"))
+				return
+			case <-dcTmb.Dead():
+				// notify agent to close the datachannel
+				w.logger.Info("Sending DataChannel Close")
+				cdMessage := am.AgentMessage{
+					ChannelId:   dcId,
+					MessageType: string(am.CloseDataChannel),
+				}
+				w.websocket.Send(cdMessage)
+				return
+			}
+		}
+	}()
+	return nil
 }
