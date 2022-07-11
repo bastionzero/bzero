@@ -64,7 +64,9 @@ type UserAddOptions struct {
 func LookupOrCreateFromList(username string) (*UnixUser, error) {
 	// check that user doesn't exist before we try to create it
 	var unknownUser user.UnknownUserError
+	fmt.Printf("Something's happening here and what it is is %s\n", username)
 	if usr, err := Lookup(username); errors.As(err, &unknownUser) {
+		fmt.Printf("Sorry %s -- we couldn't find you!\n", username)
 		if opts, ok := allowedToCreate[username]; !ok {
 			return nil, fmt.Errorf("%s does not exist", username)
 		} else if err := userAdd(username, opts); err != nil {
@@ -74,8 +76,10 @@ func LookupOrCreateFromList(username string) (*UnixUser, error) {
 			return validateUserCreation(username)
 		}
 	} else if err != nil {
+		fmt.Printf("Sorry %s -- something bad happened: %s!\n", username, err)
 		return nil, err
 	} else {
+		fmt.Printf("Congrats %s -- we did find you!\n", username)
 		return usr, nil
 	}
 }
