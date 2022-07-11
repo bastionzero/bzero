@@ -267,8 +267,15 @@ func (w *Websocket) receive() error {
 				default:
 					w.ready = true
 
-					// push to the right channel
-					agentMessage := message.Arguments[0]
+					// Otherwise assume that the invocation contains a single AgentMessage argument
+					if len(message.Arguments) != 1 {
+						return fmt.Errorf("expected a single agent message argument but got %d arguments.", len(message.Arguments))
+					}
+
+					var agentMessage am.AgentMessage
+					if err := json.Unmarshal(message.Arguments[0], &agentMessage); err != nil {
+						return fmt.Errorf("error unmarshalling agent message from websocket method %s. Error: %s", message.Target, err)
+					}
 
 					if channel, ok := w.getChannel(agentMessage.ChannelId); ok {
 						channel.Receive(agentMessage)
@@ -333,12 +340,8 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 				return messages, fmt.Errorf("error unmarshalling SignalR invocation message from Bastion: %s. Error: %s", string(msg), err)
 			}
 
-			// make sure there is an AgentMessage
-			if len(invocationMessage.Arguments) != 0 {
-				messages = append(messages, invocationMessage)
-			} else {
-				w.logger.Errorf("Ignoring SignalR invocation message because it doesn't have an AgentMessage argument")
-			}
+			w.logger.Tracef("Invocation message is: %s", invocationMessage)
+			messages = append(messages, invocationMessage)
 		default:
 			msg := fmt.Sprintf("Ignoring SignalR message with type %v", signalRMessageType.Type)
 			w.logger.Tracef(msg)
@@ -362,10 +365,16 @@ func (w *Websocket) processOutput(message signalRInvocationMessage) {
 		return
 	}
 
+	agentMessageArg, err := json.Marshal(message.agentMessage)
+	if err != nil {
+		w.logger.Errorf("Failed to marshal agent message in signalR invocation message: %s", err)
+		return
+	}
+
 	signalRMessage := SignalRInvocationMessage{
 		Target:       target,
 		Type:         int(Invocation),
-		Arguments:    []am.AgentMessage{message.agentMessage},
+		Arguments:    []json.RawMessage{agentMessageArg},
 		InvocationId: message.invocationId,
 	}
 
