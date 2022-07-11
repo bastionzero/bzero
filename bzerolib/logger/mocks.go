@@ -7,7 +7,11 @@ import (
 )
 
 func MockLogger() *Logger {
-	if logger, err := createLogger(DefaultLoggerConfig(Debug.String()), "/dev/null", []io.Writer{GinkgoWriter}); err == nil {
+	config := &Config{
+		ConsoleWriters: []io.Writer{GinkgoWriter},
+	}
+
+	if logger, err := New(config); err == nil {
 		return logger
 	}
 	return nil

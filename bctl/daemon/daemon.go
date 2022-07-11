@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -88,16 +89,20 @@ func main() {
 	os.Exit(1)
 }
 
-func createLogger() (logger *bzlogger.Logger, err error) {
+func createLogger() (*bzlogger.Logger, error) {
+	options := &bzlogger.Config{
+		FilePath: logPath,
+	}
+
 	// For shell plugin we read/write directly from Stdin/Stdout so we dont want
 	// our logs to show up there
-	if plugin == string(bzplugin.Shell) || plugin == string(bzplugin.Ssh) {
-		logger, err = bzlogger.New(bzlogger.DefaultLoggerConfig(logLevel), logPath)
-	} else {
-		logger, err = bzlogger.NewWithStdOut(bzlogger.DefaultLoggerConfig(logLevel), logPath)
+	if plugin != string(bzplugin.Shell) && plugin != string(bzplugin.Ssh) {
+		options.ConsoleWriters = []io.Writer{os.Stdout}
 	}
+
+	logger, err := bzlogger.New(options)
 	logger.AddDaemonVersion(daemonVersion)
-	return
+	return logger, err
 }
 
 func reportError(logger *bzlogger.Logger, errorReport error) {
