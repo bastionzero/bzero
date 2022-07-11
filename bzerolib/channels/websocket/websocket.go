@@ -362,7 +362,7 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 				return messages, fmt.Errorf("error unmarshalling SignalR invocation message from Bastion: %s. Error: %s", string(msg), err)
 			}
 
-			w.logger.Tracef("Invocation message is: %s", invocationMessage)
+			w.logger.Tracef("Received new Invocation Message with target: %s", invocationMessage.Target)
 			messages = append(messages, invocationMessage)
 		default:
 			msg := fmt.Sprintf("Ignoring SignalR message with type %v", signalRMessageType.Type)
