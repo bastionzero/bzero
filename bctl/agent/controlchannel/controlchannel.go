@@ -41,8 +41,7 @@ type ControlChannel struct {
 	ksConfig keysplitting.IKeysplittingConfig
 
 	// variables for opening websockets
-	serviceUrl            string
-	dcTargetSelectHandler func(msg am.AgentMessage) (string, error)
+	serviceUrl string
 
 	// These are all the types of channels we have available
 	inputChan chan am.AgentMessage
@@ -61,19 +60,17 @@ func Start(logger *logger.Logger,
 	websocket websocket.IWebsocket, // control channel websocket
 	serviceUrl string,
 	targetType string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	ksConfig keysplitting.IKeysplittingConfig) (*ControlChannel, error) {
 
 	control := &ControlChannel{
-		websocket:             websocket,
-		logger:                logger,
-		id:                    id,
-		ksConfig:              ksConfig,
-		serviceUrl:            serviceUrl,
-		dcTargetSelectHandler: targetSelectHandler,
-		targetType:            targetType,
-		inputChan:             make(chan am.AgentMessage, 25),
-		connections:           make(map[string]wsMeta),
+		websocket:   websocket,
+		logger:      logger,
+		id:          id,
+		ksConfig:    ksConfig,
+		serviceUrl:  serviceUrl,
+		targetType:  targetType,
+		inputChan:   make(chan am.AgentMessage, 25),
+		connections: make(map[string]wsMeta),
 	}
 
 	// The ChannelId is mostly for distinguishing multiple channels over a single websocket but the control channel has
@@ -180,7 +177,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	params["connectionType"] = message.Type
 	params["connection_service_url"] = message.ConnectionServiceUrl
 
-	if ws, err := websocket.New(subLogger, c.serviceUrl, params, headers, c.dcTargetSelectHandler, false, false, websocket.AgentWebsocket); err != nil {
+	if ws, err := websocket.New(subLogger, c.serviceUrl, params, headers, false, false, websocket.AgentWebsocket); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary

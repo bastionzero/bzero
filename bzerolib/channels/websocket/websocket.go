@@ -91,9 +91,6 @@ type Websocket struct {
 	sendQueue               chan signalRInvocationMessage
 	messagesWaitingResponse map[string]am.AgentMessage
 
-	// Function for figuring out correct Target SignalR Hub
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
-
 	// Flag to indicate if we should automatically try to reconnect
 	autoReconnect bool
 
@@ -118,7 +115,6 @@ func New(logger *logger.Logger,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	autoReconnect bool,
 	getChallenge bool,
 	targetType int) (*Websocket, error) {
@@ -128,7 +124,6 @@ func New(logger *logger.Logger,
 		sendQueue:               make(chan signalRInvocationMessage, 100),
 		messagesWaitingResponse: make(map[string]am.AgentMessage),
 		channels:                make(map[string]IChannel),
-		targetSelectHandler:     targetSelectHandler,
 		getChallenge:            getChallenge,
 		autoReconnect:           autoReconnect,
 		serviceUrl:              serviceUrl,
@@ -265,7 +260,7 @@ func (w *Websocket) receive() error {
 		} else {
 			for _, message := range messages {
 				switch message.Target {
-				case "CloseConnection":
+				case DaemonCloseConnection:
 					rerr := errors.New("the bzero agent terminated the connection")
 					w.Close(rerr)
 					return rerr
@@ -360,7 +355,7 @@ func (w *Websocket) processOutput(message signalRInvocationMessage) {
 	defer w.socketLock.Unlock()
 
 	// Select SignalR Endpoint
-	target, err := w.targetSelectHandler(message.agentMessage) // Agent and Daemon specify their own function to choose target
+	target, err := w.websocketMethodSelector(message.agentMessage)
 	if err != nil {
 		rerr := fmt.Errorf("error in selecting SignalR Endpoint target name: %s", err)
 		w.logger.Error(rerr)
@@ -381,6 +376,56 @@ func (w *Websocket) processOutput(message signalRInvocationMessage) {
 		if err := w.client.WriteMessage(websocket.TextMessage, append(msgBytes, signalRMessageTerminatorByte)); err != nil {
 			w.logger.Error(err)
 		}
+	}
+}
+
+func (w *Websocket) websocketMethodSelector(agentMessage am.AgentMessage) (SignalRWebsocketMethod, error) {
+	// Select SignalR Endpoint
+	switch w.targetType {
+	case Cluster, Db, Web, Shell, Ssh:
+		return daemonWebsocketMethodSelector(agentMessage)
+	case AgentControl:
+		return agentControlChannelWebsocketMethodSelector(agentMessage)
+	case AgentWebsocket:
+		return agentDataChannelWebsocketMethodSelector(agentMessage)
+	default:
+		return "", fmt.Errorf("Unhandled signalR method for websocket type %d", w.targetType)
+	}
+}
+
+// daemon's data channel function to select signalR hub method based on agent message type
+func daemonWebsocketMethodSelector(agentMessage am.AgentMessage) (SignalRWebsocketMethod, error) {
+	switch am.MessageType(agentMessage.MessageType) {
+	case am.Keysplitting:
+		return RequestDaemonToBastionV1, nil
+	case am.OpenDataChannel:
+		return OpenDataChannelDaemonToBastionV1, nil
+	case am.CloseDataChannel:
+		return CloseDataChannelDaemonToBastionV1, nil
+	default:
+		return "", fmt.Errorf("unhandled message type: %s", agentMessage.MessageType)
+	}
+}
+
+// agent's control channel function to select signalR hub method based on agent message type
+func agentControlChannelWebsocketMethodSelector(agentMessage am.AgentMessage) (SignalRWebsocketMethod, error) {
+	switch am.MessageType(agentMessage.MessageType) {
+	case am.HealthCheck:
+		return AliveCheckAgentToBastion, nil
+	default:
+		return "", fmt.Errorf("unsupported message type")
+	}
+}
+
+// agent's data channel function to select signalR hub method based on agent message type
+func agentDataChannelWebsocketMethodSelector(agentMessage am.AgentMessage) (SignalRWebsocketMethod, error) {
+	switch am.MessageType(agentMessage.MessageType) {
+	case am.CloseDaemonWebsocket:
+		return CloseDaemonWebsocketV1, nil
+	case am.Keysplitting, am.Stream, am.Error:
+		return ResponseAgentToBastionV1, nil
+	default:
+		return "", fmt.Errorf("unable to determine SignalR endpoint for message type: %s", agentMessage.MessageType)
 	}
 }
 
