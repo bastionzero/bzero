@@ -106,9 +106,6 @@ type Websocket struct {
 	requestParams map[string]string // Params used to authenticate against the websocket
 	headers       map[string]string
 
-	// Optional command to refresh auth information
-	refreshTokenCommand string
-
 	// Target type for connectionNode
 	targetType int
 
@@ -124,7 +121,6 @@ func New(logger *logger.Logger,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	autoReconnect bool,
 	getChallenge bool,
-	refreshTokenCommand string,
 	targetType int) (*Websocket, error) {
 
 	ws := Websocket{
@@ -140,7 +136,6 @@ func New(logger *logger.Logger,
 		requestParams:           make(map[string]string),
 		headers:                 headers,
 		subscribed:              false,
-		refreshTokenCommand:     refreshTokenCommand,
 		targetType:              targetType,
 		baseUrl:                 "",
 	}

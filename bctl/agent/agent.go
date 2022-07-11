@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -126,20 +127,21 @@ func run(logger *logger.Logger) {
 }
 
 func setupLogger() (*logger.Logger, error) {
-	// if this is systemd, output files
-	logFile := ""
-	if agentType == Bzero {
-		logFile = bzeroLogFilePath
+	config := logger.Config{
+		ConsoleWriters: []io.Writer{os.Stdout},
 	}
 
-	// setup our loggers
-	writeToConsole := true
-	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logFile, writeToConsole); err != nil {
-		return nil, err
-	} else {
-		logger.AddAgentVersion(getAgentVersion())
-		return logger, nil
+	// if this is systemd, output log to file
+	if agentType == Bzero {
+		config.FilePath = bzeroLogFilePath
 	}
+
+	log, err := logger.New(&config)
+	if err != nil {
+		log.AddAgentVersion(getAgentVersion())
+	}
+
+	return log, err
 }
 
 // report early errors to the bastion so we have greater visibility
@@ -211,7 +213,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 	// create a websocket
 	wsId := uuid.New().String()
 	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
-	websocket, err := websocket.New(wsLogger, serviceUrl, params, headers, ccTargetSelectHandler, true, true, "", websocket.AgentControl)
+	websocket, err := websocket.New(wsLogger, serviceUrl, params, headers, ccTargetSelectHandler, true, true, websocket.AgentControl)
 	if err != nil {
 		return nil, err
 	}
