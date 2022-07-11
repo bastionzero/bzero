@@ -64,6 +64,12 @@ func readPipe(pipe io.Reader, outputChan chan []byte) {
 	}
 }
 
+func safeListen(port string) net.Listener {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
+	Expect(err).To(BeNil())
+	return listener
+}
+
 func TestDefaultSsh(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Daemon TransparentSsh Suite")
@@ -77,7 +83,8 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 	var config *gossh.ClientConfig
 
 	BeforeEach(func() {
-		privateBytes, _, _ := bzssh.GenerateKeys()
+		privateBytes, _, err := bzssh.GenerateKeys()
+		Expect(err).To(BeNil())
 		signer, _ := gossh.ParsePrivateKey(privateBytes)
 		config = &gossh.ClientConfig{
 			User:            "testUser",
@@ -114,7 +121,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(badScpErrMsg)).Return(len(badScpErrMsg), nil)
 
-			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
+			listener := safeListen(port)
 			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
 			conn, session = startSession(t, port, config)
 
@@ -143,7 +150,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(badSftpErrMsg)).Return(len(badSftpErrMsg), nil)
 
-			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
+			listener := safeListen(port)
 			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
 			conn, session = startSession(t, port, config)
 
@@ -170,7 +177,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(shellReqErrMsg)).Return(len(shellReqErrMsg), nil)
 
-			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
+			listener := safeListen(port)
 			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
 			conn, session = startSession(t, port, config)
 
@@ -211,7 +218,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 
-			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
+			listener := safeListen(port)
 			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
 			conn, session = startSession(t, port, config)
 
@@ -299,7 +306,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 
-			listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
+			listener := safeListen(port)
 			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
 			conn, session = startSession(t, port, config)
 

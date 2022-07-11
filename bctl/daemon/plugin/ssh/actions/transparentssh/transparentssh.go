@@ -85,7 +85,7 @@ func (t *TransparentSsh) Start() error {
 
 	var privateKey []byte
 	var err error
-	var useExistingKeys bool
+	useExistingKeys := false
 
 	// although we don't use keys for authentication, the local ssh process will
 	// throw an error if it's told to look for an invalid IdentityFile
@@ -157,28 +157,28 @@ func (t *TransparentSsh) Start() error {
 				}
 
 				channel, requests, err := newChannel.Accept()
-				t.sshChannel = channel
 				if err != nil {
 					t.logger.Errorf("could not accept channel (%s)", err)
 					continue
 				}
+				t.sshChannel = channel
 
 				// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 				go func(requests <-chan *gossh.Request) {
 					for req := range requests {
-						var ok bool
-						var payloadSize int
+						ok := false
+						if len(req.Payload) < sshPayloadOffset {
+							t.rejectSshWithError(fmt.Sprintf("payload from ssh process must be at least length %d. Got length %d", sshPayloadOffset, len(req.Payload)))
+							return
+						}
+						payloadSize := int(req.Payload[sshPayloadOffset-1])
 
 						switch req.Type {
 						// handle scp (and someday, other exec)
 						case "exec":
-							payloadSize = int(req.Payload[3])
 							command := string(req.Payload[sshPayloadOffset : sshPayloadOffset+payloadSize])
 							if !bzssh.IsValidScp(command) {
-								errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command))
-								t.logger.Errorf(errMsg)
-								t.stdIo.WriteErr([]byte(errMsg))
-								t.Kill()
+								t.rejectSshWithError(bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command)))
 								return
 							}
 
@@ -192,19 +192,15 @@ func (t *TransparentSsh) Start() error {
 
 						// handle sftp (NOTE: looks like git works over this kind of system too)
 						case "subsystem":
-							payloadSize = int(req.Payload[3])
 							command := string(req.Payload[sshPayloadOffset : sshPayloadOffset+payloadSize])
 
 							if !bzssh.IsValidSftp(command) {
-								errMsg := bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command))
-								t.logger.Errorf(errMsg)
-								t.stdIo.WriteErr([]byte(errMsg))
-								t.Kill()
+								t.rejectSshWithError(bzssh.UnauthorizedCommandError(fmt.Sprintf("'%s'", command)))
 								return
 							}
 
 							ok = true
-							go t.readFromChannel()
+							t.tmb.Go(t.readFromChannel)
 
 							sshExecMessage := bzssh.SshExecMessage{
 								Command: command,
@@ -214,16 +210,12 @@ func (t *TransparentSsh) Start() error {
 
 						// maybe someday we will allow these!
 						case "shell":
-							errMsg := bzssh.UnauthorizedCommandError("shell request")
-							t.logger.Errorf(errMsg)
-							t.stdIo.WriteErr([]byte(errMsg))
-							t.Kill()
+							t.rejectSshWithError(bzssh.UnauthorizedCommandError("shell request"))
+							return
 
 						case "pty-req":
-							errMsg := bzssh.UnauthorizedCommandError("PTY request")
-							t.logger.Errorf(errMsg)
-							t.stdIo.WriteErr([]byte(errMsg))
-							t.Kill()
+							t.rejectSshWithError(bzssh.UnauthorizedCommandError("PTY request"))
+							return
 						}
 
 						if !ok {
@@ -324,4 +316,10 @@ func (t *TransparentSsh) sendOutputMessage(action bzssh.SshSubAction, payload in
 		Action:        string(action),
 		ActionPayload: payloadBytes,
 	}
+}
+
+func (t *TransparentSsh) rejectSshWithError(errMsg string) {
+	t.logger.Errorf(errMsg)
+	t.stdIo.WriteErr([]byte(errMsg))
+	t.Kill()
 }

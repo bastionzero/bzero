@@ -24,8 +24,6 @@ var (
 func startServer(port string) (chan gossh.Channel, chan []byte) {
 	privateKey, _, _ := bzssh.GenerateKeys()
 	config := &gossh.ServerConfig{
-		// TODO: is using NoClientAuth acceptable? Shows in the ssh logs as "authentication (none)", which we know is fine but may look alarming
-		// however if we remove this, the ssh logs show authentication with the public key, which looks like a long-lived credential!
 		NoClientAuth: true,
 		PublicKeyCallback: func(c gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
 			return &gossh.Permissions{}, nil
@@ -34,7 +32,8 @@ func startServer(port string) (chan gossh.Channel, chan []byte) {
 	private, _ := gossh.ParsePrivateKey(privateKey)
 	config.AddHostKey(private)
 
-	listener, _ := net.Listen("tcp", fmt.Sprintf(":%s", port))
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
+	Expect(err).To(BeNil())
 	channelChan := make(chan gossh.Channel)
 	dataChan := make(chan []byte)
 
@@ -42,8 +41,10 @@ func startServer(port string) (chan gossh.Channel, chan []byte) {
 		defer listener.Close()
 
 		// Before use, a handshake must be performed on the incoming net.Conn.
-		nConn, _ := listener.Accept()
-		_, chans, reqs, _ := gossh.NewServerConn(nConn, config)
+		nConn, err := listener.Accept()
+		Expect(err).To(BeNil())
+		_, chans, reqs, err := gossh.NewServerConn(nConn, config)
+		Expect(err).To(BeNil())
 
 		go gossh.DiscardRequests(reqs)
 

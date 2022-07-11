@@ -68,7 +68,7 @@ func (s *OpaqueSsh) Start() error {
 
 	var privateKey, publicKey []byte
 	var err error
-	var useExistingKeys bool
+	useExistingKeys := false
 
 	// if we already have a private key, use it. Otherwise, create a new one
 	// NOTE: it is technically possible for this to create a one-time race if two SSH processes
