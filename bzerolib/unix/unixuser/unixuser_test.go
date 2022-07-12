@@ -127,7 +127,11 @@ var _ = Describe("Unix", Ordered, func() {
 
 	Context("Create User", func() {
 		It("creates a new user", func() {
-			sudoersFile := sudoers.New(filepath.Join(bzeroDaddyPath, "test-sudoers"))
+			testSudoersFile := sudoers.New(filepath.Join(bzeroDaddyPath, "test-sudoers"))
+			managedUsers["ssm-user"] = UserAddOptions{
+				Sudoer:      true,
+				SudoersFile: testSudoersFile,
+			}
 
 			validateUserCreation = func(username string) (*UnixUser, error) {
 				return &UnixUser{}, nil
@@ -135,12 +139,12 @@ var _ = Describe("Unix", Ordered, func() {
 
 			By("not creating a user it isn't allowed to")
 			setRunCommand("sneakyman")
-			_, err := LookupOrCreateFromList("sneakyman", sudoersFile)
+			_, err := LookupOrCreateFromList("sneakyman")
 			Expect(err).ToNot(BeNil())
 
 			By("creating a user it is allowed to")
 			setRunCommand("ssm-user")
-			_, err = LookupOrCreateFromList("ssm-user", sudoersFile)
+			_, err = LookupOrCreateFromList("ssm-user")
 			Expect(err).To(BeNil())
 
 			By("adding a normal user with the specified options")
@@ -151,15 +155,16 @@ var _ = Describe("Unix", Ordered, func() {
 			}
 
 			setRunCommand(fmt.Sprintf("bastion-zero %s", expireDateString))
-			_, err = Create("bastion-zero", opts, sudoersFile)
+			_, err = Create("bastion-zero", opts)
 			Expect(err).To(BeNil())
 
 			By("creating a sudoer user with specified options")
 			sudoerUserName := "bzero-test"
 			opts.Sudoer = true
+			opts.SudoersFile = testSudoersFile
 
 			setRunCommand(fmt.Sprintf("%s %s", sudoerUserName, expireDateString))
-			_, err = Create(sudoerUserName, opts, sudoersFile)
+			_, err = Create(sudoerUserName, opts)
 			Expect(err).To(BeNil())
 
 			// check that our sudoers line was added correctly

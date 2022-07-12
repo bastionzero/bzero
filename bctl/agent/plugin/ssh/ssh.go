@@ -12,7 +12,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
-	"bastionzero.com/bctl/v1/bzerolib/unix/sudoers"
 	"bastionzero.com/bctl/v1/bzerolib/unix/unixuser"
 )
 
@@ -74,8 +73,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 			subSubLogger := subLogger.GetComponentLogger("authorized_keys")
 
 			// Create will create the user with the given username if it is allowed, or it will return the existing user
-			sudoersFile := sudoers.NewDefault()
-			usr, err := unixuser.LookupOrCreateFromList(synPayload.TargetUser, sudoersFile)
+			usr, err := unixuser.LookupOrCreateFromList(synPayload.TargetUser)
 			if err != nil {
 				rerr = fmt.Errorf("failed to use ssh as user %s: %s", synPayload.TargetUser, err)
 				break
