@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"bastionzero.com/bctl/v1/bzerolib/unix/sudoers"
 )
 
 // These are the users we're allowed to create, if someone is trying to look them up
@@ -35,10 +37,6 @@ const (
 	gidFlag        = "--gid"
 	groupsFlag     = "--groups"
 	shellFlag      = "--shell"
-
-	// sudoers constants
-	defaultSudoersFolderName = "/etc/sudoers.d"
-	defaultSudoersFileName   = "bastionzero-users"
 )
 
 // key'ed by user name
@@ -52,9 +50,8 @@ type UserAddOptions struct {
 	Shell      string
 
 	// sudoer config variables
-	Sudoer            bool   // defaults to false
-	SudoersFolderName string // defaults to const defaultSudoersFolderName
-	SudoersFileName   string // defaults to const defaultSudoersFileName
+	Sudoer     bool // defaults to false
+	SudoerFile sudoers.ISudoerFile
 }
 
 // TODO: instead of using hardcoded list, accept UserList arg so that ssh and shell could have differently configured lists
@@ -144,22 +141,10 @@ func userAdd(username string, options UserAddOptions) error {
 // adds a user to the provided (or default) sudoers file, provided they are a sudoer
 func addUserToSudoers(username string, options UserAddOptions) error {
 	if options.Sudoer {
-		// determine our sudoers sudoersFile name
-		sudoersFile := strings.TrimSpace(options.SudoersFileName)
-		if sudoersFile == "" {
-			sudoersFile = defaultSudoersFileName
+		if options.SudoerFile == nil {
+			options.SudoerFile = sudoers.NewDefault()
 		}
-
-		// determine our sudoers folder name
-		sudoersFolder := strings.TrimSpace(options.SudoersFolderName)
-		if sudoersFolder == "" {
-			sudoersFolder = defaultSudoersFolderName
-		}
-
-		// add our user to the sudoers file
-		if err := addToSudoers(username, filepath.Join(sudoersFolder, sudoersFile)); err != nil {
-			return err
-		}
+		return options.SudoerFile.AddUser(username)
 	}
 	return nil
 }

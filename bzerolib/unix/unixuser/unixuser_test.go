@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"bastionzero.com/bctl/v1/bzerolib/unix/sudoers"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -121,6 +122,7 @@ var _ = Describe("Unix", Ordered, func() {
 			validCommand := regexp.MustCompile(`^\S+useradd -m \S+(( --[a-z]+ \S+)*)$`)
 			runCommand = func(cmd *exec.Cmd) error {
 				fmt.Printf("\n Generated command: %s\n", cmd.String())
+				fmt.Println(validCommand.Match([]byte(cmd.String())))
 				Expect(validCommand.Match([]byte(cmd.String()))).To(BeTrue())
 				return nil
 			}
@@ -146,12 +148,12 @@ var _ = Describe("Unix", Ordered, func() {
 			By("creating a sudoer user with specified options")
 			sudoerUserName := "bzero-test"
 			opts.Sudoer = true
-			opts.SudoersFolderName = bzeroDaddyPath
+			opts.SudoerFile = sudoers.New(bzeroDaddyPath, "test-sudoers")
 			_, err = Create(sudoerUserName, opts)
 			Expect(err).To(BeNil())
 
 			// check that our sudoers line was added correctly
-			fileBytes, err := os.ReadFile(filepath.Join(bzeroDaddyPath, defaultSudoersFileName))
+			fileBytes, err := os.ReadFile(filepath.Join(bzeroDaddyPath, "test-sudoers"))
 			Expect(err).To(BeNil())
 
 			expectedSudoerEntry := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", sudoerUserName)
