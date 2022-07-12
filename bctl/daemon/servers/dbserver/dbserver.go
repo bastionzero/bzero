@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net"
 	"os"
-	"time"
 
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
@@ -98,6 +97,9 @@ func StartDbServer(logger *logger.Logger,
 	// Always ensure we close the local tcp connection when we exit
 	defer localTcpListener.Close()
 
+	// Do nothing with the first syn no-op call
+	localTcpListener.AcceptTCP()
+
 	// Block and keep listening for new tcp events
 	for {
 		conn, err := localTcpListener.AcceptTCP()
@@ -107,10 +109,6 @@ func StartDbServer(logger *logger.Logger,
 		}
 
 		logger.Infof("Accepting new tcp connection")
-
-		// important sleep for preventing errors on linux machines when executing commands immediately
-		// after daemon startup
-		time.Sleep(time.Second)
 
 		// create our new datachannel in its own go routine so that we can accept other tcp connections
 		go func() {
