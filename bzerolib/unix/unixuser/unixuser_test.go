@@ -17,8 +17,8 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func setRunCommand(user string) {
-	expectedCommand := fmt.Sprintf("useradd -m %s", user)
+func setRunCommand(userAndOpts string) {
+	expectedCommand := fmt.Sprintf("useradd -m %s", userAndOpts)
 	runCommand = func(cmd *exec.Cmd) error {
 		fmt.Printf("\n Generated command: %s\n", cmd.String())
 		Expect(cmd.String()).To(ContainSubstring(expectedCommand))
