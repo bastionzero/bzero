@@ -144,17 +144,21 @@ var _ = Describe("Unix", Ordered, func() {
 			Expect(err).To(BeNil())
 
 			By("adding a normal user with the specified options")
+			expireDate := time.Now().Add(24 * time.Hour)
+			expireDateString := fmt.Sprintf("--expiredate %d-%02d-%02d", expireDate.Year(), expireDate.Month(), expireDate.Day())
 			opts := UserAddOptions{
-				ExpireDate: time.Now().Add(24 * time.Hour),
+				ExpireDate: expireDate,
 			}
-			setRunCommand("bastion-zero")
+
+			setRunCommand(fmt.Sprintf("bastion-zero %s", expireDateString))
 			_, err = Create("bastion-zero", opts, sudoersFile)
 			Expect(err).To(BeNil())
 
 			By("creating a sudoer user with specified options")
 			sudoerUserName := "bzero-test"
-			setRunCommand(sudoerUserName)
 			opts.Sudoer = true
+
+			setRunCommand(fmt.Sprintf("%s %s", sudoerUserName, expireDateString))
 			_, err = Create(sudoerUserName, opts, sudoersFile)
 			Expect(err).To(BeNil())
 
