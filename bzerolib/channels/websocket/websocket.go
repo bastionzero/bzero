@@ -144,7 +144,7 @@ func New(logger *logger.Logger,
 	go func() {
 		if err := ws.connect(); err != nil {
 			logger.Error(err)
-			go ws.Close(fmt.Errorf("process was unable to connect to BastionZero"))
+			go ws.close(fmt.Errorf("process was unable to connect to BastionZero"))
 
 			// If this is a daemon connection (i.e. we are not getting a challenge)
 			// we also need to make sure we close the connection in the backend
@@ -197,7 +197,23 @@ func New(logger *logger.Logger,
 	return &ws, nil
 }
 
+// Close kills all datachannels subscribed to this websocket, kills the
+// websocket tomb, disconnects the websocket connection, and waits for all
+// goroutines tracked by the websocket tomb to finish running.
 func (w *Websocket) Close(reason error) {
+	w.close(reason)
+
+	// It is not safe for tracked goroutines within the websocket struct to call
+	// Wait() otherwise there is a deadlock when calling .Wait()
+	w.tmb.Wait()
+}
+
+// close kills all datachannels subscribed to this websocket, kills the
+// websocket tomb, and disconnects the websocket connection.
+//
+// Tracked goroutines that wish to close the websocket must call this function,
+// instead of the publicly exposed one, to ensure there is no deadlock.
+func (w *Websocket) close(reason error) {
 	w.logger.Infof("websocket closing because: %s", reason)
 
 	// close all of our existing datachannels
@@ -215,8 +231,6 @@ func (w *Websocket) Close(reason error) {
 		w.ready = false
 		w.client.Close()
 	}
-
-	w.tmb.Wait()
 }
 
 // add channel to channels dictionary for forwarding incoming messages
@@ -250,7 +264,7 @@ func (w *Websocket) receive() error {
 		// Check if it's a clean exit or we don't need to reconnect
 		if websocket.IsCloseError(err, websocket.CloseNormalClosure) || !w.autoReconnect {
 			rerr := errors.New("websocket closed")
-			w.Close(rerr)
+			w.close(rerr)
 			return rerr
 		} else { // else, reconnect
 			msg := fmt.Errorf("error in websocket, will attempt to reconnect: %s", err)
@@ -267,7 +281,7 @@ func (w *Websocket) receive() error {
 				switch message.Target {
 				case "CloseConnection":
 					rerr := errors.New("the bzero agent terminated the connection")
-					w.Close(rerr)
+					w.close(rerr)
 					return rerr
 				default:
 					w.ready = true
