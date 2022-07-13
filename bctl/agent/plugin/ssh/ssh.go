@@ -59,7 +59,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 	} else {
 		var rerr error
 
-		subSubLogger := subLogger.GetComponentLogger("authorized_keys")
+		authorizedKeysLogger := subLogger.GetComponentLogger("authorized_keys")
 
 		// Create will create the user with the given username if it is allowed, or it will return the existing user
 		usr, err := unixuser.LookupOrCreateFromList(synPayload.TargetUser)
@@ -69,7 +69,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 
 		// we place the authorized keys lock file inside the user's /home/.ssh/ directory because that is the least bad place for it
 		// source: https://i.stack.imgur.com/BlpRb.png
-		authKeys, err := authorizedkeys.New(subSubLogger, plugin.doneChan, usr, sshDir, sshDir, maxKeyLifetime)
+		authKeys, err := authorizedkeys.New(authorizedKeysLogger, plugin.doneChan, usr, sshDir, sshDir, maxKeyLifetime)
 		if err != nil {
 			rerr = fmt.Errorf("failed to set up authorized_keys file: %s", err)
 		}
