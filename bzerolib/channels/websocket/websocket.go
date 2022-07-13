@@ -197,6 +197,12 @@ func New(logger *logger.Logger,
 	return &ws, nil
 }
 
+// Dead returns a channel that is closed once all tracked goroutines in the
+// websocket struct have finished running.
+func (w *Websocket) Dead() <-chan struct{} {
+	return w.tmb.Dead()
+}
+
 // Close kills all datachannels subscribed to this websocket, kills the
 // websocket tomb, disconnects the websocket connection, and waits for all
 // goroutines tracked by the websocket tomb to finish running.

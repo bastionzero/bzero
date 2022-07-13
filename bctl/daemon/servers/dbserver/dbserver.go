@@ -79,6 +79,22 @@ func StartDbServer(logger *logger.Logger,
 		return err
 	}
 
+	// Start a goroutine that listens for the websocket tomb to die. If the
+	// websocket tomb has died, then the websocket is truly dead (graceful
+	// websocket closure or received "CloseMessage") and there is nothing left
+	// to do, so we just exit. Reconnects don't kill the websocket tomb.
+	go func() {
+		for {
+			select {
+			case <-server.tmb.Dying():
+				return
+			case <-server.websocket.Dead():
+				errorCode := 1
+				os.Exit(errorCode)
+			}
+		}
+	}()
+
 	// Now create our local listener for TCP connections
 	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
 	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
