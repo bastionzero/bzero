@@ -163,6 +163,8 @@ func (t *TransparentSsh) Start() error {
 				}
 				t.sshChannel = channel
 
+				t.logger.Infof("I have a channel, but any requests?")
+
 				// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 				go func(requests <-chan *gossh.Request) {
 					for req := range requests {
@@ -176,6 +178,8 @@ func (t *TransparentSsh) Start() error {
 							t.rejectSshWithError(fmt.Sprintf("ssh payload metadata indicated body length of %d bytes. Received %d bytes", payloadSize, len(req.Payload)-sshPayloadOffset))
 							return
 						}
+
+						t.logger.Infof("I am %s and I got %s", req.Type, req.Payload)
 
 						switch req.Type {
 						// handle scp (and someday, other exec)
