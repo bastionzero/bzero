@@ -8,14 +8,23 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"bastionzero.com/bctl/v1/bzerolib/unix/sudoers"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+func setRunCommand(userAndOpts string) {
+	expectedCommand := fmt.Sprintf("useradd -m %s", userAndOpts)
+	runCommand = func(cmd *exec.Cmd) error {
+		fmt.Printf("\n Generated command: %s\n", cmd.String())
+		Expect(cmd.String()).To(ContainSubstring(expectedCommand))
+		return nil
+	}
+}
 
 func TestUnixUser(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -118,40 +127,48 @@ var _ = Describe("Unix", Ordered, func() {
 
 	Context("Create User", func() {
 		It("creates a new user", func() {
-			validCommand := regexp.MustCompile(`^\S+useradd -m \S+(( --[a-z]+ \S+)*)$`)
-			runCommand = func(cmd *exec.Cmd) error {
-				fmt.Printf("\n Generated command: %s\n", cmd.String())
-				Expect(validCommand.Match([]byte(cmd.String()))).To(BeTrue())
-				return nil
+			testSudoersFile := sudoers.New(filepath.Join(bzeroDaddyPath, "test-sudoers"))
+			managedUsers["ssm-user"] = UserAddOptions{
+				Sudoer:      true,
+				SudoersFile: testSudoersFile,
 			}
+
 			validateUserCreation = func(username string) (*UnixUser, error) {
 				return &UnixUser{}, nil
 			}
 
 			By("not creating a user it isn't allowed to")
+			setRunCommand("sneakyman")
 			_, err := LookupOrCreateFromList("sneakyman")
 			Expect(err).ToNot(BeNil())
 
 			By("creating a user it is allowed to")
+			setRunCommand("ssm-user")
 			_, err = LookupOrCreateFromList("ssm-user")
 			Expect(err).To(BeNil())
 
 			By("adding a normal user with the specified options")
+			expireDate := time.Now().Add(24 * time.Hour)
+			expireDateString := fmt.Sprintf("--expiredate %d-%02d-%02d", expireDate.Year(), expireDate.Month(), expireDate.Day())
 			opts := UserAddOptions{
-				ExpireDate: time.Now().Add(24 * time.Hour),
+				ExpireDate: expireDate,
 			}
+
+			setRunCommand(fmt.Sprintf("bastion-zero %s", expireDateString))
 			_, err = Create("bastion-zero", opts)
 			Expect(err).To(BeNil())
 
 			By("creating a sudoer user with specified options")
 			sudoerUserName := "bzero-test"
 			opts.Sudoer = true
-			opts.SudoersFolderName = bzeroDaddyPath
+			opts.SudoersFile = testSudoersFile
+
+			setRunCommand(fmt.Sprintf("%s %s", sudoerUserName, expireDateString))
 			_, err = Create(sudoerUserName, opts)
 			Expect(err).To(BeNil())
 
 			// check that our sudoers line was added correctly
-			fileBytes, err := os.ReadFile(filepath.Join(bzeroDaddyPath, defaultSudoersFileName))
+			fileBytes, err := os.ReadFile(filepath.Join(bzeroDaddyPath, "test-sudoers"))
 			Expect(err).To(BeNil())
 
 			expectedSudoerEntry := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", sudoerUserName)
