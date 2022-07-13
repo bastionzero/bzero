@@ -57,13 +57,11 @@ func (t *TransparentSsh) Kill() {
 
 func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
 
-	// Update the logger action
-	t.logger = t.logger.GetActionLogger(action)
 	switch bzssh.SshSubAction(action) {
 	case bzssh.SshOpen:
 		var openRequest bzssh.SshOpenMessage
 		if err := json.Unmarshal(actionPayload, &openRequest); err != nil {
-			return nil, fmt.Errorf("malformed transparent ssh action payload %s", string(actionPayload))
+			return nil, fmt.Errorf("unable to unmarshal transparent ssh open message: %s", err)
 		}
 		return t.start(openRequest, action)
 
@@ -97,7 +95,7 @@ func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, e
 			t.sendStreamMessage(smsg.Error, false, []byte(errMsg))
 			return nil, fmt.Errorf(errMsg)
 		} else {
-			// because scp takes further inputs after execution begins, we can't wait on this to bring a syncrhonous error
+			// because scp takes further inputs after execution begins, we can't wait on this to bring a synchronous error
 			t.exec(execRequest.Command)
 		}
 
