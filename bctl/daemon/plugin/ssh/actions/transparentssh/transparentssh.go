@@ -148,7 +148,10 @@ func (t *TransparentSsh) Start() error {
 
 		go gossh.DiscardRequests(reqs)
 
+		t.logger.Infof("I have a conn, but any channels?")
+
 		go func() {
+			t.logger.Infof("Yeah so I have %d chans", len(chans))
 			for newChannel := range chans {
 				// Channels have a type, depending on the application level protocol intended.
 				if t := newChannel.ChannelType(); t != "session" {
@@ -234,6 +237,7 @@ func (t *TransparentSsh) Start() error {
 					}
 				}(requests)
 			}
+			t.logger.Infof("Seems like I should stop here...")
 		}()
 	}()
 

@@ -158,7 +158,7 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 		for {
 			select {
 			case <-t.tmb.Dying():
-				t.logger.Errorf("got killed")
+				t.logger.Errorf("tomb was killed. Stopping...")
 				return nil
 			case d := <-t.stdInChan:
 				t.logger.Debugf("Writing %d bytes to stdin", len(d))
