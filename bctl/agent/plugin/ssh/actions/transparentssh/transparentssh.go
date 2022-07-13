@@ -46,13 +46,14 @@ func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessa
 }
 
 func (t *TransparentSsh) Kill() {
-	t.tmb.Kill(nil)
 	if t.session != nil {
 		t.session.Close()
 	}
 	if t.conn != nil {
 		t.conn.Close()
 	}
+	t.tmb.Kill(nil)
+	t.tmb.Wait()
 }
 
 func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
