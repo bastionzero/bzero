@@ -46,13 +46,14 @@ func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessa
 }
 
 func (t *TransparentSsh) Kill() {
-	t.tmb.Kill(nil)
 	if t.session != nil {
 		t.session.Close()
 	}
 	if t.conn != nil {
 		t.conn.Close()
 	}
+	t.tmb.Kill(nil)
+	t.tmb.Wait()
 }
 
 func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
@@ -158,7 +159,7 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 		for {
 			select {
 			case <-t.tmb.Dying():
-				t.logger.Errorf("got killed")
+				t.logger.Errorf("tomb was killed. Stopping...")
 				return nil
 			case d := <-t.stdInChan:
 				t.logger.Debugf("Writing %d bytes to stdin", len(d))
