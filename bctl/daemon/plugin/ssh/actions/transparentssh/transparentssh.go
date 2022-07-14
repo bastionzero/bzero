@@ -123,7 +123,7 @@ func (t *TransparentSsh) Start() error {
 	// An SSH server is represented by a ServerConfig, which holds
 	// certificate details and handles authentication of ServerConns.
 	config := &gossh.ServerConfig{
-		// TODO: is using NoClientAuth acceptable? Shows in the ssh logs as "authentication (none)", which we know is fine but may look alarming
+		// FIXME: is using NoClientAuth acceptable? Shows in the ssh logs as "authentication (none)", which we know is fine but may look alarming
 		// however if we remove this, the ssh logs show authentication with the public key, which looks like a long-lived credential!
 		NoClientAuth: true,
 		PublicKeyCallback: func(c gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
@@ -158,7 +158,7 @@ func (t *TransparentSsh) Start() error {
 
 				channel, requests, err := newChannel.Accept()
 				if err != nil {
-					t.logger.Errorf("could not accept channel (%s)", err)
+					t.logger.Errorf("could not accept channel: %w", err)
 					continue
 				}
 				t.sshChannel = channel

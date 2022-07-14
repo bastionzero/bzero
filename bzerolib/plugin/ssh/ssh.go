@@ -11,8 +11,9 @@ type SshAction string
 const (
 	OpaqueSsh      SshAction = "opaque"
 	TransparentSsh SshAction = "transparent"
-	scpWithSpace   string    = "scp "
-	sftp           string    = "sftp"
+	// we need the space in order to block execution of scripts that might start with 'scp'
+	scpWithSpace string = "scp "
+	sftp         string = "sftp"
 )
 
 type SshActionParams struct {
