@@ -159,7 +159,7 @@ func (t *TransparentSsh) Start() error {
 
 				channel, requests, err := newChannel.Accept()
 				if err != nil {
-					t.logger.Errorf("could not accept channel (%s)", err)
+					t.logger.Errorf("could not accept channel: %w", err)
 					continue
 				}
 				t.sshChannel = channel
@@ -188,7 +188,7 @@ func (t *TransparentSsh) Start() error {
 							}
 
 							ok = true
-							t.tmb.Go(t.readFromChannel)
+							go t.readFromChannel()
 
 							sshExecMessage := bzssh.SshExecMessage{
 								Command: command,
@@ -205,7 +205,7 @@ func (t *TransparentSsh) Start() error {
 							}
 
 							ok = true
-							t.tmb.Go(t.readFromChannel)
+							go t.readFromChannel()
 
 							sshExecMessage := bzssh.SshExecMessage{
 								Command: command,
@@ -238,14 +238,14 @@ func (t *TransparentSsh) Start() error {
 }
 
 // send anything we get from local SSH up to the agent
-func (t *TransparentSsh) readFromChannel() error {
+func (t *TransparentSsh) readFromChannel() {
 
 	b := make([]byte, InputBufferSize)
 
 	for {
 		select {
 		case <-t.tmb.Dying():
-			return nil
+			return
 		default:
 			n, err := t.sshChannel.Read(b)
 			if err != nil {
@@ -255,11 +255,11 @@ func (t *TransparentSsh) readFromChannel() error {
 					t.signalSuccess()
 					t.logger.Errorf("finished reading from stdin")
 					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
-					return nil
+					return
 				} else {
 					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: err.Error()})
 					t.logger.Errorf("error reading from Stdin: %s", err)
-					return err
+					return
 				}
 			} else if n > 0 {
 				t.logger.Debugf("Sending %d bytes to remote SSH", n)
