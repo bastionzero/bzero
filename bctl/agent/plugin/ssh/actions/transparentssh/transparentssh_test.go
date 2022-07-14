@@ -200,7 +200,7 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			By("shutting down when the remote ssh process ends")
 			sshChannel.Close()
 			msg = <-outboxQueue
-			// could be from stdout or stderr, so we don't check that
+			Expect(msg.Type).To(Equal(smsg.StdOut))
 			Expect(msg.More).To(BeFalse())
 		})
 	})

@@ -117,7 +117,7 @@ func (s *OpaqueSsh) start(openRequest bzssh.SshOpenMessage, action string) ([]by
 		for {
 			select {
 			case <-s.tmb.Dying():
-				s.logger.Errorf("tomb was killed. Stopping...")
+				s.logger.Errorf("got killed")
 				return nil
 			default:
 				// this line blocks until it reads output or error

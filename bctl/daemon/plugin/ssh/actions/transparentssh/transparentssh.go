@@ -75,11 +75,10 @@ func (t *TransparentSsh) signalSuccess() {
 }
 
 func (t *TransparentSsh) Kill() {
-	t.tmb.Kill(nil)
 	if t.sshChannel != nil {
 		t.sshChannel.Close()
 	}
-	t.tmb.Wait()
+	t.tmb.Kill(nil)
 }
 
 func (t *TransparentSsh) Start() error {
