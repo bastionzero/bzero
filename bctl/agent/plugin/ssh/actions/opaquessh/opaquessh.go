@@ -11,6 +11,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
+	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -19,6 +20,7 @@ import (
 const (
 	chunkSize     = 64 * 1024
 	writeDeadline = 5 * time.Second
+	rsaKeyPath    = "/etc/ssh/ssh_host_rsa_key.pub"
 )
 
 type OpaqueSsh struct {
@@ -34,9 +36,11 @@ type OpaqueSsh struct {
 
 	remoteConnection *net.TCPConn
 	authorizedKeys   authorizedkeys.IAuthorizedKeys
+
+	fileIo bzio.BzFileIo
 }
 
-func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *net.TCPConn, authKeys authorizedkeys.IAuthorizedKeys) *OpaqueSsh {
+func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessage, conn *net.TCPConn, authKeys authorizedkeys.IAuthorizedKeys, fileIo bzio.BzFileIo) *OpaqueSsh {
 
 	return &OpaqueSsh{
 		logger:           logger,
@@ -44,6 +48,7 @@ func New(logger *logger.Logger, doneChan chan struct{}, ch chan smsg.StreamMessa
 		streamOutputChan: ch,
 		remoteConnection: conn,
 		authorizedKeys:   authKeys,
+		fileIo:           fileIo,
 	}
 }
 
@@ -107,17 +112,24 @@ func (s *OpaqueSsh) start(openRequest bzssh.SshOpenMessage, action string) ([]by
 	s.streamMessageVersion = openRequest.StreamMessageVersion
 	s.logger.Debugf("Setting stream message version: %s", s.streamMessageVersion)
 
+	// send an RSA key to the daemon if we can find it
+	if rsaKey, err := s.fileIo.ReadFile(rsaKeyPath); err != nil {
+		s.logger.Errorf("unable to read key file at %s: %s", rsaKeyPath, err)
+	} else {
+		s.sendStreamMessage(0, smsg.Data, false, rsaKey)
+	}
+
 	// Setup a go routine to listen for messages coming from this local connection and send to daemon
 	s.tmb.Go(func() error {
 		defer close(s.doneChan)
 
-		sequenceNumber := 0
+		sequenceNumber := 1
 		buff := make([]byte, chunkSize)
 
 		for {
 			select {
 			case <-s.tmb.Dying():
-				s.logger.Errorf("got killed")
+				s.logger.Errorf("tomb was killed. Stopping...")
 				return nil
 			default:
 				// this line blocks until it reads output or error
