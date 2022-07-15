@@ -151,6 +151,7 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 
 	// track goroutines for how we communicate with stdin, stdout, stderr
 	t.tmb.Go(func() error {
+		defer close(t.doneChan)
 		t.tmb.Go(func() error {
 			return t.readPipe(stdout, smsg.StdOut, "stdout")
 		})
