@@ -8,7 +8,6 @@ import (
 	"net"
 
 	gossh "golang.org/x/crypto/ssh"
-	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -26,7 +25,6 @@ const (
 const readyMsg = "BZERO-DAEMON READY-TO-CONNECT"
 
 type TransparentSsh struct {
-	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	outboxQueue chan plugin.ActionWrapper
@@ -78,9 +76,7 @@ func (t *TransparentSsh) Kill() {
 	if t.sshChannel != nil {
 		t.sshChannel.Close()
 	}
-	if t.tmb.Alive() {
-		t.tmb.Kill(nil)
-	}
+	close(t.doneChan)
 }
 
 func (t *TransparentSsh) Start() error {
@@ -88,7 +84,7 @@ func (t *TransparentSsh) Start() error {
 	// although we don't use keys for authentication, the local ssh process will
 	// throw an error if it's told to look for an invalid IdentityFile, and we can
 	// then re-use this private key as our "host key" when we terminate the ssh connection
-	privateKey, _, err := bzssh.SetUpKeys(t.identityFile)
+	privateKey, _, err := bzssh.SetUpKeys(t.identityFile, t.logger)
 	if err != nil {
 		return fmt.Errorf("failed to set up ssh keypair: %s", err)
 	} else {
@@ -98,11 +94,6 @@ func (t *TransparentSsh) Start() error {
 	}
 
 	t.sendOutputMessage(bzssh.SshOpen, bzssh.SshOpenMessage{})
-
-	go func() {
-		defer close(t.doneChan)
-		<-t.tmb.Dying()
-	}()
 
 	// the following implementation of an ssh server is based heavily on this example:
 	// https://github.com/Scalingo/go-ssh-examples/blob/master/server_complex.go
@@ -223,32 +214,26 @@ func (t *TransparentSsh) Start() error {
 
 // send anything we get from local SSH up to the agent
 func (t *TransparentSsh) readFromChannel() {
-
 	b := make([]byte, InputBufferSize)
 
 	for {
-		select {
-		case <-t.tmb.Dying():
-			t.logger.Infof("tomb was killed. Going to stop reading from stdin")
-		default:
-			n, err := t.sshChannel.Read(b)
-			if err != nil {
-				if err == io.EOF {
-					// when UPLOADING, we need to tell Agent we're done
-					// if we reach this point we assume success
-					t.signalSuccess()
-					t.logger.Errorf("finished reading from stdin")
-					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
-					return
-				} else {
-					t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: err.Error()})
-					t.logger.Errorf("error reading from Stdin: %s", err)
-					return
-				}
-			} else if n > 0 {
-				t.logger.Debugf("Sending %d bytes to remote SSH", n)
-				t.sendOutputMessage(bzssh.SshInput, bzssh.SshInputMessage{Data: b[:n]})
+		n, err := t.sshChannel.Read(b)
+		if err != nil {
+			if err == io.EOF {
+				// when UPLOADING, we need to tell Agent we're done
+				// if we reach this point we assume success
+				t.signalSuccess()
+				t.logger.Errorf("finished reading from stdin")
+				t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: endedByUser})
+				return
+			} else {
+				t.sendOutputMessage(bzssh.SshClose, bzssh.SshCloseMessage{Reason: err.Error()})
+				t.logger.Errorf("error reading from Stdin: %s", err)
+				return
 			}
+		} else if n > 0 {
+			t.logger.Debugf("Sending %d bytes to remote SSH", n)
+			t.sendOutputMessage(bzssh.SshInput, bzssh.SshInputMessage{Data: b[:n]})
 		}
 	}
 }

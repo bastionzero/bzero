@@ -29,6 +29,7 @@ func NewKnownHosts(filePath string, hosts []string, fileIo bzio.BzFileIo) *Known
 }
 
 func (k *KnownHosts) AddHostKeyPrivate(privateKey []byte) error {
+
 	if publicKey, err := ReadPublicKeyRsa(privateKey); err != nil {
 		return fmt.Errorf("failed to decode private key: %s", err)
 	} else if sshKey, err := gossh.NewPublicKey(publicKey); err != nil {
@@ -41,4 +42,5 @@ func (k *KnownHosts) AddHostKeyPrivate(privateKey []byte) error {
 func (k *KnownHosts) AddHostKeyPublic(publicKey gossh.PublicKey) error {
 	keyLine := knownhosts.Line(k.hosts, publicKey)
 	return k.fileIo.WriteFile(k.filePath, []byte(keyLine), 0600)
+
 }

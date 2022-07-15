@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -101,14 +102,17 @@ func ReadPublicKeyRsa(privatePem []byte) (*rsa.PublicKey, error) {
 
 // tries to return an SSH keypair based on the given identityfile
 // if that fails, create a new keypair and update the identityfile
-func SetUpKeys(identityFile IIdentityFile) (privateKey []byte, publicKey []byte, err error) {
+func SetUpKeys(identityFile IIdentityFile, logger *logger.Logger) (privateKey []byte, publicKey []byte, err error) {
 	useExistingKeys := false
 	// if any of the following steps fail, we need to generate new keys
-	// TODO: would it be crazy to pass a logger to this function?
 	if privateKey, err = identityFile.GetKey(); err != nil {
+		logger.Errorf("failed to retrieve identity file: %s", err)
 	} else if publicKeyRsa, err := ReadPublicKeyRsa(privateKey); err != nil {
+		logger.Errorf("failed to decode identity file: %s", err)
 	} else if publicKey, err = GeneratePublicKey(publicKeyRsa); err != nil {
+		logger.Errorf("failed to decode public key: %s", err)
 	} else {
+		logger.Errorf("using existing temporary keys")
 		useExistingKeys = true
 	}
 	if !useExistingKeys {

@@ -70,7 +70,7 @@ func (s *OpaqueSsh) Start() error {
 	// NOTE: it is technically possible for this to create a one-time race if two SSH processes
 	// are kicked off *and* the user just logged in. However this is unlikely and can be resolved
 	// if/when we upgrade the SSH architecture
-	_, publicKey, err := bzssh.SetUpKeys(s.identityFile)
+	_, publicKey, err := bzssh.SetUpKeys(s.identityFile, s.logger)
 	if err != nil {
 		return fmt.Errorf("failed to set up ssh keypair: %s", err)
 	}
