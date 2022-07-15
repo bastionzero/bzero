@@ -54,7 +54,6 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 	actLogger := s.logger.GetActionLogger(actionName)
 	switch actionName {
 	case string(bzssh.OpaqueSsh):
-		// FIXME: add args
 		s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.stdIo, s.identityFile, s.knownHosts)
 	case string(bzssh.TransparentSsh):
 		// listen for a connection from the ZLI
