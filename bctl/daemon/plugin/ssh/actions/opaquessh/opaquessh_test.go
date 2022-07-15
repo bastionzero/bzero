@@ -126,7 +126,7 @@ var _ = Describe("Daemon OpaqueSsh action", func() {
 			// can't check the public key's contents but we can make sure it's there
 			Expect(len(openPayload.PublicKey)).Should(BeNumerically(">", 0))
 
-			By("writing the remote host key to bz-known_hosts")
+			By("writing the remote host key to bastionzero-known_hosts")
 			s.ReceiveStream(smsg.StreamMessage{
 				Type:    smsg.Data,
 				Content: base64.StdEncoding.EncodeToString([]byte(tests.DemoPub)),

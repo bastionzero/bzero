@@ -318,7 +318,7 @@ func parseFlags() error {
 
 	// SSH plugin variables
 	flag.StringVar(&identityFile, "identityFile", "", "Path to an SSH IdentityFile")
-	flag.StringVar(&knownHostsFile, "knownHostsFile", "", "Path to bz-known_hosts")
+	flag.StringVar(&knownHostsFile, "knownHostsFile", "", "Path to bastionzero-known_hosts")
 	flag.StringVar(&sshAction, "sshAction", "", "One of ['opaque', 'transparent']")
 	flag.StringVar(&hostNames, "hostNames", "", "Comma-separated list of hostNames to use for this target")
 
