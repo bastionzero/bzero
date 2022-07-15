@@ -1,6 +1,7 @@
 package opaquessh
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
+	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -24,6 +26,7 @@ var _ = Describe("Agent OpaqueSsh action", func() {
 	logger := logger.MockLogger()
 	testUser := "test-user"
 	testData := "testData"
+	testHostKey := "testHostKey"
 
 	readyChan := make(chan struct{})
 	go mockSshServer(readyChan)
@@ -41,7 +44,10 @@ var _ = Describe("Agent OpaqueSsh action", func() {
 		mockAuthKeyService := authorizedkeys.MockAuthorizedKey{}
 		mockAuthKeyService.On("Add").Return(nil)
 
-		s := New(logger, doneChan, outboxQueue, dummyConn, mockAuthKeyService)
+		mockFileService := bzio.MockBzFileIo{}
+		mockFileService.On("ReadFile", rsaKeyPath).Return([]byte(testHostKey), nil)
+
+		s := New(logger, doneChan, outboxQueue, dummyConn, mockAuthKeyService, mockFileService)
 
 		It("relays messages between the Daemon and the local SSH process", func() {
 
@@ -57,6 +63,12 @@ var _ = Describe("Agent OpaqueSsh action", func() {
 			Expect(err).To(BeNil())
 			Expect(returnBytes).To(Equal([]byte{}))
 
+			By("sending the host key to the daemon")
+			msg := <-outboxQueue
+			content, _ := base64.StdEncoding.DecodeString(msg.Content)
+			Expect(msg.Type).To(Equal(smsg.Data))
+			Expect(content).To(Equal([]byte(testHostKey)))
+
 			By("passing Daemon input to SSH")
 			inputMsg := ssh.SshInputMessage{
 				Data: []byte(testData),
@@ -69,7 +81,7 @@ var _ = Describe("Agent OpaqueSsh action", func() {
 			Expect(returnBytes).To(Equal([]byte{}))
 
 			By("sending SSH output back to Daemon")
-			msg := <-outboxQueue
+			msg = <-outboxQueue
 			Expect(msg.Type).To(Equal(smsg.StdOut))
 			Expect(msg.More).To(BeTrue())
 

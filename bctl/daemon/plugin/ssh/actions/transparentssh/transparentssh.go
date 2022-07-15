@@ -32,34 +32,34 @@ type TransparentSsh struct {
 	outboxQueue chan plugin.ActionWrapper
 	doneChan    chan struct{}
 
-	identityFile string
-
-	filIo bzio.BzFileIo
-	stdIo bzio.BzIo
-
-	// used to communicate directly with the SSH process
+	// used to communicate directly with the ZLI via stdio
+	zliIo bzio.BzIo
+	// used to communicate directly with the SSH process via TCP
 	sshListener net.Listener
 	sshChannel  gossh.Channel
+
+	identityFile bzssh.IIdentityFile
+	knownHosts   bzssh.IKnownHosts
 }
 
 func New(
 	logger *logger.Logger,
 	outboxQueue chan plugin.ActionWrapper,
 	doneChan chan struct{},
-	identityFile string,
-	filIo bzio.BzFileIo,
-	stdIo bzio.BzIo,
+	zliIo bzio.BzIo,
 	listener net.Listener,
+	identityFile bzssh.IIdentityFile,
+	knownHosts bzssh.IKnownHosts,
 ) *TransparentSsh {
 
 	return &TransparentSsh{
 		logger:       logger,
 		outboxQueue:  outboxQueue,
 		doneChan:     doneChan,
-		identityFile: identityFile,
-		filIo:        filIo,
-		stdIo:        stdIo,
+		zliIo:        zliIo,
 		sshListener:  listener,
+		identityFile: identityFile,
+		knownHosts:   knownHosts,
 	}
 }
 
@@ -75,39 +75,26 @@ func (t *TransparentSsh) signalSuccess() {
 }
 
 func (t *TransparentSsh) Kill() {
-	t.tmb.Kill(nil)
 	if t.sshChannel != nil {
 		t.sshChannel.Close()
 	}
-	t.tmb.Wait()
+	if t.tmb.Alive() {
+		t.tmb.Kill(nil)
+	}
 }
 
 func (t *TransparentSsh) Start() error {
 
-	var privateKey []byte
-	var err error
-	useExistingKeys := false
-
 	// although we don't use keys for authentication, the local ssh process will
-	// throw an error if it's told to look for an invalid IdentityFile
-	// so unfortunately we still need to create one if it doesn't exist
-	//
-	// we then re-use this private key as our "host key" when we terminate the ssh connection
-	if publicKeyRsa, err := bzssh.ReadPublicKeyRsa(t.identityFile, t.filIo); err == nil {
-		if _, err = bzssh.GeneratePublicKey(publicKeyRsa); err != nil {
-			t.logger.Errorf("error decoding temporary public key: %s", err)
-		} else if privateKey, err = t.filIo.ReadFile(t.identityFile); err == nil {
-			t.logger.Debugf("using existing temporary keys")
-			useExistingKeys = true
-		}
-	}
-	if !useExistingKeys {
-		t.logger.Debugf("generating new temporary keys")
-		privateKey, _, err = bzssh.GenerateKeys()
-		if err != nil {
-			return fmt.Errorf("error generating temporary keys: %s", err)
-		} else if err := t.filIo.WriteFile(t.identityFile, privateKey, 0600); err != nil {
-			return fmt.Errorf("error writing temporary private key: %s", err)
+	// throw an error if it's told to look for an invalid IdentityFile, and we can
+	// then re-use this private key as our "host key" when we terminate the ssh connection
+	privateKey, _, err := bzssh.SetUpKeys(t.identityFile)
+	if err != nil {
+		return fmt.Errorf("failed to set up ssh keypair: %s", err)
+	} else {
+		t.logger.Infof("wait do I still write here?")
+		if err := t.knownHosts.AddHostKeyPrivate(privateKey); err != nil {
+			return fmt.Errorf("failed to update known_hosts file: %s", err)
 		}
 	}
 
@@ -124,8 +111,6 @@ func (t *TransparentSsh) Start() error {
 	// An SSH server is represented by a ServerConfig, which holds
 	// certificate details and handles authentication of ServerConns.
 	config := &gossh.ServerConfig{
-		// TODO: is using NoClientAuth acceptable? Shows in the ssh logs as "authentication (none)", which we know is fine but may look alarming
-		// however if we remove this, the ssh logs show authentication with the public key, which looks like a long-lived credential!
 		NoClientAuth: true,
 		PublicKeyCallback: func(c gossh.ConnMetadata, pubKey gossh.PublicKey) (*gossh.Permissions, error) {
 			return &gossh.Permissions{}, nil
@@ -138,7 +123,7 @@ func (t *TransparentSsh) Start() error {
 		defer t.sshListener.Close()
 
 		// Once a ServerConfig has been configured, tell ZLI we can accept connections
-		t.stdIo.Write([]byte(readyMsg))
+		t.zliIo.Write([]byte(readyMsg))
 
 		// Before use, a handshake must be performed on the incoming net.Conn.
 		nConn, _ := t.sshListener.Accept()
@@ -159,7 +144,7 @@ func (t *TransparentSsh) Start() error {
 
 				channel, requests, err := newChannel.Accept()
 				if err != nil {
-					t.logger.Errorf("could not accept channel: %w", err)
+					t.logger.Errorf("could not accept channel: %s", err)
 					continue
 				}
 				t.sshChannel = channel
@@ -245,7 +230,7 @@ func (t *TransparentSsh) readFromChannel() {
 	for {
 		select {
 		case <-t.tmb.Dying():
-			return
+			t.logger.Infof("tomb was killed. Going to stop reading from stdin")
 		default:
 			n, err := t.sshChannel.Read(b)
 			if err != nil {
@@ -302,7 +287,7 @@ func (t *TransparentSsh) ReceiveStream(smessage smsg.StreamMessage) {
 		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
 			t.logger.Errorf("error decoding ssh StdOut stream content: %s", err)
 		} else {
-			t.stdIo.WriteErr([]byte(contentBytes))
+			t.zliIo.WriteErr([]byte(contentBytes))
 		}
 		t.Kill()
 		return
@@ -325,6 +310,6 @@ func (t *TransparentSsh) sendOutputMessage(action bzssh.SshSubAction, payload in
 
 func (t *TransparentSsh) rejectSshWithError(errMsg string) {
 	t.logger.Errorf(errMsg)
-	t.stdIo.WriteErr([]byte(errMsg))
+	t.zliIo.WriteErr([]byte(errMsg))
 	t.Kill()
 }

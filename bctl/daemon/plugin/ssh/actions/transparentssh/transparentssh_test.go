@@ -77,7 +77,8 @@ func TestDefaultSsh(t *testing.T) {
 
 var _ = Describe("Daemon TransparentSsh action", func() {
 	logger := logger.MockLogger()
-	identityFile := "testFile"
+	identityFilePath := "testIdFile"
+	knownHostsFilePath := "testKhFile"
 	testData := "testData"
 
 	var config *gossh.ClientConfig
@@ -115,14 +116,18 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			mockFileService := bzio.MockBzFileIo{}
 			// provide the action this demo (valid) private key
-			mockFileService.On("ReadFile", identityFile).Return([]byte(tests.DemoPem), nil)
+			mockFileService.On("ReadFile", identityFilePath).Return([]byte(tests.DemoPem), nil)
+			idFile := bzssh.NewIdentityFile(identityFilePath, mockFileService)
+			// also expect a new entry in known_hosts
+			mockFileService.On("WriteFile", knownHostsFilePath).Return(nil)
+			khFile := bzssh.NewKnownHosts(knownHostsFilePath, []string{"testHost"}, mockFileService)
 
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(badScpErrMsg)).Return(len(badScpErrMsg), nil)
 
 			listener := safeListen(port)
-			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			t := New(logger, outboxQueue, doneChan, mockIoService, listener, idFile, khFile)
 			conn, session = startSession(t, port, config)
 
 			By("rejecting the invalid request")
@@ -144,14 +149,18 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			mockFileService := bzio.MockBzFileIo{}
 			// provide the action this demo (valid) private key
-			mockFileService.On("ReadFile", identityFile).Return([]byte(tests.DemoPem), nil)
+			mockFileService.On("ReadFile", identityFilePath).Return([]byte(tests.DemoPem), nil)
+			idFile := bzssh.NewIdentityFile(identityFilePath, mockFileService)
+			// also expect a new entry in known_hosts
+			mockFileService.On("WriteFile", knownHostsFilePath).Return(nil)
+			khFile := bzssh.NewKnownHosts(knownHostsFilePath, []string{"testHost"}, mockFileService)
 
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(badSftpErrMsg)).Return(len(badSftpErrMsg), nil)
 
 			listener := safeListen(port)
-			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			t := New(logger, outboxQueue, doneChan, mockIoService, listener, idFile, khFile)
 			conn, session = startSession(t, port, config)
 
 			By("rejecting the invalid request")
@@ -171,14 +180,18 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			mockFileService := bzio.MockBzFileIo{}
 			// provide the action this demo (valid) private key
-			mockFileService.On("ReadFile", identityFile).Return([]byte(tests.DemoPem), nil)
+			mockFileService.On("ReadFile", identityFilePath).Return([]byte(tests.DemoPem), nil)
+			idFile := bzssh.NewIdentityFile(identityFilePath, mockFileService)
+			// also expect a new entry in known_hosts
+			mockFileService.On("WriteFile", knownHostsFilePath).Return(nil)
+			khFile := bzssh.NewKnownHosts(knownHostsFilePath, []string{"testHost"}, mockFileService)
 
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 			mockIoService.On("WriteErr", []byte(shellReqErrMsg)).Return(len(shellReqErrMsg), nil)
 
 			listener := safeListen(port)
-			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			t := New(logger, outboxQueue, doneChan, mockIoService, listener, idFile, khFile)
 			conn, session = startSession(t, port, config)
 
 			By("rejecting the invalid request")
@@ -212,14 +225,17 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 
 			mockFileService := bzio.MockBzFileIo{}
 			// provide the action this demo (valid) private key
-			mockFileService.On("ReadFile", identityFile).Return([]byte(tests.DemoPem), nil)
+			mockFileService.On("ReadFile", identityFilePath).Return([]byte(tests.DemoPem), nil)
+			idFile := bzssh.NewIdentityFile(identityFilePath, mockFileService)
+			// also expect a new entry in known_hosts
+			mockFileService.On("WriteFile", knownHostsFilePath).Return(nil)
+			khFile := bzssh.NewKnownHosts(knownHostsFilePath, []string{"testHost"}, mockFileService)
 
-			// we will receive a ready message upon startup
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 
 			listener := safeListen(port)
-			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			t := New(logger, outboxQueue, doneChan, mockIoService, listener, idFile, khFile)
 			conn, session = startSession(t, port, config)
 
 			By("sending an open message to the agent")
@@ -297,17 +313,21 @@ var _ = Describe("Daemon TransparentSsh action", func() {
 			outboxQueue := make(chan plugin.ActionWrapper, 1)
 
 			mockFileService := bzio.MockBzFileIo{}
-			// provide the action an invalid private key -- this will force it to generate a new one
-			mockFileService.On("ReadFile", identityFile).Return([]byte("invalid key"), nil)
+			// provide the action an invalid private key -- this will force it to generate a new one...
+			mockFileService.On("ReadFile", identityFilePath).Return([]byte("invalid key"), nil)
 			// ...which we expect to be written out
-			mockFileService.On("WriteFile", identityFile).Return(nil)
+			mockFileService.On("WriteFile", identityFilePath).Return(nil)
+			idFile := bzssh.NewIdentityFile(identityFilePath, mockFileService)
+			// also expect a new entry in known_hosts
+			mockFileService.On("WriteFile", knownHostsFilePath).Return(nil)
+			khFile := bzssh.NewKnownHosts(knownHostsFilePath, []string{"testHost"}, mockFileService)
 
 			// we will receive a ready message upon startup
 			mockIoService := bzio.MockBzIo{TestData: testData}
 			mockIoService.On("Write", []byte(readyMsg)).Return(len(readyMsg), nil)
 
 			listener := safeListen(port)
-			t := New(logger, outboxQueue, doneChan, identityFile, mockFileService, mockIoService, listener)
+			t := New(logger, outboxQueue, doneChan, mockIoService, listener, idFile, khFile)
 			conn, session = startSession(t, port, config)
 
 			// take the open message for granted since we already tested

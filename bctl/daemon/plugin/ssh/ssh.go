@@ -26,21 +26,21 @@ type SshDaemonPlugin struct {
 	doneChan     chan struct{}
 	killed       bool
 	action       ISshAction
-	identityFile string
 	localPort    string
-	filIo        bzio.BzFileIo
+	identityFile bzssh.IIdentityFile
+	knownHosts   bzssh.IKnownHosts
 	stdIo        bzio.BzIo
 }
 
-func New(logger *logger.Logger, identityFile string, localPort string, filIo bzio.BzFileIo, stdIo bzio.StdIo) *SshDaemonPlugin {
+func New(logger *logger.Logger, localPort string, identityFile bzssh.IIdentityFile, knownHosts bzssh.IKnownHosts, stdIo bzio.StdIo) *SshDaemonPlugin {
 	return &SshDaemonPlugin{
 		logger:       logger,
 		outboxQueue:  make(chan bzplugin.ActionWrapper, 10),
 		doneChan:     make(chan struct{}),
 		killed:       false,
-		identityFile: identityFile,
 		localPort:    localPort,
-		filIo:        filIo,
+		identityFile: identityFile,
+		knownHosts:   knownHosts,
 		stdIo:        stdIo,
 	}
 }
@@ -54,7 +54,8 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 	actLogger := s.logger.GetActionLogger(actionName)
 	switch actionName {
 	case string(bzssh.OpaqueSsh):
-		s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
+		// FIXME: add args
+		s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.stdIo, s.identityFile, s.knownHosts)
 	case string(bzssh.TransparentSsh):
 		// listen for a connection from the ZLI
 		// action is responsible for closing this
@@ -62,7 +63,7 @@ func (s *SshDaemonPlugin) StartAction(actionName string) error {
 		if err != nil {
 			s.logger.Errorf("failed to listen for connection: %s", err)
 		}
-		s.action = transparentssh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo, listener)
+		s.action = transparentssh.New(actLogger, s.outboxQueue, s.doneChan, s.stdIo, listener, s.identityFile, s.knownHosts)
 	}
 
 	// Start the ssh action
