@@ -15,7 +15,7 @@ type IKnownHosts interface {
 }
 
 type KnownHosts struct {
-	filePath string // revisit private vs. public
+	filePath string
 	hosts    []string
 	fileIo   bzio.BzFileIo
 }
