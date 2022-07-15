@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 
+	gossh "golang.org/x/crypto/ssh"
 	"gopkg.in/tomb.v2"
 
-	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
@@ -30,19 +30,19 @@ type OpaqueSsh struct {
 	// channel where we push from StdIn
 	stdInChan chan []byte
 
-	identityFile string
-
-	filIo bzio.BzFileIo
 	stdIo io.ReadWriter
+
+	identityFile bzssh.IIdentityFile
+	knownHosts   bzssh.IKnownHosts
 }
 
 func New(
 	logger *logger.Logger,
 	outboxQueue chan plugin.ActionWrapper,
 	doneChan chan struct{},
-	identityFile string,
-	filIo bzio.BzFileIo,
 	stdIo io.ReadWriter,
+	identityFile bzssh.IIdentityFile,
+	knownHosts bzssh.IKnownHosts,
 ) *OpaqueSsh {
 
 	return &OpaqueSsh{
@@ -50,9 +50,9 @@ func New(
 		outboxQueue:  outboxQueue,
 		doneChan:     doneChan,
 		stdInChan:    make(chan []byte, InputBufferSize),
-		identityFile: identityFile,
-		filIo:        filIo,
 		stdIo:        stdIo,
+		identityFile: identityFile,
+		knownHosts:   knownHosts,
 	}
 }
 
@@ -66,30 +66,13 @@ func (s *OpaqueSsh) Kill() {
 
 func (s *OpaqueSsh) Start() error {
 
-	var privateKey, publicKey []byte
-	var err error
-	useExistingKeys := false
-
 	// if we already have a private key, use it. Otherwise, create a new one
 	// NOTE: it is technically possible for this to create a one-time race if two SSH processes
 	// are kicked off *and* the user just logged in. However this is unlikely and can be resolved
 	// if/when we upgrade the SSH architecture
-	if publicKeyRsa, err := bzssh.ReadPublicKeyRsa(s.identityFile, s.filIo); err == nil {
-		if publicKey, err = bzssh.GeneratePublicKey(publicKeyRsa); err != nil {
-			s.logger.Errorf("error decoding temporary public key: %s", err)
-		} else {
-			s.logger.Debugf("using existing temporary keys")
-			useExistingKeys = true
-		}
-	}
-	if !useExistingKeys {
-		s.logger.Debugf("generating new temporary keys")
-		privateKey, publicKey, err = bzssh.GenerateKeys()
-		if err != nil {
-			return fmt.Errorf("error generating temporary keys: %s", err)
-		} else if err := s.filIo.WriteFile(s.identityFile, privateKey, 0600); err != nil {
-			return fmt.Errorf("error writing temporary private key: %s", err)
-		}
+	_, publicKey, err := bzssh.SetUpKeys(s.identityFile)
+	if err != nil {
+		return fmt.Errorf("failed to set up ssh keypair: %s", err)
 	}
 
 	sshOpenMessage := bzssh.SshOpenMessage{
@@ -149,6 +132,15 @@ func (s *OpaqueSsh) ReceiveStream(smessage smsg.StreamMessage) {
 	case smsg.Error:
 		s.tmb.Kill(fmt.Errorf("received an error from the agent"))
 		return
+	// a ready message from the agent will contain the host key we can use
+	case smsg.Data:
+		if contentBytes, err := base64.StdEncoding.DecodeString(smessage.Content); err != nil {
+			s.logger.Errorf("error decoding ssh ready stream content: %s", err)
+		} else if parsedKey, _, _, _, err := gossh.ParseAuthorizedKey(contentBytes); err != nil {
+			s.logger.Errorf("could not unmarshal public key data: %s", err)
+		} else {
+			s.knownHosts.AddHostKeyPublic(parsedKey)
+		}
 	default:
 		s.logger.Errorf("unhandled stream type: %s", smessage.Type)
 	}

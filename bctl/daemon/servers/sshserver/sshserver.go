@@ -34,11 +34,14 @@ type SshServer struct {
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
-	remoteHost   string
-	remotePort   int
-	localPort    string
-	targetUser   string
-	identityFile string
+	remoteHost string
+	remotePort int
+	localPort  string
+	targetUser string
+
+	identityFile   string
+	knownHostsFile string
+	hostNames      []string
 
 	// fields for new datachannels
 	params      map[string]string
@@ -59,6 +62,8 @@ func StartSshServer(
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	identityFile string,
+	knownHostsFile string,
+	hostNames []string,
 	remoteHost string,
 	remotePort int,
 	localPort string,
@@ -75,6 +80,8 @@ func StartSshServer(
 		cert:                cert,
 		agentPubKey:         agentPubKey,
 		identityFile:        identityFile,
+		knownHostsFile:      knownHostsFile,
+		hostNames:           hostNames,
 		remoteHost:          remoteHost,
 		remotePort:          remotePort,
 		localPort:           localPort,
@@ -89,6 +96,7 @@ func StartSshServer(
 	// create our new datachannel
 	if err := server.newDataChannel(action, server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
+		return err
 	}
 
 	return nil
@@ -115,7 +123,12 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
 
-	plugin := ssh.New(pluginLogger, s.identityFile, s.localPort, bzio.OsFileIo{}, bzio.StdIo{})
+	fileIo := bzio.OsFileIo{}
+
+	idFile := bzssh.NewIdentityFile(s.identityFile, fileIo)
+	khFile := bzssh.NewKnownHosts(s.knownHostsFile, s.hostNames, fileIo)
+
+	plugin := ssh.New(pluginLogger, s.localPort, idFile, khFile, bzio.StdIo{})
 	if err := plugin.StartAction(action); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)
 	}

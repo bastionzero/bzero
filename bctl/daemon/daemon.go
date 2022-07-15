@@ -48,8 +48,10 @@ var (
 	dataChannelId string
 
 	// SSH specific arguments
-	identityFile string
-	sshAction    string
+	identityFile   string
+	knownHostsFile string
+	sshAction      string
+	hostNames      string // comma-separated list
 )
 
 const (
@@ -182,6 +184,8 @@ func startSshServer(logger *bzlogger.Logger, headers map[string]string, params m
 		agentPubKey,
 		targetSelectHandler,
 		identityFile,
+		knownHostsFile,
+		strings.Split(hostNames, ","),
 		remoteHost,
 		remotePort,
 		localPort,
@@ -314,7 +318,9 @@ func parseFlags() error {
 
 	// SSH plugin variables
 	flag.StringVar(&identityFile, "identityFile", "", "Path to an SSH IdentityFile")
+	flag.StringVar(&knownHostsFile, "knownHostsFile", "", "Path to bastionzero-known_hosts")
 	flag.StringVar(&sshAction, "sshAction", "", "One of ['opaque', 'transparent']")
+	flag.StringVar(&hostNames, "hostNames", "", "Comma-separated list of hostNames to use for this target")
 
 	flag.Parse()
 
@@ -340,7 +346,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
-		requiredFlags = append(requiredFlags, "targetUser", "targetId", "remoteHost", "remotePort", "sshAction")
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "remoteHost", "identityFile", "knownHostsFile", "hostNames", "remotePort", "sshAction")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

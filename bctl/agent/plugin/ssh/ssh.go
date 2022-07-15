@@ -12,6 +12,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/opaquessh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/actions/transparentssh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh/authorizedkeys"
+	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
@@ -96,6 +97,7 @@ func New(logger *logger.Logger, ch chan smsg.StreamMessage, action string, paylo
 					plugin.streamOutputChan,
 					remoteConnection,
 					authKeys,
+					bzio.OsFileIo{},
 				)
 
 			case bzssh.TransparentSsh:

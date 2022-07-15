@@ -52,8 +52,10 @@ func (t *TransparentSsh) Kill() {
 	if t.conn != nil {
 		t.conn.Close()
 	}
-	t.tmb.Kill(nil)
-	t.tmb.Wait()
+	if t.tmb.Alive() {
+		t.tmb.Kill(nil)
+		t.tmb.Wait()
+	}
 }
 
 func (t *TransparentSsh) Receive(action string, actionPayload []byte) ([]byte, error) {
@@ -159,7 +161,7 @@ func (t *TransparentSsh) start(openRequest bzssh.SshOpenMessage, action string) 
 		for {
 			select {
 			case <-t.tmb.Dying():
-				t.logger.Errorf("tomb was killed. Stopping...")
+				t.logger.Infof("tomb was killed. Going to stop writing to stdin")
 				return nil
 			case d := <-t.stdInChan:
 				t.logger.Debugf("Writing %d bytes to stdin", len(d))
