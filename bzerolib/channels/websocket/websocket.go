@@ -113,7 +113,7 @@ type Websocket struct {
 
 	// Agent Ready Channel indicates when the agent has connected to the
 	// corresponding websocket. This is only used for daemon websocket.
-	agentReady chan bool
+	agentReadyChan chan struct{}
 
 	// True when websocket is ready to start sending output messages
 	sendQueueReady bool
@@ -142,7 +142,7 @@ func New(logger *logger.Logger,
 		subscribed:              false,
 		targetType:              targetType,
 		baseUrl:                 "",
-		agentReady:              make(chan bool, 1),
+		agentReadyChan:          make(chan struct{}, 1),
 	}
 
 	// Connect to the websocket in a go routine in case it takes a long time
@@ -285,7 +285,7 @@ func (w *Websocket) receive() error {
 
 					w.logger.Infof("Agent is connected and ready to receive methods in websocket for connection: %s", agentConnectedMessage.ConnectionId)
 
-					w.agentReady <- true
+					w.agentReadyChan <- struct{}{}
 				default:
 					w.ready = true
 
@@ -761,7 +761,7 @@ func (w *Websocket) waitForAgentWebsocketReady() {
 	// connect before sending any messages from the output queue
 	if w.isDaemonWebsocket() {
 		select {
-		case <-w.agentReady:
+		case <-w.agentReadyChan:
 			w.sendQueueReady = true
 		case <-time.After(AgentConnectedWebsocketTimeout):
 			w.Close(fmt.Errorf("Timed out waiting for agent websocket to connect"))
