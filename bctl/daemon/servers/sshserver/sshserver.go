@@ -127,7 +127,6 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	idFile := bzssh.NewIdentityFile(s.identityFile, fileIo)
 	khFile := bzssh.NewKnownHosts(s.knownHostsFile, s.hostNames, fileIo)
-	s.logger.Infof("known_hosts at %s", s.knownHostsFile)
 
 	plugin := ssh.New(pluginLogger, s.localPort, idFile, khFile, bzio.StdIo{})
 	if err := plugin.StartAction(action); err != nil {

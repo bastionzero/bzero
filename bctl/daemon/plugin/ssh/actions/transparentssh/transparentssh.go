@@ -92,7 +92,6 @@ func (t *TransparentSsh) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to set up ssh keypair: %s", err)
 	} else {
-		t.logger.Infof("wait do I still write here?")
 		if err := t.knownHosts.AddHostKeyPrivate(privateKey); err != nil {
 			return fmt.Errorf("failed to update known_hosts file: %s", err)
 		}
