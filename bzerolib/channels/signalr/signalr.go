@@ -69,9 +69,9 @@ func New(
 }
 
 func (s *SignalR) Close() {
-	if s.tmb.Alive() {
-		s.client.Close()
+	s.client.Close()
 
+	if s.tmb.Alive() {
 		s.tmb.Kill(nil)
 		s.tmb.Wait()
 	}
@@ -119,7 +119,6 @@ func (s *SignalR) Connect() error {
 		defer s.client.Close()
 
 		s.tmb.Go(func() error {
-			// Wrap and send outgoing messages
 			for {
 				select {
 				case <-s.tmb.Dying():
@@ -135,10 +134,10 @@ func (s *SignalR) Connect() error {
 		// Unwrap and forward incoming messages
 		for {
 			select {
-			case <-s.client.Done():
-				return fmt.Errorf("connection died")
 			case <-s.tmb.Dying():
 				return nil
+			case <-s.client.Done():
+				return fmt.Errorf("connection died")
 			case rawMsg := <-s.client.Inbound():
 				if err := s.unwrap(*rawMsg); err != nil {
 					s.logger.Errorf("error processing raw message from websocket: %w", err)
@@ -147,7 +146,7 @@ func (s *SignalR) Connect() error {
 		}
 	})
 
-	// return nil
+	//return nil
 }
 
 func (s *SignalR) handshake() error {
@@ -207,6 +206,9 @@ func (s *SignalR) unwrap(raw []byte) error {
 	splitMessages := bytes.Split(raw, []byte{signalRMessageTerminatorByte})
 
 	for _, rawMessage := range splitMessages {
+		if len(rawMessage) == 0 {
+			continue
+		}
 
 		// Only grab the message type so we can switch on it
 		var signalRMessageType MessageTypeOnly
@@ -233,13 +235,13 @@ func (s *SignalR) unwrap(raw []byte) error {
 
 			// Enforce assumption that there is only one AgentMessage in each SignalR wrapper
 			if len(message.Arguments) != 1 {
-				return fmt.Errorf("expected a single agent message argument but got %d arguments", len(message.Arguments))
+				return fmt.Errorf("expected a single agent message but got %d arguments", len(message.Arguments))
 			}
 
 			// Extract out the AgentMessage
 			var agentMessage am.AgentMessage
 			if err := json.Unmarshal(message.Arguments[0], &agentMessage); err != nil {
-				return fmt.Errorf("error unmarshalling agent message from websocket method %s. Error: %s", message.Target, err)
+				return fmt.Errorf("error unmarshalling agent message from websocket with method %s. Error: %w", message.Target, err)
 			}
 
 			// Push message to whoever's listening
@@ -291,7 +293,7 @@ func (s *SignalR) wrap(message am.AgentMessage) error {
 		return fmt.Errorf("error in selecting SignalR Endpoint target name: %w", err)
 	}
 
-	agentMessageArg, err := json.Marshal(message)
+	messageBytes, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("Failed to marshal agent message: %w", err)
 	}
@@ -299,7 +301,7 @@ func (s *SignalR) wrap(message am.AgentMessage) error {
 	wrappedMessage := SignalRMessage{
 		Target:       target,
 		Type:         int(Invocation),
-		Arguments:    []json.RawMessage{agentMessageArg},
+		Arguments:    []json.RawMessage{messageBytes},
 		InvocationId: &invocationId,
 	}
 
