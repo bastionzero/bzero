@@ -9,13 +9,13 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
@@ -46,14 +46,14 @@ type ShellServer struct {
 	refreshTokenCommand string
 	configPath          string
 	agentPubKey         string
-	cert                *bzcert.BZCert
+	cert                *bzcert.DaemonBZCert
 }
 
 func StartShellServer(
 	logger *logger.Logger,
 	targetUser string,
 	dataChannelId string,
-	cert *bzcert.BZCert,
+	cert *bzcert.DaemonBZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,

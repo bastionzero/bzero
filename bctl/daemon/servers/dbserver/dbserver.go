@@ -8,12 +8,12 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
@@ -44,7 +44,7 @@ type DbServer struct {
 	headers     map[string]string
 	serviceUrl  string
 	agentPubKey string
-	cert        *bzcert.BZCert
+	cert        *bzcert.DaemonBZCert
 }
 
 func StartDbServer(logger *logger.Logger,
@@ -52,7 +52,7 @@ func StartDbServer(logger *logger.Logger,
 	localHost string,
 	remotePort int,
 	remoteHost string,
-	cert *bzcert.BZCert,
+	cert *bzcert.DaemonBZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
@@ -13,7 +14,6 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
@@ -49,14 +49,14 @@ type SshServer struct {
 	headers     map[string]string
 	serviceUrl  string
 	agentPubKey string
-	cert        *bzcert.BZCert
+	cert        *bzcert.DaemonBZCert
 }
 
 func StartSshServer(
 	logger *logger.Logger,
 	targetUser string,
 	dataChannelId string,
-	cert *bzcert.BZCert,
+	cert *bzcert.DaemonBZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,

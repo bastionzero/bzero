@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -10,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
+	"bastionzero.com/bctl/v1/bctl/daemon/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/shellserver"
@@ -19,7 +18,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
+
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert/zliconfig"
 	bzlogger "bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -141,28 +140,15 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 	if err != nil {
 		return err
 	}
-	cert, err := bzcert.New(config)
+	cert, err := bzcert.New(logger, config)
 	if err != nil {
 		return err
 	}
 
-	err = cert.Verify(config.CertConfig.OrgProvider, config.CertConfig.OrgIssuerId)
-	if err != nil {
-		logger.Errorf("Error constructing BastionZero certificate: %s", err)
-
-		// https://go.dev/blog/go1.13-errors target
-		// Check if the error is either a bzcert.InitialIdTokenError (IdP key
-		// rotation) or bzcert.CurrentIdTokenError (id token needs to be
-		// refreshed) token error and prompt user to re-login
-		var initialIdTokenError *bzcert.InitialIdTokenError
-		var currentIdTokenError *bzcert.InitialIdTokenError
-		if errors.As(err, &initialIdTokenError) || errors.As(err, &currentIdTokenError) {
-			logger.Errorf("IdP tokens are invalid/expired. Please try to re-login with the zli.")
-			os.Exit(exitcodes.BZCERT_ID_TOKEN_ERROR)
-		}
-
-		os.Exit(exitcodes.UNSPECIFIED_ERROR)
-	}
+	// Validate the bzcert before creating the server and fail fast if the cert
+	// is no longer valid. This may result in prompting the user to login again
+	// if the cert contains expired IdP id tokens
+	cert.VerifyAndExitOnError()
 
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Db:
@@ -185,7 +171,7 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 	}
 }
 
-func startSshServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startSshServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("sshserver")
 
 	params["target_id"] = targetId
@@ -213,7 +199,7 @@ func startSshServer(logger *bzlogger.Logger, headers map[string]string, params m
 	)
 }
 
-func startShellServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startShellServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("shellserver")
 
 	return shellserver.StartShellServer(
@@ -229,7 +215,7 @@ func startShellServer(logger *bzlogger.Logger, headers map[string]string, params
 	)
 }
 
-func startWebServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startWebServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("webserver")
 
 	params["target_id"] = targetId
@@ -247,7 +233,7 @@ func startWebServer(logger *bzlogger.Logger, headers map[string]string, params m
 		targetSelectHandler)
 }
 
-func startDbServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startDbServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("dbserver")
 
 	params["target_id"] = targetId
@@ -265,7 +251,7 @@ func startDbServer(logger *bzlogger.Logger, headers map[string]string, params ma
 		targetSelectHandler)
 }
 
-func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("kubeserver")
 
 	// Set our param value for target_user and target_group
