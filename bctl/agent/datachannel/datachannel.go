@@ -186,7 +186,7 @@ func (d *DataChannel) sendError(errType bzerror.ErrorType, err error, hash strin
 }
 
 func (d *DataChannel) Receive(agentMessage am.AgentMessage) {
-	// only push to input channel if we're alive (aka not in the process of dying or already dead)
+	// push to input channel unless we're fully dead
 	select {
 	case <-d.tmb.Dead():
 		d.logger.Infof("received a keysplitting message but my tomb is dead")
