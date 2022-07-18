@@ -147,7 +147,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	}
 
 	action = "ssh/" + action
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, synPayload, attach, false)
 	if err != nil {
 		return err
 	}

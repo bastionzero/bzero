@@ -132,7 +132,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	}
 
 	action = "shell/" + action
-	dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, synPayload, attach, false)
 	if err != nil {
 		return err
 	}
