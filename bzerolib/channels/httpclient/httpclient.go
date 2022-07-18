@@ -2,10 +2,14 @@ package httpclient
 
 import (
 	"bytes"
-	"errors"
+	"context"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"time"
 
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"github.com/cenkalti/backoff"
 )
 
@@ -22,24 +26,39 @@ const (
 )
 
 type HttpClient struct {
+	logger logger.Logger
+
 	backoffParams *backoff.ExponentialBackOff
 
 	endpoint string
-	body     []byte
+	body     io.Reader
 	headers  map[string][]string
 	params   map[string][]string
 }
 
-func New(endpoint string, body []byte, headers map[string][]string, params map[string][]string) *HttpClient {
+func New(
+	logger logger.Logger,
+	endpoint string,
+	body []byte,
+	headers map[string][]string,
+	params map[string][]string,
+) *HttpClient {
 	return &HttpClient{
+		logger:   logger,
 		endpoint: endpoint,
-		body:     body,
+		body:     bytes.NewBuffer(body),
 		headers:  headers,
 		params:   params,
 	}
 }
 
-func NewWithBackoff(endpoint string, body []byte, headers map[string][]string, params map[string][]string) *HttpClient {
+func NewWithBackoff(
+	logger logger.Logger,
+	endpoint string,
+	body []byte,
+	headers map[string][]string,
+	params map[string][]string,
+) *HttpClient {
 	backoffParams := backoff.NewExponentialBackOff()
 
 	// Ref: https://github.com/cenkalti/backoff/blob/a78d3804c2c84f0a3178648138442c9b07665bda/exponential.go#L76
@@ -53,94 +72,77 @@ func NewWithBackoff(endpoint string, body []byte, headers map[string][]string, p
 	backoffParams.MaxElapsedTime = 72 * time.Hour
 
 	return &HttpClient{
+		logger:        logger,
 		backoffParams: backoffParams,
 		endpoint:      endpoint,
-		body:          body,
+		body:          bytes.NewBuffer(body),
 		headers:       headers,
 		params:        params,
 	}
 }
 
-func (h *HttpClient) request(method RequestMethod) (*http.Response, error) {
+func (h *HttpClient) Post(ctx context.Context) (*http.Response, error) {
+	return h.request(Post, ctx)
+}
+
+func (h *HttpClient) Patch(ctx context.Context) (*http.Response, error) {
+	return h.request(Patch, ctx)
+}
+
+func (h *HttpClient) Get(ctx context.Context) (*http.Response, error) {
+	return h.request(Get, ctx)
+}
+
+func (h *HttpClient) request(method RequestMethod, ctx context.Context) (*http.Response, error) {
+	// If there is no backoff, then only execute request once
 	if h.backoffParams == nil {
-		return singleRequest()
+		return h.makeRequestOnce(method, ctx)
 	}
 
-	ticker := backoff.NewTicker(h.backoffParams)
-
 	// Keep looping through our ticker, waiting for it to tell us when to retry
-	for range ticker.C {
-		singleRequest()
+	ticker := backoff.NewTicker(h.backoffParams)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled before successful http response")
+		case _, ok := <-ticker.C:
+			if !ok {
+				return nil, fmt.Errorf("failed to get successful http response after %s", h.backoffParams.MaxElapsedTime)
+			}
+
+			response, err := h.makeRequestOnce(method, ctx)
+
+			nextRequestTime := h.backoffParams.NextBackOff().Round(time.Second)
+			if err != nil {
+				h.logger.Errorf("Retrying in %s because of error making %s request: %s", nextRequestTime, string(method), err)
+				continue
+			}
+
+			// Check if our response code was sucessful
+			if response.StatusCode >= 200 && response.StatusCode < 300 {
+				ticker.Stop()
+				return response, nil
+			}
+
+			h.logger.Errorf("Received bad status code %d making %s request, will retry in %s", response.StatusCode, string(method), nextRequestTime)
+		}
 	}
 }
 
-func (h *HttpClient) singleRequest(method RequestMethod) (*http.Response, error) {
+func (h *HttpClient) makeRequestOnce(method RequestMethod, ctx context.Context) (*http.Response, error) {
 	// Make our Client
 	client := http.Client{
 		Timeout: httpTimeout,
 	}
 
-	// Make our Request
-	request, _ := http.NewRequest(string(method), b.endpoint, bytes.NewBuffer(b.body))
-	request.Header = http.Header(b.headers)
+	// Build our Request
+	request, _ := http.NewRequestWithContext(ctx, string(method), h.endpoint, h.body)
+	request.Header = http.Header(h.headers)
 
 	// Add params to request URL
-	query := url.Values(s.params)
+	query := url.Values(h.params)
 	request.URL.RawQuery = query.Encode()
 
-	response, err = httpClient.Do(request)
-
-	if err != nil {
-		b.logger.Errorf("error making POST request: %s", err)
-		continue
-	} else if err := checkBadStatusCode(response); err != nil {
-		ticker.Stop()
-		return response, err
-	} else if response.StatusCode >= 200 && response.StatusCode < 300 {
-		ticker.Stop()
-		return response, nil
-	} else {
-		b.logger.Errorf("Received status code %d making POST request, will retry in %s", response.StatusCode, b.backoffParams.NextBackOff().Round(time.Second))
-		continue
-	}
-}
-
-func (h *HttpClient) Post() (*http.Response, error) {
-
-	ticker := backoff.NewTicker(h.backoffParams)
-
-	// Keep looping through our ticker, waiting for it to tell us when to retry
-	for range ticker.C {
-		// Make our Client
-		client := http.Client{
-			Timeout: httpTimeout,
-		}
-
-		if len(b.headers) == 0 && len(b.params) == 0 {
-			response, err = httpClient.Post(b.endpoint, b.contentType, bytes.NewBuffer(b.body))
-		} else {
-			// Make our Request
-			req, _ := http.NewRequest("POST", b.endpoint, bytes.NewBuffer(b.body))
-			req = addHeaders(req, b.headers, b.contentType)
-			req = addQueryParams(req, b.params)
-
-			response, err = httpClient.Do(req)
-		}
-
-		if err != nil {
-			b.logger.Errorf("error making POST request: %s", err)
-			continue
-		} else if err := checkBadStatusCode(response); err != nil {
-			ticker.Stop()
-			return response, err
-		} else if response.StatusCode >= 200 && response.StatusCode < 300 {
-			ticker.Stop()
-			return response, nil
-		} else {
-			b.logger.Errorf("Received status code %d making POST request, will retry in %s", response.StatusCode, b.backoffParams.NextBackOff().Round(time.Second))
-			continue
-		}
-	}
-
-	return nil, errors.New("unable to make post request")
+	// Make our Request
+	return client.Do(request)
 }

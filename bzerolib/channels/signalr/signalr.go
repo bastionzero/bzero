@@ -146,7 +146,7 @@ func (s *SignalR) Connect() error {
 		}
 	})
 
-	//return nil
+	return nil
 }
 
 func (s *SignalR) handshake() error {
