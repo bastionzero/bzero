@@ -181,7 +181,10 @@ func (d *DataChannel) waitOrTimeout() error {
 	defer absoluteTimeout.Stop()
 	for {
 		select {
-		case <-d.inputChan:
+		case agentMessage := <-d.inputChan:
+			if err := d.processInputMessage(agentMessage); err != nil {
+				d.logger.Error(err)
+			}
 		case <-time.After(idleTimeout): // idle timeout
 			return nil
 		case <-absoluteTimeout.C:
@@ -194,7 +197,7 @@ func (d *DataChannel) waitOrTimeout() error {
 func (d *DataChannel) sendKeysplitting() error {
 	for {
 		select {
-		case <-d.tmb.Dying():
+		case <-d.tmb.Dead():
 			d.keysplitter.Release()
 			return nil
 		case ksMessage := <-d.keysplitter.Outbox():
@@ -208,7 +211,7 @@ func (d *DataChannel) sendKeysplitting() error {
 func (d *DataChannel) zapPluginOutput() error {
 	for {
 		select {
-		case <-d.tmb.Dying():
+		case <-d.tmb.Dead():
 			return nil
 		case wrapper := <-d.plugin.Outbox():
 			// Build and send response
