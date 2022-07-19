@@ -2,14 +2,14 @@ package signalr
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
+	"bastionzero.com/bctl/v1/bzerolib/channels/httpclient"
 	"bastionzero.com/bctl/v1/bzerolib/channels/newwebsocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"github.com/cenkalti/backoff"
@@ -146,7 +146,7 @@ func (s *SignalR) Connect() error {
 		}
 	})
 
-	return nil
+	// return nil
 }
 
 func (s *SignalR) handshake() error {
@@ -176,26 +176,13 @@ func (s *SignalR) negotiate() error {
 		return err
 	}
 
-	// Build POST request
-	client := http.Client{
-		Timeout: time.Second * 30,
-	}
-	request, _ := http.NewRequest("POST", negotiateEndpoint, bytes.NewBuffer([]byte{}))
-
-	// Add params to request URL
-	query := url.Values(s.params)
-	request.URL.RawQuery = query.Encode()
+	client := httpclient.New(s.logger, negotiateEndpoint, []byte{}, make(map[string][]string), s.params)
 
 	// Make negotiate call
-	response, err := client.Do(request)
+	// LUCIE: make it a real context
+	_, err = client.Post(context.TODO())
 	if err != nil {
 		return fmt.Errorf("failed to make negotiate POST: %w", err)
-	}
-	defer response.Body.Close()
-
-	// Check that request was successful
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("negotiate failed with status code: %d", response.StatusCode)
 	}
 
 	return nil

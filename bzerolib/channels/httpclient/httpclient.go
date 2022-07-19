@@ -110,21 +110,12 @@ func (h *HttpClient) request(method RequestMethod, ctx context.Context) (*http.R
 				return nil, fmt.Errorf("failed to get successful http response after %s", h.backoffParams.MaxElapsedTime)
 			}
 
-			response, err := h.makeRequestOnce(method, ctx)
-
-			nextRequestTime := h.backoffParams.NextBackOff().Round(time.Second)
-			if err != nil {
-				h.logger.Errorf("Retrying in %s because of error making %s request: %s", nextRequestTime, string(method), err)
-				continue
+			if response, err := h.makeRequestOnce(method, ctx); err != nil {
+				nextRequestTime := h.backoffParams.NextBackOff().Round(time.Second)
+				h.logger.Errorf("Retrying in %s: %s", nextRequestTime, string(method), err)
+			} else {
+				return response, err
 			}
-
-			// Check if our response code was sucessful
-			if response.StatusCode >= 200 && response.StatusCode < 300 {
-				ticker.Stop()
-				return response, nil
-			}
-
-			h.logger.Errorf("Received bad status code %d making %s request, will retry in %s", response.StatusCode, string(method), nextRequestTime)
 		}
 	}
 }
@@ -144,5 +135,15 @@ func (h *HttpClient) makeRequestOnce(method RequestMethod, ctx context.Context) 
 	request.URL.RawQuery = query.Encode()
 
 	// Make our Request
-	return client.Do(request)
+	response, err := client.Do(request)
+	if err != nil {
+		return response, fmt.Errorf("%s request failed: %w", string(method), err)
+	}
+
+	// Check if request was successful
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return response, fmt.Errorf("%s request failed with status code: %d", string(method), response.StatusCode)
+	}
+
+	return response, err
 }

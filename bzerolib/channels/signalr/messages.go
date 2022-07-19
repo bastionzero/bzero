@@ -19,6 +19,7 @@ type MessageTypeOnly struct {
 }
 
 // LUCIE: why are any of these pointers? And what does that mean?
+// The pointers are so the fields can be nil because they're not always there
 type CompletionMessage struct {
 	Type         int            `json:"type"`
 	InvocationId *string        `json:"invocationId"`
