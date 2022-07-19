@@ -1,6 +1,7 @@
 package dbserver
 
 import (
+	"errors"
 	"net"
 	"os"
 
@@ -156,25 +157,29 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 
 	action = "db/" + action
 	attach := false
-	_, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
 	if err != nil {
 		return err
 	}
 
 	// create a function to listen to the datachannel dying and then laugh
 	go func() {
-		select {
-		case <-dcTmb.Dead():
-			// notify agent to close the datachannel
-			d.logger.Info("Sending DataChannel Close")
-			cdMessage := am.AgentMessage{
-				ChannelId:   dcId,
-				MessageType: string(am.CloseDataChannel),
+		for {
+			select {
+			case <-d.tmb.Dying():
+				dc.Close(errors.New("db server closing"))
+				return
+			case <-dcTmb.Dead():
+				// notify agent to close the datachannel
+				d.logger.Info("Sending DataChannel Close")
+				cdMessage := am.AgentMessage{
+					ChannelId:   dcId,
+					MessageType: string(am.CloseDataChannel),
+				}
+				d.websocket.Send(cdMessage)
+
+				return
 			}
-			d.websocket.Send(cdMessage)
-
-			return
-
 		}
 	}()
 	return nil

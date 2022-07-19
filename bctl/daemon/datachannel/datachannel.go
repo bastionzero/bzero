@@ -197,7 +197,7 @@ func (d *DataChannel) waitOrTimeout() error {
 func (d *DataChannel) sendKeysplitting() error {
 	for {
 		select {
-		case <-d.tmb.Dead():
+		case <-d.tmb.Dying():
 			d.keysplitter.Release()
 			return nil
 		case ksMessage := <-d.keysplitter.Outbox():
@@ -211,7 +211,7 @@ func (d *DataChannel) sendKeysplitting() error {
 func (d *DataChannel) zapPluginOutput() error {
 	for {
 		select {
-		case <-d.tmb.Dead():
+		case <-d.tmb.Dying():
 			return nil
 		case wrapper := <-d.plugin.Outbox():
 			// Build and send response
