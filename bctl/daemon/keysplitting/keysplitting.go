@@ -134,6 +134,11 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 	return nil
 }
 
+func (k *Keysplitting) PipelineLen() int {
+	// TODO: Lucie, return something good!!
+	return -10000000
+}
+
 func (k *Keysplitting) resend(hpointer string) {
 	recoveryMap := *k.pipelineMap
 	k.pipelineMap = orderedmap.New()
