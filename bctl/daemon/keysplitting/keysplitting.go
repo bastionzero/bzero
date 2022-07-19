@@ -42,7 +42,9 @@ type Keysplitting struct {
 	// condition of the stateLock protected state variables to be true
 	pipelineOpen *sync.Cond
 	// ordered hash map to keep track of sent keysplitting messages
-	pipelineMap *orderedmap.OrderedMap
+	pipelineMap    *orderedmap.OrderedMap
+	pipelineLength int
+
 	// isHandshakeComplete is true when SynAck has been received. It is reset to
 	// false during recovery
 	isHandshakeComplete bool
@@ -83,6 +85,10 @@ func New(
 	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.stateLock)
 
 	return keysplitter, nil
+}
+
+func (k *Keysplitting) PipelineEmpty() bool {
+	return k.pipelineLength == 0
 }
 
 func (k *Keysplitting) Recovering() bool {
@@ -132,11 +138,6 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 		return err
 	}
 	return nil
-}
-
-func (k *Keysplitting) PipelineLen() int {
-	// TODO: Lucie, return something good!!
-	return -10000000
 }
 
 func (k *Keysplitting) resend(hpointer string) {
@@ -241,6 +242,7 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 		}
 
 		// Condition variable changed. We must call Broadcast() to prevent deadlock
+		k.pipelineLength = k.pipelineMap.Len()
 		k.pipelineOpen.Broadcast()
 	} else {
 		return fmt.Errorf("%w: %T message did not correspond to a previously sent message", ErrUnknownHPointer, ksMessage.KeysplittingPayload)
@@ -331,6 +333,7 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 		return fmt.Errorf("failed to hash message")
 	} else {
 		k.pipelineMap.Set(hash, ksMessage)
+		k.pipelineLength = k.pipelineMap.Len()
 		return nil
 	}
 }

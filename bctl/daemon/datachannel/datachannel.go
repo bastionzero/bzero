@@ -35,7 +35,7 @@ type IKeysplitting interface {
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
 	Recover(errorMessage rrr.ErrorMessage) error
 	Inbox(action string, actionPayload []byte) error
-	PipelineLen() int
+	PipelineEmpty() bool
 	Outbox() <-chan *ksmsg.KeysplittingMessage
 	Release()
 	Recovering() bool
@@ -188,7 +188,7 @@ func (d *DataChannel) waitForRemainingMessages() error {
 			}
 		case <-time.After(checkOutboxInterval):
 			// if the plugin has nothing pending and the pipeline is empty, we can safely stop
-			if len(d.plugin.Outbox()) == 0 && d.keysplitter.PipelineLen() == 0 {
+			if len(d.plugin.Outbox()) == 0 && d.keysplitter.PipelineEmpty() {
 				return nil
 			}
 		}
