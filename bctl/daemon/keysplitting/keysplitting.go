@@ -87,7 +87,7 @@ func New(
 	return keysplitter, nil
 }
 
-func (k *Keysplitting) PipelineEmpty() bool {
+func (k *Keysplitting) IsPipelineEmpty() bool {
 	return k.pipelineLength == 0
 }
 
