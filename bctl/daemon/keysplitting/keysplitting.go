@@ -4,8 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"sync"
 
 	"github.com/Masterminds/semver"
@@ -18,94 +16,84 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
-// max number of times we will try to resend after an error message
+// Max number of times we will try to resend after an error message
 const maxErrorRecoveryTries = 3
 
-// the number of messages we're allowed to precalculate and send without having
+// The number of messages we're allowed to precalculate and send without having
 // received an ack
-var pipelineLimit = 8
-
-type ZLIConfig struct {
-	KSConfig KeysplittingConfig `json:"keySplitting"`
-	TokenSet ZLITokenSetConfig  `json:"tokenSet"`
-}
-type ZLITokenSetConfig struct {
-	CurrentIdToken string `json:"id_token"`
-}
-
-type KeysplittingConfig struct {
-	PrivateKey       string `json:"privateKey"`
-	PublicKey        string `json:"publicKey"`
-	CerRand          string `json:"cerRand"`
-	CerRandSignature string `json:"cerRandSig"`
-	InitialIdToken   string `json:"initialIdToken"`
-}
+const maxPipelineLimit = 8
 
 type Keysplitting struct {
 	logger *logger.Logger
 
-	clientPubKey    string
-	clientSecretKey string
-	bzcertHash      string
+	bzcert bzcrt.IBZCert
 
 	agentPubKey  string
 	ackPublicKey string
 
-	// for grabbing and updating id tokens
-	zliConfigPath          string
-	zliRefreshTokenCommand string
-
-	// ordered hash map to keep track of sent keysplitting messages
-	pipelineMap  *orderedmap.OrderedMap
-	pipelineLock sync.Mutex
-	pipelineOpen *sync.Cond
+	synAction string
 
 	// a channel for all the messages we give the datachannel to send
 	outboxQueue chan *ksmsg.KeysplittingMessage
 
-	// not the last ack we've received but the last ack we've received *in order*
-	lastAck        *ksmsg.KeysplittingMessage
-	outOfOrderAcks map[string]*ksmsg.KeysplittingMessage
+	// stateLock mutex coordinates usage of state variables defined below
+	stateLock sync.Mutex
+	// pipelineOpen allows concurrent goroutines to wait for some specific
+	// condition of the stateLock protected state variables to be true
+	pipelineOpen *sync.Cond
+	// ordered hash map to keep track of sent keysplitting messages
+	pipelineMap    *orderedmap.OrderedMap
+	pipelineLength int
 
-	// bool variable for letting the datachannel know when to start processing incoming messages again
+	// isHandshakeComplete is true when SynAck has been received. It is reset to
+	// false during recovery
+	isHandshakeComplete bool
+	// not the last ack we've received but the last ack we've received
+	lastAck *ksmsg.KeysplittingMessage
+	// bool variable for letting the datachannel know when to start processing
+	// incoming messages again
 	recovering bool
-
-	// We set the schemaVersion to use based on the schemaVersion sent by the agent in the synack
-	schemaVersion      *semver.Version
-	prePipeliningAgent bool
-	synAction          string
-
 	// keep track of how many times we've tried to recover
 	errorRecoveryAttempt int
+	// We set the schemaVersion to use based on the schemaVersion sent by the
+	// agent in the synack
+	schemaVersion      *semver.Version
+	prePipeliningAgent bool
+	pipelineLimit      int
 }
 
 func New(
 	logger *logger.Logger,
 	agentPubKey string,
-	configPath string,
-	refreshTokenCommand string,
+	bzcert bzcrt.IBZCert,
 ) (*Keysplitting, error) {
 
-	// TODO: load keys from storage
 	keysplitter := &Keysplitting{
-		logger:                 logger,
-		zliConfigPath:          configPath,
-		zliRefreshTokenCommand: refreshTokenCommand,
-		agentPubKey:            agentPubKey,
-		ackPublicKey:           "",
-		pipelineMap:            orderedmap.New(),
-		outboxQueue:            make(chan *ksmsg.KeysplittingMessage, pipelineLimit),
-		outOfOrderAcks:         make(map[string]*ksmsg.KeysplittingMessage),
-		recovering:             false,
-		synAction:              "initial",
-		errorRecoveryAttempt:   0,
+		logger:               logger,
+		bzcert:               bzcert,
+		agentPubKey:          agentPubKey,
+		ackPublicKey:         "",
+		pipelineMap:          orderedmap.New(),
+		outboxQueue:          make(chan *ksmsg.KeysplittingMessage, maxPipelineLimit),
+		recovering:           false,
+		synAction:            "initial",
+		errorRecoveryAttempt: 0,
+		isHandshakeComplete:  false,
+		lastAck:              nil,
+		pipelineLimit:        maxPipelineLimit,
 	}
-	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.pipelineLock)
+	keysplitter.pipelineOpen = sync.NewCond(&keysplitter.stateLock)
 
 	return keysplitter, nil
 }
 
+func (k *Keysplitting) IsPipelineEmpty() bool {
+	return k.pipelineLength == 0
+}
+
 func (k *Keysplitting) Recovering() bool {
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
 	return k.recovering
 }
 
@@ -118,6 +106,9 @@ func (k *Keysplitting) Outbox() <-chan *ksmsg.KeysplittingMessage {
 }
 
 func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
+
 	// only recover from this error message if it corresponds to a message we've actually sent
 	// our old error messages weren't setting hpointers correctly
 	// TODO: CWC-1818: remove schema version check
@@ -143,7 +134,7 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 	}
 
 	k.recovering = true
-	if _, err := k.BuildSyn("", []byte{}, true); err != nil {
+	if _, err := k.buildSyn("", []byte{}, true); err != nil {
 		return err
 	}
 	return nil
@@ -184,21 +175,36 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 	if err := ksMessage.VerifySignature(k.agentPubKey); err != nil {
 		// TODO: CWC-1553: Remove this inner conditional once all agents have updated
 		if innerErr := ksMessage.VerifySignature(k.ackPublicKey); innerErr != nil {
-			return fmt.Errorf("failed to verify %v signature: inner error: %s. original error: %s", ksMessage.Type, innerErr, err)
+			return fmt.Errorf("%w: failed to verify %v signature: inner error: %s outer error: %s", ErrInvalidSignature, ksMessage.Type, innerErr, err)
 		}
 	}
 
-	// Check this messages is in response to one we've sent
-	if hpointer, err := ksMessage.GetHpointer(); err != nil {
+	hpointer, err := ksMessage.GetHpointer()
+	if err != nil {
 		return err
-	} else if _, ok := k.pipelineMap.Get(hpointer); ok {
+	}
+
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
+
+	// Check this messages is in response to one we've sent
+	if _, ok := k.pipelineMap.Get(hpointer); ok {
 		switch ksMessage.Type {
 		case ksmsg.SynAck:
 			if msg, ok := ksMessage.KeysplittingPayload.(ksmsg.SynAckPayload); ok {
-				defer k.pipelineLock.Unlock()
-
 				k.lastAck = ksMessage
 				k.pipelineMap.Delete(hpointer) // delete syn from map
+
+				// Must set schema version first in case we're recovering and
+				// resend() has to rebuild Data messages. If we don't set
+				// schemaVersion first, then the resent Data messages will refer
+				// to the previously agreed schema version (in the original
+				// handshake prior to recovery) which might be different.
+				parsedSchemaVersion, err := semver.NewVersion(msg.SchemaVersion)
+				if err != nil {
+					return ErrFailedToParseVersion
+				}
+				k.schemaVersion = parsedSchemaVersion
 
 				// when we recover, we're recovering based on the nonce in the syn/ack because unless
 				// it's not in response to the initial syn, where the nonce is a true random number,
@@ -208,81 +214,51 @@ func (k *Keysplitting) Validate(ksMessage *ksmsg.KeysplittingMessage) error {
 				k.recovering = false
 				k.resend(msg.Nonce)
 
-				if v, err := semver.NewVersion(msg.SchemaVersion); err != nil {
-					return fmt.Errorf("unable to parse version")
-				} else {
-					k.schemaVersion = v
-				}
-
-				// check to see if we're talking with an agent that's using pre-2.0 keysplitting because
-				// we'll need to dirty the payload by adding extra quotes around it
-				// TODO: CWC-1820: remove once all daemon's are updated
+				// check to see if we're talking with an agent that's using
+				// pre-2.0 keysplitting because we'll need to dirty the payload
+				// by adding extra quotes around it TODO: CWC-1820: remove once
+				// all daemon's are updated
 				if c, err := semver.NewConstraint("< 2.0"); err != nil {
 					return fmt.Errorf("unable to create versioning constraint")
-				} else if v, err := semver.NewVersion(msg.SchemaVersion); err != nil {
-					return fmt.Errorf("unable to parse version")
 				} else {
-					k.prePipeliningAgent = c.Check(v)
+					k.prePipeliningAgent = c.Check(parsedSchemaVersion)
 
 					if k.prePipeliningAgent {
-						pipelineLimit = 1
+						// Override default
+						k.pipelineLimit = 1
 					}
 				}
+
+				// We've received a SynAck, so the handshake is complete
+				k.isHandshakeComplete = true
 			}
 		case ksmsg.DataAck:
-			// check if incoming message corresponds to our most recently sent data
-			if pair := k.pipelineMap.Oldest(); pair == nil {
-				return fmt.Errorf("we received an ack but we're not waiting for a response to any messages")
-			} else if pair.Key != hpointer {
-				k.logger.Info("Received an out-of-order ack message")
-				if len(k.outOfOrderAcks) > pipelineLimit {
-					// we're missing an ack sometime in the past, let's try to recover
-					if _, err := k.BuildSyn("", []byte{}, true); err != nil {
-						k.recovering = true
-						return fmt.Errorf("could not recover from missing ack: %s", err)
-					} else {
-						return fmt.Errorf("hold up, we're missing an ack. Going into recovery")
-					}
-				}
-				k.outOfOrderAcks[hpointer] = ksMessage
-			} else {
-				k.lastAck = ksMessage
-				k.pipelineMap.Delete(hpointer)
-				k.processOutOfOrderAcks()
+			k.lastAck = ksMessage
+			k.pipelineMap.Delete(hpointer)
 
-				// If we're here, it means that the previous data message that caused the error was accepted
-				k.errorRecoveryAttempt = 0
-
-				k.pipelineOpen.Broadcast()
-			}
+			// If we're here, it means that the previous data message that
+			// caused the error was accepted
+			k.errorRecoveryAttempt = 0
 		}
+
+		// Condition variable changed. We must call Broadcast() to prevent deadlock
+		k.pipelineLength = k.pipelineMap.Len()
+		k.pipelineOpen.Broadcast()
 	} else {
-		return fmt.Errorf("%T message did not correspond to a previously sent message", ksMessage.KeysplittingPayload)
+		return fmt.Errorf("%w: %T message did not correspond to a previously sent message", ErrUnknownHPointer, ksMessage.KeysplittingPayload)
 	}
 
 	return nil
 }
 
-func (k *Keysplitting) processOutOfOrderAcks() {
-	for pair := k.pipelineMap.Oldest(); pair != nil; pair = pair.Next() {
-		if ack, ok := k.outOfOrderAcks[pair.Key.(string)]; !ok {
-			return
-		} else {
-			k.lastAck = ack
-			k.pipelineMap.Delete(pair.Key)
-		}
-	}
-}
-
 func (k *Keysplitting) Inbox(action string, actionPayload []byte) error {
-	k.pipelineLock.Lock()
-	defer k.pipelineLock.Unlock()
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
 
-	// we only want to pipeline up to the maximum allowed amount
-	if k.pipelineMap.Len() >= pipelineLimit {
-		k.logger.Debug("Pipeline full, waiting to send next message")
+	// Wait if pipeline is full OR if handshake is not complete
+	for k.pipelineMap.Len() >= k.pipelineLimit || !k.isHandshakeComplete {
+		k.logger.Debugf("Pipeline full: %t, Handshake complete: %t. Waiting to send next message...", k.pipelineMap.Len() >= k.pipelineLimit, k.isHandshakeComplete)
 		k.pipelineOpen.Wait()
-		k.logger.Debug("Pipeline open, sending message")
 	}
 
 	return k.pipeline(action, actionPayload)
@@ -296,7 +272,6 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 	// get the ack we're going to be building our new message off of
 	var ack *ksmsg.KeysplittingMessage
 	if pair := k.pipelineMap.Newest(); pair == nil {
-
 		// if our pipeline map is empty, we build off our last received ack
 		if k.lastAck != nil {
 			ack = k.lastAck
@@ -304,7 +279,6 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 			return fmt.Errorf("can't build message because there's nothing to build it off of")
 		}
 	} else {
-
 		// otherwise, we're going to need to predict the ack we're building off of
 		ksMessage := pair.Value.(ksmsg.KeysplittingMessage)
 		if newAck, err := ksMessage.BuildUnsignedDataAck([]byte{}, k.agentPubKey, k.schemaVersion.String()); err != nil {
@@ -316,7 +290,7 @@ func (k *Keysplitting) pipeline(action string, actionPayload []byte) error {
 
 	// build our new data message and then ship it!
 	if newMessage, err := k.buildResponse(ack, action, actionPayload); err != nil {
-		return fmt.Errorf("failed to build new message: %s", err)
+		return fmt.Errorf("failed to build new message: %w", err)
 	} else if err := k.addToPipelineMap(newMessage); err != nil {
 		return err
 	} else {
@@ -345,10 +319,10 @@ func (k *Keysplitting) buildResponse(ksMessage *ksmsg.KeysplittingMessage, actio
 	}
 
 	// Use the agreed upon schema version from the synack when building data messages
-	if responseMessage, err := ksMessage.BuildUnsignedData(action, payload, k.bzcertHash, k.schemaVersion.String()); err != nil {
+	if responseMessage, err := ksMessage.BuildUnsignedData(action, payload, k.bzcert.Hash(), k.schemaVersion.String()); err != nil {
 		return responseMessage, err
-	} else if err := responseMessage.Sign(k.clientSecretKey); err != nil {
-		return responseMessage, fmt.Errorf("could not sign payload: %s", err)
+	} else if err := responseMessage.Sign(k.bzcert.PrivateKey()); err != nil {
+		return responseMessage, fmt.Errorf("%w: %s", ErrFailedToSign, err)
 	} else {
 		return responseMessage, nil
 	}
@@ -359,13 +333,24 @@ func (k *Keysplitting) addToPipelineMap(ksMessage ksmsg.KeysplittingMessage) err
 		return fmt.Errorf("failed to hash message")
 	} else {
 		k.pipelineMap.Set(hash, ksMessage)
+		k.pipelineLength = k.pipelineMap.Len()
 		return nil
 	}
 }
 
 func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
-	// lock our pipeline because nothing can be calculated until we get our synack
-	k.pipelineLock.Lock()
+	k.stateLock.Lock()
+	defer k.stateLock.Unlock()
+
+	return k.buildSyn(action, payload, send)
+}
+
+// It is the caller's responsibility to lock the stateLock mutex before calling this function
+func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (*ksmsg.KeysplittingMessage, error) {
+	// Reset state
+	k.isHandshakeComplete = false
+	k.lastAck = nil
+
 	if k.synAction == "initial" {
 		k.synAction = action
 	}
@@ -375,16 +360,9 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 		return nil, fmt.Errorf("failed to marshal action params")
 	}
 
-	// Build the BZero Certificate then store hash for future messages
-	bzCert, err := k.buildBZCert()
-	if err != nil {
-		return nil, fmt.Errorf("error building bzecert: %s", err)
-	} else {
-		if hash, ok := bzCert.Hash(); ok {
-			k.bzcertHash = hash
-		} else {
-			return nil, fmt.Errorf("could not hash BZ Certificate")
-		}
+	// Refresh our BZCert
+	if err := k.bzcert.Refresh(); err != nil {
+		return nil, fmt.Errorf("failed to build new BastionZero certificate: %w", err)
 	}
 
 	// Build the keysplitting message
@@ -395,7 +373,7 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 		ActionPayload: payloadBytes,
 		TargetId:      k.agentPubKey,
 		Nonce:         util.Nonce(),
-		BZCert:        bzCert,
+		BZCert:        *k.bzcert.Cert(),
 	}
 
 	ksMessage := ksmsg.KeysplittingMessage{
@@ -404,8 +382,8 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 	}
 
 	// Sign it and add it to our hash map
-	if err := ksMessage.Sign(k.clientSecretKey); err != nil {
-		return nil, fmt.Errorf("could not sign payload: %s", err)
+	if err := ksMessage.Sign(k.bzcert.PrivateKey()); err != nil {
+		return nil, fmt.Errorf("%s: %w", ErrFailedToSign, err)
 	} else if err := k.addToPipelineMap(ksMessage); err != nil {
 		return nil, err
 	} else {
@@ -413,48 +391,5 @@ func (k *Keysplitting) BuildSyn(action string, payload interface{}, send bool) (
 			k.outboxQueue <- &ksMessage
 		}
 		return &ksMessage, nil
-	}
-}
-
-func (k *Keysplitting) buildBZCert() (bzcrt.BZCert, error) {
-	// update the id token by calling the passed in zli command
-	if err := util.RunRefreshAuthCommand(k.zliRefreshTokenCommand); err != nil {
-		return bzcrt.BZCert{}, err
-	} else if zliConfig, err := k.loadZLIConfig(); err != nil {
-		return bzcrt.BZCert{}, err
-	} else {
-		// Set public and private keys because someone maybe have logged out and logged back in again
-		k.clientPubKey = zliConfig.KSConfig.PublicKey
-
-		// The golang ed25519 library uses a length 64 private key because the private key is the concatenated form
-		// privatekey = privatekey + publickey.  So if it was generated as length 32, we can correct for that here
-		if privatekeyBytes, _ := base64.StdEncoding.DecodeString(zliConfig.KSConfig.PrivateKey); len(privatekeyBytes) == 32 {
-			publickeyBytes, _ := base64.StdEncoding.DecodeString(k.clientPubKey)
-			k.clientSecretKey = base64.StdEncoding.EncodeToString(append(privatekeyBytes, publickeyBytes...))
-		} else {
-			k.clientSecretKey = zliConfig.KSConfig.PrivateKey
-		}
-
-		return bzcrt.BZCert{
-			InitialIdToken:  zliConfig.KSConfig.InitialIdToken,
-			CurrentIdToken:  zliConfig.TokenSet.CurrentIdToken,
-			ClientPublicKey: zliConfig.KSConfig.PublicKey,
-			Rand:            zliConfig.KSConfig.CerRand,
-			SignatureOnRand: zliConfig.KSConfig.CerRandSignature,
-		}, nil
-	}
-}
-
-func (k *Keysplitting) loadZLIConfig() (*ZLIConfig, error) {
-	var config ZLIConfig
-
-	if configFile, err := os.Open(k.zliConfigPath); err != nil {
-		return nil, fmt.Errorf("could not open config file: %s", err)
-	} else if configFileBytes, err := ioutil.ReadAll(configFile); err != nil {
-		return nil, fmt.Errorf("failed to read config file: %s", err)
-	} else if err := json.Unmarshal(configFileBytes, &config); err != nil {
-		return nil, fmt.Errorf("could not unmarshal config file: %s", err)
-	} else {
-		return &config, nil
 	}
 }

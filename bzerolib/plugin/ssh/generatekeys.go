@@ -1,4 +1,4 @@
-package opaquessh
+package ssh
 
 // functions for handling SSH keypairs
 // based on: https://gist.github.com/devinodaniel/8f9b8a4f31573f428f29ec0e884e6673
@@ -10,7 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
-	"bastionzero.com/bctl/v1/bzerolib/bzio"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -23,7 +23,7 @@ func GenerateKeys() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	publicKeyBytes, err := generatePublicKey(&privateKey.PublicKey)
+	publicKeyBytes, err := GeneratePublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -79,7 +79,7 @@ func decodePemToPrivateKey(privatePem []byte) (*rsa.PrivateKey, error) {
 
 // generatePublicKey take a rsa.PublicKey and return bytes suitable for writing to .pub file
 // returns in the format "ssh-rsa ..."
-func generatePublicKey(publicKey *rsa.PublicKey) ([]byte, error) {
+func GeneratePublicKey(publicKey *rsa.PublicKey) ([]byte, error) {
 	publicRsaKey, err := ssh.NewPublicKey(publicKey)
 	if err != nil {
 		return nil, err
@@ -90,14 +90,38 @@ func generatePublicKey(publicKey *rsa.PublicKey) ([]byte, error) {
 	return pubKeyBytes, nil
 }
 
-// takes a private key path and returns a public key struct
+// takes an encoded private key and returns a public key struct
 // returns an error if the key cannot be read or is invalid
-func readPublicKeyRsa(privateKeyPath string, fileIo bzio.BzFileIo) (*rsa.PublicKey, error) {
-	if privatePem, err := fileIo.ReadFile(privateKeyPath); err != nil {
-		return nil, err
-	} else if privateKey, err := decodePemToPrivateKey(privatePem); err != nil {
+func ReadPublicKeyRsa(privatePem []byte) (*rsa.PublicKey, error) {
+	if privateKey, err := decodePemToPrivateKey(privatePem); err != nil {
 		return nil, err
 	} else {
 		return &privateKey.PublicKey, privateKey.Validate()
 	}
+}
+
+// tries to return an SSH keypair based on the given identityfile
+// if that fails, create a new keypair and update the identityfile
+func SetUpKeys(identityFile IIdentityFile, logger *logger.Logger) (privateKey []byte, publicKey []byte, err error) {
+	useExistingKeys := false
+	// if any of the following steps fail, we need to generate new keys
+	if privateKey, err = identityFile.GetKey(); err != nil {
+		logger.Errorf("failed to retrieve identity file: %s", err)
+	} else if publicKeyRsa, err := ReadPublicKeyRsa(privateKey); err != nil {
+		logger.Errorf("failed to decode identity file: %s", err)
+	} else if publicKey, err = GeneratePublicKey(publicKeyRsa); err != nil {
+		logger.Errorf("failed to decode public key: %s", err)
+	} else {
+		logger.Errorf("using existing temporary keys")
+		useExistingKeys = true
+	}
+	if !useExistingKeys {
+		privateKey, publicKey, err = GenerateKeys()
+		if err != nil {
+			return nil, nil, fmt.Errorf("error generating temporary keys: %s", err)
+		} else if err := identityFile.SetKey(privateKey); err != nil {
+			return nil, nil, fmt.Errorf("error writing temporary private key: %s", err)
+		}
+	}
+	return privateKey, publicKey, nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -16,7 +17,9 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
-	"bastionzero.com/bctl/v1/bzerolib/logger"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert/zliconfig"
+	bzlogger "bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 )
 
@@ -45,7 +48,10 @@ var (
 	dataChannelId string
 
 	// SSH specific arguments
-	identityFile string
+	identityFile   string
+	knownHostsFile string
+	sshAction      string
+	hostNames      string // comma-separated list
 )
 
 const (
@@ -56,20 +62,9 @@ const (
 func main() {
 	flagErr := parseFlags()
 
-	// Setup our loggers
-	writeToConsole := true
-
-	// For shell plugin we read/write directly from Stdin/Stdout so we dont want
-	// our logs to show up there
-	if plugin == string(bzplugin.Shell) || plugin == string(bzplugin.Ssh) {
-		writeToConsole = false
-	}
-
-	if logger, err := logger.New(logger.DefaultLoggerConfig(logLevel), logPath, writeToConsole); err != nil {
+	if logger, err := createLogger(); err != nil {
 		reportError(logger, err)
 	} else {
-		logger.AddDaemonVersion(daemonVersion)
-
 		// print out parseflags error now
 		if flagErr != nil {
 			reportError(logger, flagErr)
@@ -97,7 +92,23 @@ func main() {
 	os.Exit(1)
 }
 
-func reportError(logger *logger.Logger, errorReport error) {
+func createLogger() (*bzlogger.Logger, error) {
+	options := &bzlogger.Config{
+		FilePath: logPath,
+	}
+
+	// For shell plugin we read/write directly from Stdin/Stdout so we dont want
+	// our logs to show up there
+	if plugin != string(bzplugin.Shell) && plugin != string(bzplugin.Ssh) {
+		options.ConsoleWriters = []io.Writer{os.Stdout}
+	}
+
+	logger, err := bzlogger.New(options)
+	logger.AddDaemonVersion(daemonVersion)
+	return logger, err
+}
+
+func reportError(logger *bzlogger.Logger, errorReport error) {
 	if logger != nil {
 		logger.Error(errorReport)
 	}
@@ -116,35 +127,45 @@ func reportError(logger *logger.Logger, errorReport error) {
 	errorreport.ReportError(logger, serviceUrl, errReport)
 }
 
-func startServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+func startServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string) error {
 	logger.Infof("Opening websocket to the Connection Node: %s for plugin %s", connectionServiceUrl, plugin)
 
 	params["connection_id"] = connectionId
 	params["connectionServiceUrl"] = connectionServiceUrl
 	params["connectionServiceAuthToken"] = connectionServiceAuthToken
 
+	// create our MrZAP object
+	config, err := zliconfig.New(configPath, refreshTokenCommand)
+	if err != nil {
+		return err
+	}
+	cert, err := bzcert.New(config)
+	if err != nil {
+		return err
+	}
+
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Db:
 		params["websocketType"] = "db"
-		return startDbServer(logger, headers, params)
+		return startDbServer(logger, headers, params, cert)
 	case bzplugin.Kube:
 		params["websocketType"] = "cluster"
-		return startKubeServer(logger, headers, params)
+		return startKubeServer(logger, headers, params, cert)
 	case bzplugin.Shell:
 		params["websocketType"] = "shell"
-		return startShellServer(logger, headers, params)
+		return startShellServer(logger, headers, params, cert)
 	case bzplugin.Ssh:
 		params["websocketType"] = "ssh"
-		return startSshServer(logger, headers, params)
+		return startSshServer(logger, headers, params, cert)
 	case bzplugin.Web:
 		params["websocketType"] = "web"
-		return startWebServer(logger, headers, params)
+		return startWebServer(logger, headers, params, cert)
 	default:
 		return fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
 }
 
-func startSshServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+func startSshServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("sshserver")
 
 	params["target_id"] = targetId
@@ -156,28 +177,30 @@ func startSshServer(logger *logger.Logger, headers map[string]string, params map
 		subLogger,
 		targetUser,
 		dataChannelId,
-		refreshTokenCommand,
-		configPath,
+		cert,
 		serviceUrl,
 		params,
 		headers,
 		agentPubKey,
 		targetSelectHandler,
 		identityFile,
+		knownHostsFile,
+		strings.Split(hostNames, ","),
 		remoteHost,
 		remotePort,
+		localPort,
+		sshAction,
 	)
 }
 
-func startShellServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+func startShellServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("shellserver")
 
 	return shellserver.StartShellServer(
 		subLogger,
 		targetUser,
 		dataChannelId,
-		refreshTokenCommand,
-		configPath,
+		cert,
 		serviceUrl,
 		params,
 		headers,
@@ -186,7 +209,7 @@ func startShellServer(logger *logger.Logger, headers map[string]string, params m
 	)
 }
 
-func startWebServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+func startWebServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("webserver")
 
 	params["target_id"] = targetId
@@ -196,8 +219,7 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 		localHost,
 		remotePort,
 		remoteHost,
-		refreshTokenCommand,
-		configPath,
+		cert,
 		serviceUrl,
 		params,
 		headers,
@@ -205,7 +227,7 @@ func startWebServer(logger *logger.Logger, headers map[string]string, params map
 		targetSelectHandler)
 }
 
-func startDbServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+func startDbServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("dbserver")
 
 	params["target_id"] = targetId
@@ -215,8 +237,7 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 		localHost,
 		remotePort,
 		remoteHost,
-		refreshTokenCommand,
-		configPath,
+		cert,
 		serviceUrl,
 		params,
 		headers,
@@ -224,7 +245,7 @@ func startDbServer(logger *logger.Logger, headers map[string]string, params map[
 		targetSelectHandler)
 }
 
-func startKubeServer(logger *logger.Logger, headers map[string]string, params map[string]string) error {
+func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("kubeserver")
 
 	// Set our param value for target_user and target_group
@@ -237,8 +258,7 @@ func startKubeServer(logger *logger.Logger, headers map[string]string, params ma
 		localHost,
 		certPath,
 		keyPath,
-		refreshTokenCommand,
-		configPath,
+		cert,
 		targetUser,
 		targetGroups,
 		localhostToken,
@@ -266,7 +286,7 @@ func parseFlags() error {
 	flag.StringVar(&sessionId, "sessionId", "", "Session ID From Zli")
 	flag.StringVar(&sessionToken, "sessionToken", "", "Session Token From Zli")
 	flag.StringVar(&authHeader, "authHeader", "", "Auth Header From Zli")
-	flag.StringVar(&logLevel, "logLevel", logger.Debug.String(), "The log level to use")
+	flag.StringVar(&logLevel, "logLevel", bzlogger.Debug.String(), "The log level to use")
 	flag.StringVar(&connectionId, "connectionId", "", "The bzero connection id for the shell connection")
 	flag.StringVar(&connectionServiceUrl, "connectionServiceUrl", "", "The bzero connection id for the shell connection")
 	flag.StringVar(&connectionServiceAuthToken, "connectionServiceAuthToken", "", "The bzero connection id for the shell connection")
@@ -298,6 +318,9 @@ func parseFlags() error {
 
 	// SSH plugin variables
 	flag.StringVar(&identityFile, "identityFile", "", "Path to an SSH IdentityFile")
+	flag.StringVar(&knownHostsFile, "knownHostsFile", "", "Path to bastionzero-known_hosts")
+	flag.StringVar(&sshAction, "sshAction", "", "One of ['opaque', 'transparent']")
+	flag.StringVar(&hostNames, "hostNames", "", "Comma-separated list of hostNames to use for this target")
 
 	flag.Parse()
 
@@ -323,7 +346,7 @@ func parseFlags() error {
 	case bzplugin.Shell:
 		requiredFlags = append(requiredFlags, "targetUser", "connectionId")
 	case bzplugin.Ssh:
-		requiredFlags = append(requiredFlags, "targetUser", "targetId", "identityFile", "remoteHost", "remotePort")
+		requiredFlags = append(requiredFlags, "targetUser", "targetId", "remoteHost", "identityFile", "knownHostsFile", "hostNames", "remotePort", "sshAction")
 	default:
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	}

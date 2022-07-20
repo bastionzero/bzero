@@ -20,18 +20,22 @@ const (
 	// https://docs.microsoft.com/en-us/azure/active-directory/develop/id-tokens#payload-claims)
 	microsoftPersonalAccountTenantId = "9188040d-6c67-4c5b-b112-36a304b66dad"
 
-	bzCustomTokenLifetime = time.Hour * 24 * 365 * 5 // 5 years
+	initialIdTokenLifetime = time.Hour * 24 * 365 * 5 // 5 years
 )
 
-type IBZCertVerifier interface {
-	VerifyIdToken(idtoken string, skipExpiry bool, verifyNonce bool) (time.Time, error)
+type BZCertVerifier struct {
+	orgId        string
+	ssoProvider  *oidc.Provider
+	providerType ProviderType
 }
 
-type BZCertVerifier struct {
-	orgId       string
-	orgProvider ProviderType
-	issUrl      string
-	cert        *BZCert
+// the claims we care about checking
+type idTokenClaims struct {
+	HD         string `json:"hd"`    // Google Org ID
+	Nonce      string `json:"nonce"` // BastionZero-issued structured nonce
+	TID        string `json:"tid"`   // Microsoft Tenant ID
+	IssuedAt   int64  `json:"iat"`   // Unix datetime of issuance
+	Expiration int64  `json:"exp"`   // Unix datetime of token expiry
 }
 
 type ProviderType string
@@ -40,32 +44,39 @@ const (
 	Google    ProviderType = "google"
 	Microsoft ProviderType = "microsoft"
 	Okta      ProviderType = "okta"
-	// Custom    ProviderType = "custom" // TODO: support custom IdPs
+	// Custom    ProviderType = "custom" // plan for custom IdP support
 	None ProviderType = "None"
 )
 
-func NewBZCertVerifier(bzcert *BZCert, idpProvider string, idpOrgId string) (IBZCertVerifier, error) {
+func NewVerifier(idpProvider string, idpOrgId string) (*BZCertVerifier, error) {
 	// customIss := os.Getenv("CUSTOM_IDP")
 
-	issUrl := ""
+	var issuerUrl string
 	switch ProviderType(idpProvider) {
 	case Google:
-		issUrl = googleUrl
+		issuerUrl = googleUrl
 	case Microsoft:
-		issUrl = getMicrosoftIssUrl(idpOrgId)
+		issuerUrl = getMicrosoftIssUrl(idpOrgId)
 	case Okta:
-		issUrl = "https://" + idpOrgId + ".okta.com"
+		issuerUrl = fmt.Sprintf("https://%s.okta.com", idpOrgId)
 	// case Custom:
 	// 	issUrl = customIss
 	default:
-		return nil, fmt.Errorf("unrecognized OIDC provider: %s", idpProvider)
+		return nil, fmt.Errorf("unrecognized SSO provider: %s", idpProvider)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(60*time.Second))
+	defer cancel()
+
+	provider, err := oidc.NewProvider(ctx, issuerUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to establish connection with SSO provider %s: %w", idpProvider, err)
 	}
 
 	return &BZCertVerifier{
-		orgId:       idpOrgId,
-		orgProvider: ProviderType(idpProvider),
-		issUrl:      issUrl,
-		cert:        bzcert,
+		orgId:        idpOrgId,
+		ssoProvider:  provider,
+		providerType: ProviderType(idpProvider),
 	}, nil
 }
 
@@ -79,92 +90,103 @@ func getMicrosoftIssUrl(orgId string) string {
 		tenantId = orgId
 	}
 
-	return microsoftUrl + "/" + tenantId + "/v2.0"
+	return fmt.Sprintf("%s/%s/v2.0", microsoftUrl, tenantId)
 }
 
-// This function verifies id_tokens
-func (u *BZCertVerifier) VerifyIdToken(idtoken string, skipExpiry bool, verifyNonce bool) (time.Time, error) {
-	// Verify Token Signature
-
-	// If there is no issuer URL, skip id token verification
-	// Provider isn't stored for single-player orgs
-	if u.issUrl == "" {
-		return time.Now().Add(bzCustomTokenLifetime), nil
+func (v *BZCertVerifier) Verify(bzcert *BZCert) (exp time.Time, err error) {
+	if err = v.verifyInitialIdToken(bzcert.InitialIdToken, bzcert); err != nil {
+		return exp, fmt.Errorf("error verifying initial id token: %w", err)
+	} else if exp, err = v.verifyCurrentIdToken(bzcert.CurrentIdToken); err != nil {
+		return exp, fmt.Errorf("error verifying current id token: %w", err)
+	} else {
+		return
 	}
+}
 
-	ctx := context.TODO() // Gives us non-nil empty context
+// this function verifies the current id token and will return that token's
+// expiration time
+func (v *BZCertVerifier) verifyCurrentIdToken(token string) (time.Time, error) {
 	config := &oidc.Config{
 		SkipClientIDCheck: true,
-		SkipExpiryCheck:   skipExpiry,
-		// SupportedSigningAlgs: []string{RS256, ES512},
+		SkipExpiryCheck:   false,
 	}
 
-	provider, err := oidc.NewProvider(ctx, u.issUrl)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid OIDC provider: %s", err)
+	if claims, err := v.getTokenClaims(token, config); err != nil {
+		return time.Time{}, err
+	} else {
+		return time.Unix(claims.Expiration, 0), nil
 	}
+}
+
+// this function verifies the initial id token which requires checking whether
+// the structured nonce is correctly formatted
+func (v *BZCertVerifier) verifyInitialIdToken(token string, bzcert *BZCert) error {
+	config := &oidc.Config{
+		SkipClientIDCheck: true,
+		SkipExpiryCheck:   true,
+	}
+
+	claims, err := v.getTokenClaims(token, config)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	iat := time.Unix(claims.IssuedAt, 0) // Confirmed both Microsoft and Google use Unix
+
+	// the initial id token expires after a time specified by BastionZero
+	if now.After(iat.Add(initialIdTokenLifetime)) {
+		return fmt.Errorf("InitialIdToken Expired {Current Time = %v, Token iat = %v}", now, iat)
+	}
+
+	// Check if the structured nonce in id token is formatted correctly
+	if err = v.verifyAuthNonce(bzcert, claims.Nonce); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (v *BZCertVerifier) getTokenClaims(idtoken string, config *oidc.Config) (*idTokenClaims, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(60*time.Second))
+	defer cancel()
 
 	// This checks formatting and signature validity
-	verifier := provider.Verifier(config)
+	verifier := v.ssoProvider.Verifier(config)
 	token, err := verifier.Verify(ctx, idtoken)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("ID Token verification error: %s", err)
+		return nil, fmt.Errorf("failed to verify id token with SSO provider: %w", err)
 	}
 
-	// Verify Claims
-
-	// the claims we care about checking
-	var claims struct {
-		HD       string `json:"hd"`    // Google Org ID
-		Nonce    string `json:"nonce"` // BastionZero-issued nonce
-		TID      string `json:"tid"`   // Microsoft Tenant ID
-		IssuedAt int64  `json:"iat"`   // Unix datetime of issuance
-		Death    int64  `json:"exp"`   // Unix datetime of token expiry
-	}
-
-	if err := token.Claims(&claims); err != nil {
-		return time.Time{}, fmt.Errorf("error parsing the ID Token: %s", err)
-	}
-
-	// Manual check to see if InitialIdToken is expired
-	if skipExpiry {
-		now := time.Now()
-		iat := time.Unix(claims.IssuedAt, 0) // Confirmed both Microsoft and Google use Unix
-		if now.After(iat.Add(bzCustomTokenLifetime)) {
-			return time.Time{}, fmt.Errorf("InitialIdToken Expired {Current Time = %v, Token iat = %v}", now, iat)
-		}
-	}
-
-	// Check if Nonce in ID token is formatted correctly
-	if verifyNonce {
-		if err = u.verifyAuthNonce(claims.Nonce); err != nil {
-			return time.Time{}, err
-		}
+	// Extract claims from token
+	var claims idTokenClaims
+	if err = token.Claims(&claims); err != nil {
+		return nil, fmt.Errorf("error parsing the ID Token: %s", err)
 	}
 
 	// Only validate org claim if there is an orgId associated with this agent. This will be empty
 	// for orgs associated with a personal gsuite/microsoft account. We do not need to check against
 	// anything for Okta, because Okta creates a specific issuer url for every org meaning that by
 	// virtue of getting the claims, we are assured it's for the specific Okta tenant.
-	switch u.orgProvider {
+	switch v.providerType {
 	case Google:
-		if u.orgId != claims.HD {
-			return time.Time{}, fmt.Errorf("user's OrgId does not match target's expected Google HD")
+		if v.orgId != claims.HD {
+			return nil, fmt.Errorf("user's OrgId does not match target's expected Google HD")
 		}
 	case Microsoft:
-		if u.orgId != claims.TID {
-			return time.Time{}, fmt.Errorf("user's OrgId does not match target's expected Microsoft tid")
+		if v.orgId != claims.TID {
+			return nil, fmt.Errorf("user's OrgId does not match target's expected Microsoft tid")
 		}
 	}
 
-	return time.Unix(claims.Death, 0), nil
+	return &claims, nil
 }
 
 // This function takes in the BZECert, extracts all fields for verifying the AuthNonce (sent as part of
 // the ID Token).  Returns nil if nonce is verified, else returns an error.
 // Nonce should equal ClientPublicKey + SignatureOnRandomValue + RandomValue, where the signature is valid.
-func (b *BZCertVerifier) verifyAuthNonce(authNonce string) error {
-	nonce := b.cert.ClientPublicKey + b.cert.SignatureOnRand + b.cert.Rand
+func (v *BZCertVerifier) verifyAuthNonce(bzcert *BZCert, authNonce string) error {
+	nonce := bzcert.ClientPublicKey + bzcert.SignatureOnRand + bzcert.Rand
 	hash := sha3.Sum256([]byte(nonce))
 	nonceHash := base64.StdEncoding.EncodeToString(hash[:])
 
@@ -173,15 +195,15 @@ func (b *BZCertVerifier) verifyAuthNonce(authNonce string) error {
 		return fmt.Errorf("nonce in ID token does not match calculated nonce hash")
 	}
 
-	decodedRand, err := base64.StdEncoding.DecodeString(b.cert.Rand)
+	decodedRand, err := base64.StdEncoding.DecodeString(bzcert.Rand)
 	if err != nil {
 		return fmt.Errorf("BZCert Rand is not base64 encoded")
 	}
 
 	randHashBits := sha3.Sum256([]byte(decodedRand))
-	sigBits, _ := base64.StdEncoding.DecodeString(b.cert.SignatureOnRand)
+	sigBits, _ := base64.StdEncoding.DecodeString(bzcert.SignatureOnRand)
 
-	pubKeyBits, _ := base64.StdEncoding.DecodeString(b.cert.ClientPublicKey)
+	pubKeyBits, _ := base64.StdEncoding.DecodeString(bzcert.ClientPublicKey)
 	if len(pubKeyBits) != 32 {
 		return fmt.Errorf("public key has invalid length %v", len(pubKeyBits))
 	}

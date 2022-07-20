@@ -1,7 +1,17 @@
 package logger
 
+import (
+	"io"
+
+	. "github.com/onsi/ginkgo/v2"
+)
+
 func MockLogger() *Logger {
-	if logger, err := New(DefaultLoggerConfig(Debug.String()), "/dev/null", false); err == nil {
+	config := &Config{
+		ConsoleWriters: []io.Writer{GinkgoWriter},
+	}
+
+	if logger, err := New(config); err == nil {
 		return logger
 	}
 	return nil

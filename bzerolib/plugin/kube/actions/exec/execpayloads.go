@@ -9,7 +9,8 @@ type KubeExecStartActionPayload struct {
 	RequestId            string             `json:"requestId"`
 	StreamMessageVersion smsg.SchemaVersion `json:"streamMessageVersion"` // informs Agent what SchemaVersion to use
 	LogId                string             `json:"logId"`
-	IsTty                bool               `json:"isTty"`
+	IsStdIn              bool               `json:"isStdIn"` // Should we forward stdin to the container (-i flag in kubectl exec)
+	IsTty                bool               `json:"isTty"`   // Is StdIn a TTY (-t flag in kubectl exec)
 	Command              []string           `json:"command"`
 	Endpoint             string             `json:"endpoint"`
 	CommandBeingRun      string             `json:"commandBeingRun"`
