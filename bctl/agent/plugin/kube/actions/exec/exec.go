@@ -199,17 +199,24 @@ func (e *ExecAction) startExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	go func() {
 		defer close(e.doneChan)
 
-		if startExecRequest.IsTty {
-			err = exec.Stream(remotecommand.StreamOptions{
-				Stdin:             e.stdinReader,
-				Stdout:            stdoutWriter,
-				Stderr:            stderrWriter,
-				TerminalSizeQueue: terminalSizeQueue,
-				Tty:               true,
-			})
+		if startExecRequest.IsStdIn {
+			if startExecRequest.IsTty {
+				err = exec.Stream(remotecommand.StreamOptions{
+					Stdin:             e.stdinReader,
+					Stdout:            stdoutWriter,
+					Stderr:            stderrWriter,
+					TerminalSizeQueue: terminalSizeQueue,
+					Tty:               true,
+				})
+			} else {
+				err = exec.Stream(remotecommand.StreamOptions{
+					Stdin:  e.stdinReader,
+					Stdout: stdoutWriter,
+					Stderr: stderrWriter,
+				})
+			}
 		} else {
 			err = exec.Stream(remotecommand.StreamOptions{
-				Stdin:  e.stdinReader,
 				Stdout: stdoutWriter,
 				Stderr: stderrWriter,
 			})
