@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/bzcert"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	commonbzcert "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"

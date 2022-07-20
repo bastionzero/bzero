@@ -9,7 +9,7 @@ import (
 	"github.com/Masterminds/semver"
 	orderedmap "github.com/wk8/go-ordered-map"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/bzcert"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"

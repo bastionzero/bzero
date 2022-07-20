@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/bzcert"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/shellserver"
