@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 
-	"gopkg.in/tomb.v2"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
@@ -26,7 +25,6 @@ var getConfig = func() (*rest.Config, error) {
 }
 
 type ExecAction struct {
-	tmb    tomb.Tomb
 	logger *logger.Logger
 
 	doneChan chan struct{}
@@ -192,7 +190,6 @@ func (e *ExecAction) startExec(startExecRequest bzexec.KubeExecStartActionPayloa
 	// NOTE: don't need to version this because Type is not read on the other end
 	stderrWriter := NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdErr, e.logId)
 	stdoutWriter := NewStdWriter(e.streamOutputChan, e.streamMessageVersion, e.requestId, string(kube.Exec), smsg.StdOut, e.logId)
-	e.stdinReader = NewStdReader(string(bzexec.StdIn), startExecRequest.RequestId, e.execStdinChannel)
 	terminalSizeQueue := NewTerminalSizeQueue(startExecRequest.RequestId, e.execResizeChannel)
 
 	// runs the exec interaction with the kube server
@@ -200,6 +197,8 @@ func (e *ExecAction) startExec(startExecRequest bzexec.KubeExecStartActionPayloa
 		defer close(e.doneChan)
 
 		if startExecRequest.IsStdIn {
+			e.stdinReader = NewStdReader(string(bzexec.StdIn), startExecRequest.RequestId, e.execStdinChannel)
+
 			if startExecRequest.IsTty {
 				err = exec.Stream(remotecommand.StreamOptions{
 					Stdin:             e.stdinReader,
