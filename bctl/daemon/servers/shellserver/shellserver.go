@@ -146,9 +146,14 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 				return
 			case <-dcTmb.Dead():
 				// bubble up our error to the user
-				if dcTmb.Err() != nil {
+				if err := dcTmb.Err(); err != nil {
+
+					// Handle custom daemon exit codes which will be reported by zli
+					exitcodes.HandleDaemonError(err, ss.logger)
+
+					// otherwise bubble up the error to stdout
 					// let's just take our innermost error to give the user
-					errs := strings.Split(dcTmb.Err().Error(), ": ")
+					errs := strings.Split(err.Error(), ": ")
 					errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
 					os.Stdout.Write([]byte(errorString))
 					os.Exit(exitcodes.UNSPECIFIED_ERROR)

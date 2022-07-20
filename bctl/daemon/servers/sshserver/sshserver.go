@@ -160,7 +160,10 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 				dc.Close(errors.New("ssh server closing"))
 				return
 			case <-dcTmb.Dead():
-				if dcTmb.Err() != nil {
+				if err := dcTmb.Err(); err != nil {
+					// Handle custom daemon exit codes which will be reported by zli
+					exitcodes.HandleDaemonError(err, s.logger)
+
 					// just take our innermost error to give the user
 					errs := strings.Split(dcTmb.Err().Error(), ": ")
 					errorString := fmt.Sprintf("error: %s\n", errs[len(errs)-1])

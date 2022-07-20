@@ -141,7 +141,7 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 	if err != nil {
 		return err
 	}
-	cert, err := bzcert.New(logger, config)
+	cert, err := bzcert.New(config)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,13 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 	// Validate the bzcert before creating the server and fail fast if the cert
 	// is no longer valid. This may result in prompting the user to login again
 	// if the cert contains expired IdP id tokens
-	cert.VerifyAndExitOnError()
+	err = cert.VerifyFromZliConfig()
+	if err != nil {
+		exitcodes.HandleDaemonError(err, logger)
+
+		logger.Errorf("unknown error verifying bbzcert: %s", err)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
+	}
 
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Db:

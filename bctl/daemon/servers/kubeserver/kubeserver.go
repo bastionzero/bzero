@@ -11,6 +11,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
@@ -197,6 +198,11 @@ func (k *KubeServer) newDataChannel(dcId string, action string, websocket *webso
 					MessageType: string(am.CloseDataChannel),
 				}
 				k.websocket.Send(cdMessage)
+
+				if err := dcTmb.Err(); err != nil {
+					exitcodes.HandleDaemonError(err, k.logger)
+				}
+
 				return
 			}
 		}

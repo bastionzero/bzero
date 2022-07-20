@@ -179,6 +179,10 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 				}
 				d.websocket.Send(cdMessage)
 
+				if err := dcTmb.Err(); err != nil {
+					exitcodes.HandleDaemonError(err, d.logger)
+				}
+
 				return
 			}
 		}

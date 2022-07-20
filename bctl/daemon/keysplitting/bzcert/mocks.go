@@ -45,6 +45,7 @@ func (m *MockDaemonBZCert) Expired() bool {
 	return args.Bool(0)
 }
 
-func (m *MockDaemonBZCert) VerifyAndExitOnError() {
-	m.Called()
+func (m *MockDaemonBZCert) VerifyFromZliConfig() error {
+	args := m.Called()
+	return args.Error(0)
 }

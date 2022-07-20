@@ -134,7 +134,9 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 
 	// Ensure the refreshed bzcert is valid otherwise we may need the user to
 	// login again
-	k.bzcert.VerifyAndExitOnError()
+	if err := k.bzcert.VerifyFromZliConfig(); err != nil {
+		return err
+	}
 
 	k.recovering = true
 	if _, err := k.buildSyn("", []byte{}, true); err != nil {
