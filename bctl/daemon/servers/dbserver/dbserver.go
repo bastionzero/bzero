@@ -9,6 +9,7 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
@@ -84,14 +85,14 @@ func StartDbServer(logger *logger.Logger,
 	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
 	if err != nil {
 		logger.Errorf("Failed to resolve TCP address %s", err)
-		os.Exit(1)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	logger.Infof("Setting up TCP listener")
 	localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
 	if err != nil {
 		logger.Errorf("Failed to open local port to listen: %s", err)
-		os.Exit(1)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	// Always ensure we close the local tcp connection when we exit

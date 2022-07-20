@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
@@ -82,7 +83,7 @@ func main() {
 
 			if err := startServer(logger, headers, params); err != nil {
 				logger.Error(err)
-				os.Exit(1)
+				os.Exit(exitcodes.UNSPECIFIED_ERROR)
 			} else {
 				select {} // sleep forever
 			}
@@ -90,7 +91,7 @@ func main() {
 	}
 
 	// if we hit this, something has gone wrong
-	os.Exit(1)
+	os.Exit(exitcodes.UNSPECIFIED_ERROR)
 }
 
 func createLogger() (*bzlogger.Logger, error) {

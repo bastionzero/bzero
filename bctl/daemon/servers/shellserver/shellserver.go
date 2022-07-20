@@ -151,9 +151,10 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 					errs := strings.Split(dcTmb.Err().Error(), ": ")
 					errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
 					os.Stdout.Write([]byte(errorString))
+					os.Exit(exitcodes.UNSPECIFIED_ERROR)
+				} else {
+					os.Exit(exitcodes.SUCCESS)
 				}
-				errorCode := 1
-				os.Exit(errorCode)
 			}
 		}
 	}()

@@ -1,7 +1,8 @@
 package exitcodes
 
 // Daemon Exit Codes
-var (
+const (
+	SUCCESS               = 0
 	UNSPECIFIED_ERROR     = 1
 	BZCERT_ID_TOKEN_ERROR = 2
 )
