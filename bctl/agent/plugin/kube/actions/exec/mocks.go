@@ -13,10 +13,13 @@ type MockExecutor struct {
 }
 
 func (m MockExecutor) Stream(options remotecommand.StreamOptions) error {
+	// if there is no stdin, this will be empty
 	var data = make([]byte, 7)
 	go func() {
 		for {
-			options.Stdin.Read(data)
+			if options.Stdin != nil {
+				options.Stdin.Read(data)
+			}
 			options.Stdout.Write(data)
 			options.Stderr.Write([]byte(fmt.Sprintf("error: %s", data)))
 		}

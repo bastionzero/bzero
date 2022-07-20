@@ -12,6 +12,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
@@ -33,34 +34,40 @@ type SshServer struct {
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
-	remoteHost   string
-	remotePort   int
-	targetUser   string
-	identityFile string
+	remoteHost string
+	remotePort int
+	localPort  string
+	targetUser string
+
+	identityFile   string
+	knownHostsFile string
+	hostNames      []string
 
 	// fields for new datachannels
-	params              map[string]string
-	headers             map[string]string
-	serviceUrl          string
-	refreshTokenCommand string
-	configPath          string
-	agentPubKey         string
+	params      map[string]string
+	headers     map[string]string
+	serviceUrl  string
+	agentPubKey string
+	cert        *bzcert.BZCert
 }
 
 func StartSshServer(
 	logger *logger.Logger,
 	targetUser string,
 	dataChannelId string,
-	refreshTokenCommand string,
-	configPath string,
+	cert *bzcert.BZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	identityFile string,
+	knownHostsFile string,
+	hostNames []string,
 	remoteHost string,
 	remotePort int,
+	localPort string,
+	action string,
 ) error {
 
 	server := &SshServer{
@@ -70,12 +77,14 @@ func StartSshServer(
 		params:              params,
 		headers:             headers,
 		targetSelectHandler: targetSelectHandler,
-		configPath:          configPath,
-		refreshTokenCommand: refreshTokenCommand,
+		cert:                cert,
 		agentPubKey:         agentPubKey,
 		identityFile:        identityFile,
+		knownHostsFile:      knownHostsFile,
+		hostNames:           hostNames,
 		remoteHost:          remoteHost,
 		remotePort:          remotePort,
+		localPort:           localPort,
 	}
 
 	// Create a new websocket
@@ -85,8 +94,9 @@ func StartSshServer(
 	}
 
 	// create our new datachannel
-	if err := server.newDataChannel(string(bzssh.OpaqueSsh), server.websocket); err != nil {
+	if err := server.newDataChannel(action, server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
+		return err
 	}
 
 	return nil
@@ -95,7 +105,7 @@ func StartSshServer(
 // for creating new websockets
 func (s *SshServer) newWebsocket(wsId string) error {
 	subLogger := s.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, s.serviceUrl, s.params, s.headers, s.targetSelectHandler, autoReconnect, getChallenge, s.refreshTokenCommand, websocket.Ssh); err != nil {
+	if wsClient, err := websocket.New(subLogger, s.serviceUrl, s.params, s.headers, s.targetSelectHandler, autoReconnect, getChallenge, websocket.Ssh); err != nil {
 		return err
 	} else {
 		s.websocket = wsClient
@@ -113,45 +123,53 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
 
-	plugin := ssh.New(pluginLogger, s.identityFile, bzio.OsFileIo{}, bzio.StdIo{})
-	if err := plugin.StartAction(); err != nil {
+	fileIo := bzio.OsFileIo{}
+
+	idFile := bzssh.NewIdentityFile(s.identityFile, fileIo)
+	khFile := bzssh.NewKnownHosts(s.knownHostsFile, s.hostNames, fileIo)
+
+	plugin := ssh.New(pluginLogger, s.localPort, idFile, khFile, bzio.StdIo{})
+	if err := plugin.StartAction(action); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)
 	}
 
-	actionParams := bzssh.SshActionParams{
+	synPayload := bzssh.SshActionParams{
 		TargetUser: s.targetUser,
 		RemoteHost: s.remoteHost,
 		RemotePort: s.remotePort,
 	}
 
-	action = "ssh/" + action
 	ksLogger := s.logger.GetComponentLogger("mrzap")
-	if keysplitter, err := keysplitting.New(ksLogger, s.agentPubKey, s.configPath, s.refreshTokenCommand); err != nil {
+	keysplitter, err := keysplitting.New(ksLogger, s.agentPubKey, s.cert)
+	if err != nil {
 		return err
-	} else if dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, actionParams, attach, false); err != nil {
-		return err
-	} else {
+	}
 
-		// create a function to listen to the datachannel dying and then laugh
-		go func() {
-			for {
-				select {
-				case <-s.tmb.Dying():
-					dc.Close(errors.New("ssh server closing"))
-					return
-				case <-dcTmb.Dead():
-					if dcTmb.Err() != nil {
-						// just take our innermost error to give the user
-						errs := strings.Split(dcTmb.Err().Error(), ": ")
-						errorString := fmt.Sprintf("error: %s\n", errs[len(errs)-1])
-						os.Stdout.Write([]byte(errorString))
-						os.Exit(1)
-					} else {
-						os.Exit(0)
-					}
+	action = "ssh/" + action
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	if err != nil {
+		return err
+	}
+
+	// create a function to listen to the datachannel dying and then laugh
+	go func() {
+		for {
+			select {
+			case <-s.tmb.Dying():
+				dc.Close(errors.New("ssh server closing"))
+				return
+			case <-dcTmb.Dead():
+				if dcTmb.Err() != nil {
+					// just take our innermost error to give the user
+					errs := strings.Split(dcTmb.Err().Error(), ": ")
+					errorString := fmt.Sprintf("error: %s\n", errs[len(errs)-1])
+					os.Stdout.Write([]byte(errorString))
+					os.Exit(1)
+				} else {
+					os.Exit(0)
 				}
 			}
-		}()
-		return nil
-	}
+		}
+	}()
+	return nil
 }

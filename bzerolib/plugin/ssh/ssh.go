@@ -1,13 +1,19 @@
 package ssh
 
 import (
+	"fmt"
+
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
 type SshAction string
 
 const (
-	OpaqueSsh SshAction = "opaque"
+	OpaqueSsh      SshAction = "opaque"
+	TransparentSsh SshAction = "transparent"
+	// we need the space in order to block execution of scripts that might start with 'scp'
+	scpWithSpace string = "scp "
+	sftp         string = "sftp"
 )
 
 type SshActionParams struct {
@@ -26,6 +32,11 @@ type SshInputMessage struct {
 	Data []byte `json:"data"`
 }
 
+type SshExecMessage struct {
+	Command string `json:"command"`
+	Sftp    bool   `json:"sftp"` // true in the special case of an sftp request
+}
+
 type SshCloseMessage struct {
 	Reason string `json:"reason"`
 }
@@ -34,6 +45,21 @@ type SshSubAction string
 
 const (
 	SshOpen  SshSubAction = "ssh/open"
+	SshExec  SshSubAction = "ssh/exec"
 	SshInput SshSubAction = "ssh/input"
 	SshClose SshSubAction = "ssh/close"
 )
+
+// verify that the command begins with "scp "
+func IsValidScp(command string) bool {
+	return string([]rune(command)[:4]) == scpWithSpace
+}
+
+// verify that the entire command is "sftp"
+func IsValidSftp(command string) bool {
+	return string([]rune(command)) == sftp
+}
+
+func UnauthorizedCommandError(received string) string {
+	return fmt.Sprintf("unauthorized command: this user is only allowed to perform file transfer via scp or sftp, but received %s", received)
+}

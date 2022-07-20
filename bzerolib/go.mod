@@ -16,7 +16,7 @@ require (
 	github.com/onsi/gomega v1.19.0
 	github.com/rs/zerolog v1.24.0
 	github.com/stretchr/testify v1.7.0
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637
 	k8s.io/apimachinery v0.21.3

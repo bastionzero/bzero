@@ -2,9 +2,10 @@ package ssh
 
 import (
 	"fmt"
-	"io"
+	"net"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/opaquessh"
+	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh/actions/transparentssh"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -25,35 +26,48 @@ type SshDaemonPlugin struct {
 	doneChan     chan struct{}
 	killed       bool
 	action       ISshAction
-	identityFile string
-	filIo        bzio.BzFileIo
-	stdIo        io.ReadWriter
+	localPort    string
+	identityFile bzssh.IIdentityFile
+	knownHosts   bzssh.IKnownHosts
+	stdIo        bzio.BzIo
 }
 
-func New(logger *logger.Logger, identityFile string, filIo bzio.BzFileIo, stdIo io.ReadWriter) *SshDaemonPlugin {
+func New(logger *logger.Logger, localPort string, identityFile bzssh.IIdentityFile, knownHosts bzssh.IKnownHosts, stdIo bzio.StdIo) *SshDaemonPlugin {
 	return &SshDaemonPlugin{
 		logger:       logger,
 		outboxQueue:  make(chan bzplugin.ActionWrapper, 10),
 		doneChan:     make(chan struct{}),
 		killed:       false,
+		localPort:    localPort,
 		identityFile: identityFile,
-		filIo:        filIo,
+		knownHosts:   knownHosts,
 		stdIo:        stdIo,
 	}
 }
 
-func (s *SshDaemonPlugin) StartAction() error {
+func (s *SshDaemonPlugin) StartAction(actionName string) error {
 	if s.killed {
 		return fmt.Errorf("plugin has already been killed, cannot create a new ssh action")
 	}
 
-	// Create the OpaqueSsh action
-	actLogger := s.logger.GetActionLogger(string(bzssh.OpaqueSsh))
-	s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.identityFile, s.filIo, s.stdIo)
+	// Create the action
+	actLogger := s.logger.GetActionLogger(actionName)
+	switch actionName {
+	case string(bzssh.OpaqueSsh):
+		s.action = opaquessh.New(actLogger, s.outboxQueue, s.doneChan, s.stdIo, s.identityFile, s.knownHosts)
+	case string(bzssh.TransparentSsh):
+		// listen for a connection from the ZLI
+		// action is responsible for closing this
+		listener, err := net.Listen("tcp", fmt.Sprintf(":%s", s.localPort))
+		if err != nil {
+			s.logger.Errorf("failed to listen for connection: %s", err)
+		}
+		s.action = transparentssh.New(actLogger, s.outboxQueue, s.doneChan, s.stdIo, listener, s.identityFile, s.knownHosts)
+	}
 
 	// Start the ssh action
 	if err := s.action.Start(); err != nil {
-		return fmt.Errorf("error starting the default ssh action: %s", err)
+		return fmt.Errorf("error starting the ssh action: %s", err)
 	} else {
 		return nil
 	}

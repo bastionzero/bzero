@@ -71,10 +71,11 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 	}
 
 	// Determine if this is tty
+	isStdIn := kubeutils.IsQueryParamPresent(request, "stdin")
 	isTty := kubeutils.IsQueryParamPresent(request, "tty")
 
 	// Now since we made our local connection to kubectl, initiate a connection with Bastion
-	e.sendStartMessage(isTty, request.URL.Query()["command"], request.URL.String())
+	e.sendStartMessage(isStdIn, isTty, request.URL.Query()["command"], request.URL.String())
 
 	// Set up a go function for stdout
 	e.tmb.Go(func() error {
@@ -127,44 +128,46 @@ func (e *ExecAction) Start(writer http.ResponseWriter, request *http.Request) er
 		}
 	})
 
-	// Set up a go function to read from stdin
-	go func() {
-		for {
-			// Reset buffer every loop
-			buffer := make([]byte, 0)
+	if isStdIn {
+		// Set up a go function to read from stdin
+		go func() {
+			for {
+				// Reset buffer every loop
+				buffer := make([]byte, 0)
 
-			// Define our chunkBuffer
-			chunkSizeBuffer := make([]byte, kubeutils.ExecChunkSize)
+				// Define our chunkBuffer
+				chunkSizeBuffer := make([]byte, kubeutils.ExecChunkSize)
 
-			select {
-			case <-e.tmb.Dying():
-				return
-			default:
-				// Keep reading from our stdin stream if we see multiple chunks coming in
-				for {
-					if n, err := spdy.stdinStream.Read(chunkSizeBuffer); !e.tmb.Alive() {
-						return
-					} else if err == io.EOF {
-						buffer = append(buffer, chunkSizeBuffer[:n]...)
-						// Always return if we see a EOF
-						break
-					} else if err != nil {
-						e.logger.Errorf("failed reading stdin: %s", err)
-					} else {
-						// Append the new chunk to our buffer
-						buffer = append(buffer, chunkSizeBuffer[:n]...)
-
-						// If we stop seeing chunks (i.e. n != 8192) or we have reached our max buffer size, break
-						if n != kubeutils.ExecChunkSize || len(buffer) > kubeutils.ExecDefaultMaxBufferSize {
+				select {
+				case <-e.tmb.Dying():
+					return
+				default:
+					// Keep reading from our stdin stream if we see multiple chunks coming in
+					for {
+						if n, err := spdy.stdinStream.Read(chunkSizeBuffer); !e.tmb.Alive() {
+							return
+						} else if err == io.EOF {
+							buffer = append(buffer, chunkSizeBuffer[:n]...)
+							// Always return if we see a EOF
 							break
+						} else if err != nil {
+							e.logger.Errorf("failed reading stdin: %s", err)
+						} else {
+							// Append the new chunk to our buffer
+							buffer = append(buffer, chunkSizeBuffer[:n]...)
+
+							// If we stop seeing chunks (i.e. n != 8192) or we have reached our max buffer size, break
+							if n != kubeutils.ExecChunkSize || len(buffer) > kubeutils.ExecDefaultMaxBufferSize {
+								break
+							}
 						}
 					}
+					// Send message to agent
+					e.sendStdinMessage(buffer)
 				}
-				// Send message to agent
-				e.sendStdinMessage(buffer)
 			}
-		}
-	}()
+		}()
+	}
 
 	if isTty {
 		// Set up a go function for resize if we are running interactively
@@ -204,11 +207,12 @@ func (e *ExecAction) outbox(action exec.ExecSubAction, payload interface{}) {
 	}
 }
 
-func (e *ExecAction) sendStartMessage(isTty bool, command []string, endpoint string) {
+func (e *ExecAction) sendStartMessage(isStdIn bool, isTty bool, command []string, endpoint string) {
 	payload := exec.KubeExecStartActionPayload{
 		RequestId:            e.requestId,
 		StreamMessageVersion: smsg.CurrentSchema,
 		LogId:                e.logId,
+		IsStdIn:              isStdIn,
 		IsTty:                isTty,
 		Command:              command,
 		Endpoint:             endpoint,
