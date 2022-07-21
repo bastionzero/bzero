@@ -29,6 +29,4 @@ func HandleDaemonError(err error, logger *logger.Logger) {
 		logger.Errorf("IdP tokens are invalid/expired. Please try to re-login with the zli.")
 		os.Exit(BZCERT_ID_TOKEN_ERROR)
 	}
-
-	return
 }
