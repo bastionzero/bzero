@@ -127,15 +127,10 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 		k.logger.Infof("Attempt #%d to recover from error: %s", k.errorRecoveryAttempt, errMessage.Message)
 	}
 
-	// Refresh our BZCert before rebuilding the syn in case the cert expired. This may still fail if the initialId Token is no longer valid
+	// Refresh our BZCert before rebuilding the syn in case the cert expired.
+	// This may still fail if the initialId Token is no longer valid
 	if err := k.bzcert.Refresh(); err != nil {
 		return fmt.Errorf("failed to refresh BastionZero certificate: %w", err)
-	}
-
-	// Ensure the refreshed bzcert is valid otherwise we may need the user to
-	// login again
-	if err := k.bzcert.VerifyFromZliConfig(); err != nil {
-		return err
 	}
 
 	k.recovering = true

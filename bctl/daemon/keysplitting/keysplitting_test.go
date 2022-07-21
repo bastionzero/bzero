@@ -155,7 +155,6 @@ var _ = Describe("Daemon keysplitting", func() {
 		mockBZCert.On("Verify", "", "").Return(nil)
 		mockBZCert.On("Hash").Return(&fakeBZCert)
 		mockBZCert.On("Cert").Return(&fakeBZCert)
-		mockBZCert.On("VerifyFromZliConfig").Return()
 
 		// Init the SUT
 		sut, err = New(logger, agentKeypair.Base64EncodedPublicKey, mockBZCert)

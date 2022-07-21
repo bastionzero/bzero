@@ -13,7 +13,6 @@ type IDaemonBZCert interface {
 	Cert() *bzcert.BZCert
 	PrivateKey() string
 	Refresh() error
-	VerifyFromZliConfig() error
 }
 
 type DaemonBZCert struct {
@@ -60,10 +59,6 @@ func (b *DaemonBZCert) Refresh() error {
 	return nil
 }
 
-func (b *DaemonBZCert) VerifyFromZliConfig() error {
-	return b.Verify(b.config.CertConfig.OrgProvider, b.config.CertConfig.OrgIssuerId)
-}
-
 func (b *DaemonBZCert) populateFromConfig() error {
 	var privateKey string
 
@@ -88,6 +83,11 @@ func (b *DaemonBZCert) populateFromConfig() error {
 	b.Rand = b.config.CertConfig.CerRand
 	b.SignatureOnRand = b.config.CertConfig.CerRandSignature
 	b.privateKey = privateKey
+
+	// Finally also check the bzcert is valid
+	if err := b.Verify(b.config.CertConfig.OrgProvider, b.config.CertConfig.OrgIssuerId); err != nil {
+		return err
+	}
 
 	return b.HashCert()
 }

@@ -141,15 +141,11 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 	if err != nil {
 		return err
 	}
-	cert, err := bzcert.New(config)
-	if err != nil {
-		return err
-	}
 
-	// Validate the bzcert before creating the server and fail fast if the cert
-	// is no longer valid. This may result in prompting the user to login again
-	// if the cert contains expired IdP id tokens
-	err = cert.VerifyFromZliConfig()
+	// This validates the bzcert before creating the server so we can fail
+	// fast if the cert is no longer valid. This may result in prompting the
+	// user to login again if the cert contains expired IdP id tokens
+	cert, err := bzcert.New(config)
 	if err != nil {
 		exitcodes.HandleDaemonError(err, logger)
 
