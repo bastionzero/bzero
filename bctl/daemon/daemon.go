@@ -336,7 +336,7 @@ func loadEnvironment() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requriedVars := []string{"CONNECTION_ID", "CONNECTION_SERVICE_URL", "CONNECTION_SERVICE_AUTH_TOKEN", "SESSION_ID", "SESSION_TOKEN", "AUTH_HEADER", "LOG_PATH", "CONFIG_PATH", "AGENT_PUB_KEY"}
+	requriedVars := []string{"CONNECTION_ID", "CONNECTION_SERVICE_URL", "CONNECTION_SERVICE_AUTH_TOKEN", "SESSION_ID", "SESSION_TOKEN", "AUTH_HEADER", "LOG_PATH", "CONFIG_PATH", "AGENT_PUB_KEY", "REFRESH_TOKEN_COMMAND"}
 	plugin := config["PLUGIN"].Value
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Kube:
