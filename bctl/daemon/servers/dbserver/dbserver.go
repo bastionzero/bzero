@@ -167,6 +167,7 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 	go func() {
 		for {
 			select {
+			// TODO: this is redundant and/or not used -- we should take a dedicated look at daemon shutdown procedure
 			case <-d.tmb.Dying():
 				dc.Close(errors.New("db server closing"))
 				return
