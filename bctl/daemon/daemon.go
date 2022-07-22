@@ -40,10 +40,10 @@ func main() {
 		} else {
 			// Create our headers and params
 			headers := make(map[string]string)
-			headers["Authorization"] = config["AUTH_HEADER"].Value
+			headers["Authorization"] = config[AUTH_HEADER].Value
 
 			// Add our sessionId and token into the header
-			headers["Cookie"] = fmt.Sprintf("sessionId=%s; sessionToken=%s", config["SESSION_ID"].Value, config["SESSION_TOKEN"].Value)
+			headers["Cookie"] = fmt.Sprintf("sessionId=%s; sessionToken=%s", config[SESSION_ID].Value, config[SESSION_TOKEN].Value)
 
 			params := make(map[string]string)
 			params["version"] = daemonVersion
@@ -63,12 +63,12 @@ func main() {
 
 func createLogger() (*bzlogger.Logger, error) {
 	options := &bzlogger.Config{
-		FilePath: config["LOG_PATH"].Value,
+		FilePath: config[LOG_PATH].Value,
 	}
 
 	// For the shell and ssh plugins we read/write directly from Stdin/Stdout so we dont want
 	// our logs to show up there
-	plugin := config["PLUGIN"].Value
+	plugin := config[PLUGIN].Value
 	if plugin != string(bzplugin.Shell) && plugin != string(bzplugin.Ssh) {
 		options.ConsoleWriters = []io.Writer{os.Stdout}
 	}
@@ -94,21 +94,21 @@ func reportError(logger *bzlogger.Logger, errorReport error) {
 		},
 	}
 
-	errorreport.ReportError(logger, config["SERVICE_URL"].Value, errReport)
+	errorreport.ReportError(logger, config[SERVICE_URL].Value, errReport)
 }
 
 func startServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string) error {
-	connectionServiceUrl := config["CONNECTION_SERVICE_URL"].Value
-	plugin := config["PLUGIN"].Value
+	connectionServiceUrl := config[CONNECTION_SERVICE_URL].Value
+	plugin := config[PLUGIN].Value
 
 	logger.Infof("Opening websocket to the Connection Node: %s for plugin %s", connectionServiceUrl, plugin)
 
-	params["connection_id"] = config["CONNECTION_ID"].Value
+	params["connection_id"] = config[CONNECTION_ID].Value
 	params["connectionServiceUrl"] = connectionServiceUrl
-	params["connectionServiceAuthToken"] = config["CONNECTION_SERVICE_AUTH_TOKEN"].Value
+	params["connectionServiceAuthToken"] = config[CONNECTION_SERVICE_AUTH_TOKEN].Value
 
 	// create our MrZAP object
-	zliConfig, err := zliconfig.New(config["CONFIG_PATH"].Value, config["REFRESH_TOKEN_COMMAND"].Value)
+	zliConfig, err := zliconfig.New(config[CONFIG_PATH].Value, config[REFRESH_TOKEN_COMMAND].Value)
 	if err != nil {
 		return err
 	}
@@ -141,32 +141,32 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 func startSshServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("sshserver")
 
-	params["target_id"] = config["TARGET_ID"].Value
-	params["target_user"] = config["TARGET_USER"].Value
-	params["remote_host"] = config["REMOTE_HOST"].Value
-	params["remote_port"] = config["REMOTE_PORT"].Value
-	remotePort, err := strconv.Atoi(config["REMOTE_PORT"].Value)
+	params["target_id"] = config[TARGET_ID].Value
+	params["target_user"] = config[TARGET_USER].Value
+	params["remote_host"] = config[REMOTE_HOST].Value
+	params["remote_port"] = config[REMOTE_PORT].Value
+	remotePort, err := strconv.Atoi(config[REMOTE_PORT].Value)
 	if err != nil {
 		return fmt.Errorf("failed to parse remote port: %s", err)
 	}
 
 	return sshserver.StartSshServer(
 		subLogger,
-		config["TARGET_USER"].Value,
-		config["DATACHANNEL_ID"].Value,
+		config[TARGET_USER].Value,
+		config[DATACHANNEL_ID].Value,
 		cert,
-		config["SERVICE_URL"].Value,
+		config[SERVICE_URL].Value,
 		params,
 		headers,
-		config["AGENT_PUB_KEY"].Value,
+		config[AGENT_PUB_KEY].Value,
 		targetSelectHandler,
-		config["IDENTITY_FILE"].Value,
-		config["KNOWN_HOSTS_FILE"].Value,
-		strings.Split(config["HOSTNAMES"].Value, ","),
-		config["REMOTE_HOST"].Value,
+		config[IDENTITY_FILE].Value,
+		config[KNOWN_HOSTS_FILE].Value,
+		strings.Split(config[HOSTNAMES].Value, ","),
+		config[REMOTE_HOST].Value,
 		remotePort,
-		config["LOCAL_PORT"].Value,
-		config["SSH_ACTION"].Value,
+		config[LOCAL_PORT].Value,
+		config[SSH_ACTION].Value,
 	)
 }
 
@@ -175,13 +175,13 @@ func startShellServer(logger *bzlogger.Logger, headers map[string]string, params
 
 	return shellserver.StartShellServer(
 		subLogger,
-		config["TARGET_USER"].Value,
-		config["DATACHANNEL_ID"].Value,
+		config[TARGET_USER].Value,
+		config[DATACHANNEL_ID].Value,
 		cert,
-		config["SERVICE_URL"].Value,
+		config[SERVICE_URL].Value,
 		params,
 		headers,
-		config["AGENT_PUB_KEY"].Value,
+		config[AGENT_PUB_KEY].Value,
 		targetSelectHandler,
 	)
 }
@@ -189,46 +189,46 @@ func startShellServer(logger *bzlogger.Logger, headers map[string]string, params
 func startWebServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("webserver")
 
-	params["target_id"] = config["TARGET_ID"].Value
-	remotePort, err := strconv.Atoi(config["REMOTE_PORT"].Value)
+	params["target_id"] = config[TARGET_ID].Value
+	remotePort, err := strconv.Atoi(config[REMOTE_PORT].Value)
 	if err != nil {
 		return fmt.Errorf("failed to parse remote port: %s", err)
 	}
 
 	return webserver.StartWebServer(
 		subLogger,
-		config["LOCAL_PORT"].Value,
-		config["LOCAL_HOST"].Value,
+		config[LOCAL_PORT].Value,
+		config[LOCAL_HOST].Value,
 		remotePort,
-		config["REMOTE_HOST"].Value,
+		config[REMOTE_HOST].Value,
 		cert,
-		config["SERVICE_URL"].Value,
+		config[SERVICE_URL].Value,
 		params,
 		headers,
-		config["AGENT_PUB_KEY"].Value,
+		config[AGENT_PUB_KEY].Value,
 		targetSelectHandler)
 }
 
 func startDbServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("dbserver")
 
-	params["target_id"] = config["TARGET_ID"].Value
-	remotePort, err := strconv.Atoi(config["REMOTE_PORT"].Value)
+	params["target_id"] = config[TARGET_ID].Value
+	remotePort, err := strconv.Atoi(config[REMOTE_PORT].Value)
 	if err != nil {
 		return fmt.Errorf("failed to parse remote port: %s", err)
 	}
 
 	return dbserver.StartDbServer(
 		subLogger,
-		config["LOCAL_PORT"].Value,
-		config["LOCAL_HOST"].Value,
+		config[LOCAL_PORT].Value,
+		config[LOCAL_HOST].Value,
 		remotePort,
-		config["REMOTE_HOST"].Value,
+		config[REMOTE_HOST].Value,
 		cert,
-		config["SERVICE_URL"].Value,
+		config[SERVICE_URL].Value,
 		params,
 		headers,
-		config["AGENT_PUB_KEY"].Value,
+		config[AGENT_PUB_KEY].Value,
 		targetSelectHandler)
 }
 
@@ -236,29 +236,29 @@ func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params 
 	subLogger := logger.GetComponentLogger("kubeserver")
 
 	// Set our param value for target_user and target_group
-	params["target_id"] = config["TARGET_ID"].Value
-	params["target_user"] = config["TARGET_USER"].Value
-	params["target_groups"] = config["TARGET_GROUPS"].Value
+	params["target_id"] = config[TARGET_ID].Value
+	params["target_user"] = config[TARGET_USER].Value
+	params["target_groups"] = config[TARGET_GROUPS].Value
 
 	targetGroups := []string{}
-	if config["TARGET_GROUPS"].Value != "" {
-		targetGroups = strings.Split(config["TARGET_GROUPS"].Value, ",")
+	if config[TARGET_GROUPS].Value != "" {
+		targetGroups = strings.Split(config[TARGET_GROUPS].Value, ",")
 	}
 
 	return kubeserver.StartKubeServer(
 		subLogger,
-		config["LOCAL_PORT"].Value,
-		config["LOCAL_HOST"].Value,
-		config["CERT_PATH"].Value,
-		config["KEY_PATH"].Value,
+		config[LOCAL_PORT].Value,
+		config[LOCAL_HOST].Value,
+		config[CERT_PATH].Value,
+		config[KEY_PATH].Value,
 		cert,
-		config["TARGET_USER"].Value,
+		config[TARGET_USER].Value,
 		targetGroups,
-		config["LOCALHOST_TOKEN"].Value,
-		config["SERVICE_URL"].Value,
+		config[LOCALHOST_TOKEN].Value,
+		config[SERVICE_URL].Value,
 		params,
 		headers,
-		config["AGENT_PUB_KEY"].Value,
+		config[AGENT_PUB_KEY].Value,
 		targetSelectHandler)
 }
 
@@ -289,12 +289,12 @@ func loadEnvironment() error {
 
 	// Check we have all required flags
 	// Depending on the plugin ensure we have the correct required flag values
-	requriedVars := []string{"CONNECTION_ID", "CONNECTION_SERVICE_URL", "CONNECTION_SERVICE_AUTH_TOKEN", "SESSION_ID", "SESSION_TOKEN", "AUTH_HEADER", "LOG_PATH", "CONFIG_PATH", "AGENT_PUB_KEY", "REFRESH_TOKEN_COMMAND"}
-	plugin := config["PLUGIN"].Value
+	var requriedVars []string
+	plugin := config[PLUGIN].Value
 	if pluginVars, ok := requriedPluginVars[bzplugin.PluginName(plugin)]; !ok {
 		return fmt.Errorf("unhandled plugin passed: %s", plugin)
 	} else {
-		requriedVars = append(requriedVars, pluginVars...)
+		requriedVars = append(requriedGlobalVars, pluginVars...)
 	}
 
 	// Check against required dict to find the missing ones
@@ -313,14 +313,14 @@ func loadEnvironment() error {
 }
 
 func formatServiceUrl() error {
-	serviceUrlEntry := config["SERVICE_URL"]
+	serviceUrlEntry := config[SERVICE_URL]
 	serviceUrl := serviceUrlEntry.Value
 	if !strings.HasPrefix(serviceUrl, "http") {
 		if url, err := bzhttp.BuildEndpoint("https://", serviceUrl); err != nil {
 			return fmt.Errorf("error adding scheme to serviceUrl %s: %s", serviceUrl, err)
 		} else {
 			serviceUrlEntry.Value = url
-			config["SERVICE_URL"] = serviceUrlEntry
+			config[SERVICE_URL] = serviceUrlEntry
 		}
 	}
 	return nil

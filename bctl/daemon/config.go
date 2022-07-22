@@ -45,13 +45,17 @@ const (
 	HOSTNAMES        = "HOSTNAMES"        // Comma-separated list of hostNames to use for this target
 )
 
-var requriedPluginVars = map[bzplugin.PluginName][]string{
-	bzplugin.Kube:  {"LOCAL_PORT", "TARGET_USER", "TARGET_ID", "LOCALHOST_TOKEN", "CERT_PATH", "KEY_PATH"},
-	bzplugin.Db:    {"LOCAL_PORT", "REMOTE_HOST", "REMOTE_PORT"},
-	bzplugin.Web:   {"LOCAL_PORT", "REMOTE_HOST", "REMOTE_PORT"},
-	bzplugin.Shell: {"TARGET_USER", "CONNECTION_ID"},
-	bzplugin.Ssh:   {"TARGET_USER", "TARGET_ID", "REMOTE_HOST", "REMOTE_PORT", "IDENTITY_FILE", "KNOWN_HOSTS_FILE", "HOSTNAMES", "SSH_ACTION"},
-}
+var (
+	requriedGlobalVars = []string{CONNECTION_ID, CONNECTION_SERVICE_URL, CONNECTION_SERVICE_AUTH_TOKEN, SESSION_ID, SESSION_TOKEN, AUTH_HEADER, LOG_PATH, CONFIG_PATH, AGENT_PUB_KEY, REFRESH_TOKEN_COMMAND}
+
+	requriedPluginVars = map[bzplugin.PluginName][]string{
+		bzplugin.Kube:  {LOCAL_PORT, TARGET_USER, TARGET_ID, LOCALHOST_TOKEN, CERT_PATH, KEY_PATH},
+		bzplugin.Db:    {LOCAL_PORT, REMOTE_HOST, REMOTE_PORT},
+		bzplugin.Web:   {LOCAL_PORT, REMOTE_HOST, REMOTE_PORT},
+		bzplugin.Shell: {TARGET_USER, CONNECTION_ID},
+		bzplugin.Ssh:   {TARGET_USER, TARGET_ID, REMOTE_HOST, REMOTE_PORT, IDENTITY_FILE, KNOWN_HOSTS_FILE, HOSTNAMES, SSH_ACTION},
+	}
+)
 
 type EnvVar struct {
 	Value string
