@@ -10,7 +10,6 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
-	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
@@ -206,10 +205,6 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 					MessageType: string(am.CloseDataChannel),
 				}
 				w.websocket.Send(cdMessage)
-
-				if err := dcTmb.Err(); err != nil {
-					exitcodes.HandleDaemonError(err, w.logger)
-				}
 
 				return
 			}
