@@ -11,6 +11,7 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/connections/broadcast"
 	"bastionzero.com/bctl/v1/bzerolib/connections/httpclient"
+	"bastionzero.com/bctl/v1/bzerolib/connections/signalr/invocation"
 	"bastionzero.com/bctl/v1/bzerolib/connections/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"github.com/cenkalti/backoff"
@@ -25,29 +26,21 @@ type SignalR struct {
 	logger   logger.Logger
 	doneChan chan struct{}
 
-	client *websocket.Websocket
-
-	// Used for broadcasting the same recieved agent message to any number of
-	// listeners
-	broadcaster broadcast.Broadcaster
-
+	client   *websocket.Websocket
 	outbound chan *am.AgentMessage
 
 	endpoint string
 	params   map[string][]string
 
-	// LUCIE: invocation stuff needs to be threadsafe
-
-	// Map of sent messages for which we're awaiting CompletionMessages
-	// keyed by InvocationId
-	messagesWaitingResponse map[string]am.AgentMessage
-
-	// Counter for generating invocationIds which are sequential
-	// LUCIE: it's int64 in websocket.go but it doesn't look like it needs to be
-	invocationIdCounter int
-
 	// Function for choosing target method
 	targetSelector func(am.AgentMessage) (string, error)
+
+	// Used for broadcasting the same recieved agent message to any number of
+	// listeners
+	broadcaster *broadcast.Broadcast
+
+	// Thread-safe implementation for tracking invocation messages
+	invocator *invocation.Invocation
 }
 
 func New(
@@ -63,11 +56,12 @@ func New(
 	return &SignalR{
 		logger:         logger,
 		doneChan:       make(chan struct{}),
-		broadcaster:    broadcast.New(),
 		outbound:       make(chan *am.AgentMessage, 200),
 		endpoint:       endpoint,
 		params:         params,
 		targetSelector: targetSelector,
+		broadcaster:    broadcast.New(),
+		invocator:      invocation.New(),
 	}
 }
 
@@ -261,7 +255,7 @@ func (s *SignalR) processCompletionMessage(msg []byte) error {
 	}
 
 	invocationId := *completionMessage.InvocationId
-	message, ok := s.messagesWaitingResponse[invocationId]
+	message, ok := s.invocator.Match(invocationId)
 	if !ok {
 		return fmt.Errorf("received completion message for a message we did not send")
 	}
@@ -274,13 +268,10 @@ func (s *SignalR) processCompletionMessage(msg []byte) error {
 		return fmt.Errorf("server error on message type %s: %s", message.MessageType, *completionMessage.Result.ErrorMessage)
 	}
 
-	delete(s.messagesWaitingResponse, invocationId)
 	return nil
 }
 
 func (s *SignalR) wrap(message am.AgentMessage) error {
-	invocationId := fmt.Sprint(s.invocationIdCounter)
-
 	// Select SignalR Endpoint
 	target, err := s.targetSelector(message)
 	if err != nil {
@@ -292,6 +283,8 @@ func (s *SignalR) wrap(message am.AgentMessage) error {
 		return fmt.Errorf("Failed to marshal agent message: %w", err)
 	}
 
+	invocationId := s.invocator.GetInvocationId()
+
 	wrappedMessage := SignalRMessage{
 		Target:       target,
 		Type:         int(Invocation),
@@ -299,14 +292,20 @@ func (s *SignalR) wrap(message am.AgentMessage) error {
 		InvocationId: &invocationId,
 	}
 
-	msgBytes, err := json.Marshal(wrappedMessage)
+	msgBytes, _ := json.Marshal(wrappedMessage)
 	if err != nil {
 		return fmt.Errorf("error marshalling outgoing SignalR Message: %+v", wrappedMessage)
 	}
 
 	// Write our message to our connection
-	s.client.Send(msgBytes)
+	err = s.client.Send(msgBytes)
 
-	s.invocationIdCounter += 1
-	return nil
+	// Only track the message once we're absolutely sure it's been sent off
+	// this protects our invocator from tracking multiple messages with the
+	// same invocator ID
+	if err != nil {
+		s.invocator.Track(message)
+	}
+
+	return err
 }

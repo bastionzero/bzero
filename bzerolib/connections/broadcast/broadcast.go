@@ -43,7 +43,7 @@ func (b *Broadcast) Unsubscribe(id string) {
 }
 
 // Allows for broadcasting to any number of IChannels, should we be blocking
-// until someone's listening
+// until someone's listening?
 func (b *Broadcast) Broadcast(message am.AgentMessage) {
 	b.lock.Lock()
 	defer b.lock.Unlock()

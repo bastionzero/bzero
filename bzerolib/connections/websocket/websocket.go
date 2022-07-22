@@ -10,24 +10,23 @@ import (
 )
 
 type IWebsocket interface {
-	Close()
-	Dial()
-	Reconnect()
-	Inbox()
-	Send()
+	Done() <-chan struct{}
+	Inbound() <-chan *[]byte
+	Dial(endpoint string, params map[string][]string) error
+	Send(message []byte) error
 }
 
 type Websocket struct {
 	tmb      tomb.Tomb
 	doneChan chan struct{}
 
+	client *gorilla.Conn
+
 	// Received messages
 	inbound chan *[]byte
 
 	// Messages to be sent
 	outbound chan *[]byte
-
-	client *gorilla.Conn
 }
 
 func New() *Websocket {
@@ -53,6 +52,11 @@ func (w *Websocket) Inbound() <-chan *[]byte {
 }
 
 func (w *Websocket) Dial(endpoint string, params map[string][]string) error {
+	// Reinitialize our variables every time in case this is post death
+	// LUCIE: race condition between done() and dial reconnecting after death?
+	w.doneChan = make(chan struct{})
+	w.tmb = tomb.Tomb{}
+
 	// Build websocket URL
 	websocketUrl, err := url.Parse(endpoint)
 	if err != nil {
