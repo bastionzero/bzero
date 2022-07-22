@@ -9,17 +9,15 @@ import (
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
-	"bastionzero.com/bctl/v1/bzerolib/channels/httpclient"
-	"bastionzero.com/bctl/v1/bzerolib/channels/newwebsocket"
+	"bastionzero.com/bctl/v1/bzerolib/connections/broadcast"
+	"bastionzero.com/bctl/v1/bzerolib/connections/httpclient"
+	"bastionzero.com/bctl/v1/bzerolib/connections/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"github.com/cenkalti/backoff"
 	"gopkg.in/tomb.v2"
 )
 
 type ISignalR interface {
-	Connect()
-	Inbox() <-chan struct{}
-	Send()
 }
 
 type SignalR struct {
@@ -27,13 +25,18 @@ type SignalR struct {
 	logger   logger.Logger
 	doneChan chan struct{}
 
-	client *newwebsocket.Websocket
+	client *websocket.Websocket
 
-	inbound  chan *am.AgentMessage
+	// Used for broadcasting the same recieved agent message to any number of
+	// listeners
+	broadcaster broadcast.Broadcaster
+
 	outbound chan *am.AgentMessage
 
 	endpoint string
 	params   map[string][]string
+
+	// LUCIE: invocation stuff needs to be threadsafe
 
 	// Map of sent messages for which we're awaiting CompletionMessages
 	// keyed by InvocationId
@@ -60,7 +63,7 @@ func New(
 	return &SignalR{
 		logger:         logger,
 		doneChan:       make(chan struct{}),
-		inbound:        make(chan *am.AgentMessage, 200),
+		broadcaster:    broadcast.New(),
 		outbound:       make(chan *am.AgentMessage, 200),
 		endpoint:       endpoint,
 		params:         params,
@@ -69,9 +72,9 @@ func New(
 }
 
 func (s *SignalR) Close() {
-	s.client.Close()
-
 	if s.tmb.Alive() {
+		s.client.Close()
+
 		s.tmb.Kill(nil)
 		s.tmb.Wait()
 	}
@@ -81,8 +84,12 @@ func (s *SignalR) Done() <-chan struct{} {
 	return s.doneChan
 }
 
-func (s *SignalR) Inbound() <-chan *am.AgentMessage {
-	return s.inbound
+func (s *SignalR) Subscribe(id string, channel broadcast.IChannel) {
+	s.broadcaster.Subscribe(id, channel)
+}
+
+func (s *SignalR) Unsubscribe(id string) {
+	s.broadcaster.Unsubscribe(id)
 }
 
 func (s *SignalR) Send(msg *am.AgentMessage) {
@@ -146,7 +153,7 @@ func (s *SignalR) Connect() error {
 		}
 	})
 
-	// return nil
+	return nil
 }
 
 func (s *SignalR) handshake() error {
@@ -232,7 +239,7 @@ func (s *SignalR) unwrap(raw []byte) error {
 			}
 
 			// Push message to whoever's listening
-			s.inbound <- &agentMessage
+			s.broadcaster.Broadcast(agentMessage)
 
 		default:
 			s.logger.Infof("Ignoring SignalR message with type %v", SignalRMessageType(signalRMessageType.Type))

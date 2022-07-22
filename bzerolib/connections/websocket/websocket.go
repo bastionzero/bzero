@@ -1,4 +1,4 @@
-package newwebsocket
+package websocket
 
 import (
 	"fmt"
