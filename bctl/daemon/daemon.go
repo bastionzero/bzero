@@ -38,17 +38,16 @@ type EnvVar struct {
 var (
 	config = map[string]EnvVar{
 		// general-purpose configuration
-		"SESSION_ID":                    {},                               // Session id from Zli
-		"SESSION_TOKEN":                 {},                               // Session token from Zli
-		"AUTH_HEADER":                   {},                               // Auth header from Zli
-		"LOG_LEVEL":                     {Value: bzlogger.Debug.String()}, // The log level to use
-		"CONNECTION_ID":                 {},                               // The bzero connection id for the shell connection
-		"CONNECTION_SERVICE_URL":        {},                               // URL of connection service
-		"CONNECTION_SERVICE_AUTH_TOKEN": {},                               // The auth token returned from the universal connection service
-		"SERVICE_URL":                   {Value: prodServiceUrl},          // URL of bastion
-		"TARGET_ID":                     {},                               // Id of the target to connect to
-		"PLUGIN":                        {},                               // Plugin to activate
-		"AGENT_PUB_KEY":                 {},                               // Base64 encoded string of agent's public key
+		"SESSION_ID":                    {},                      // Session id from Zli
+		"SESSION_TOKEN":                 {},                      // Session token from Zli
+		"AUTH_HEADER":                   {},                      // Auth header from Zli
+		"CONNECTION_ID":                 {},                      // The bzero connection id for the shell connection
+		"CONNECTION_SERVICE_URL":        {},                      // URL of connection service
+		"CONNECTION_SERVICE_AUTH_TOKEN": {},                      // The auth token returned from the universal connection service
+		"SERVICE_URL":                   {Value: prodServiceUrl}, // URL of bastion
+		"TARGET_ID":                     {},                      // Id of the target to connect to
+		"PLUGIN":                        {},                      // Plugin to activate
+		"AGENT_PUB_KEY":                 {},                      // Base64 encoded string of agent's public key
 
 		// for interacting with the user and the ZLI
 		"LOCAL_PORT":            {}, // Daemon port To Use
