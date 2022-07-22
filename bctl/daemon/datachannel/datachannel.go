@@ -233,6 +233,8 @@ func (d *DataChannel) openDataChannel(action string, synPayload interface{}) err
 		return fmt.Errorf("error building syn: %s", err)
 	}
 
+	d.logger.Errorf("%+v", synPayload)
+
 	// Marshal the syn
 	synBytes, err := json.Marshal(synMessage)
 	if err != nil {

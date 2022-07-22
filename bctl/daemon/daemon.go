@@ -292,6 +292,11 @@ func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params 
 	params["target_user"] = config["TARGET_USER"].Value
 	params["target_groups"] = config["TARGET_GROUPS"].Value
 
+	var targetGroups []string
+	if config["TARGET_GROUPS"].Value != "" {
+		targetGroups = strings.Split(config["TARGET_GROUPS"].Value, ",")
+	}
+
 	return kubeserver.StartKubeServer(
 		subLogger,
 		config["LOCAL_PORT"].Value,
@@ -300,7 +305,7 @@ func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params 
 		config["KEY_PATH"].Value,
 		cert,
 		config["TARGET_USER"].Value,
-		strings.Split(config["TARGET_GROUPS"].Value, ","),
+		targetGroups,
 		config["LOCALHOST_TOKEN"].Value,
 		config["SERVICE_URL"].Value,
 		params,
