@@ -292,7 +292,7 @@ func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params 
 	params["target_user"] = config["TARGET_USER"].Value
 	params["target_groups"] = config["TARGET_GROUPS"].Value
 
-	var targetGroups []string
+	targetGroups := []string{}
 	if config["TARGET_GROUPS"].Value != "" {
 		targetGroups = strings.Split(config["TARGET_GROUPS"].Value, ",")
 	}
