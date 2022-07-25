@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"path"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
@@ -23,14 +25,12 @@ type ISignalR interface {
 
 type SignalR struct {
 	tmb      tomb.Tomb
-	logger   logger.Logger
+	logger   *logger.Logger
 	doneChan chan struct{}
 
-	client   *websocket.Websocket
-	outbound chan *am.AgentMessage
-
-	endpoint string
-	params   map[string][]string
+	connectionUrl *url.URL
+	client        *websocket.Websocket
+	outbound      chan *am.AgentMessage
 
 	// Function for choosing target method
 	targetSelector func(am.AgentMessage) (string, error)
@@ -39,37 +39,46 @@ type SignalR struct {
 	// listeners
 	broadcaster *broadcast.Broadcast
 
-	// Thread-safe implementation for tracking invocation messages
+	// Thread-safe implementation for tracking whether SignalR messages
+	// are received/processed successfully or not
 	invocator *invocation.Invocation
 }
 
 func New(
-	logger logger.Logger,
+	logger *logger.Logger,
+	client *websocket.Websocket,
+	serviceUrl string,
 	endpoint string,
 	params map[string][]string,
-	targetSelector func(am.AgentMessage) (string, error),
-) *SignalR {
+) (*SignalR, error) {
 	// Add the client protocol for SignalR
 	// LUCIE: figure out if I actually need this header; took it from bzhttp
 	params["clientProtocol"] = []string{"1.5"}
 
-	return &SignalR{
-		logger:         logger,
-		doneChan:       make(chan struct{}),
-		outbound:       make(chan *am.AgentMessage, 200),
-		endpoint:       endpoint,
-		params:         params,
-		targetSelector: targetSelector,
-		broadcaster:    broadcast.New(),
-		invocator:      invocation.New(),
+	// build our URL object
+	connectionUrl, err := buildUrl(serviceUrl, endpoint, params)
+	if err != nil {
+		return nil, err
 	}
+
+	sr := &SignalR{
+		logger:        logger,
+		doneChan:      make(chan struct{}),
+		outbound:      make(chan *am.AgentMessage, 200),
+		connectionUrl: connectionUrl,
+		broadcaster:   broadcast.New(),
+		invocator:     invocation.New(),
+	}
+
+	err = sr.connect()
+	return sr, err
 }
 
-func (s *SignalR) Close() {
+func (s *SignalR) Close(reason error) {
 	if s.tmb.Alive() {
 		s.client.Close()
 
-		s.tmb.Kill(nil)
+		s.tmb.Kill(reason)
 		s.tmb.Wait()
 	}
 }
@@ -86,11 +95,11 @@ func (s *SignalR) Unsubscribe(id string) {
 	s.broadcaster.Unsubscribe(id)
 }
 
-func (s *SignalR) Send(msg *am.AgentMessage) {
-	s.outbound <- msg
+func (s *SignalR) Receive(msg am.AgentMessage) {
+	s.outbound <- &msg
 }
 
-func (s *SignalR) Connect() error {
+func (s *SignalR) connect() error {
 	backoffParams := backoff.NewExponentialBackOff()
 
 	// Configure our exponential backoff
@@ -108,7 +117,7 @@ func (s *SignalR) Connect() error {
 			if err := s.handshake(); err != nil {
 				s.logger.Errorf("retrying in %d because of error on connect: %w", backoffParams.NextBackOff().Round(time.Second), err)
 			} else {
-				s.logger.Infof("Connection successful to %s", s.endpoint)
+				s.logger.Infof("Connection successful to %s", s.connectionUrl.String())
 				return nil
 			}
 		}
@@ -157,8 +166,8 @@ func (s *SignalR) handshake() error {
 	}
 
 	// Connect to our endpoint
-	if err := s.client.Dial(s.endpoint, s.params); err != nil {
-		return fmt.Errorf("failed to connect to endpoint %s: %w", s.endpoint, err)
+	if err := s.client.Dial(s.connectionUrl); err != nil {
+		return fmt.Errorf("failed to connect to endpoint %s: %w", s.connectionUrl.String(), err)
 	}
 
 	// Negotiate our SignalR version
@@ -172,16 +181,28 @@ func (s *SignalR) handshake() error {
 }
 
 func (s *SignalR) negotiate() error {
-	negotiateEndpoint, err := bzhttp.BuildEndpoint(s.endpoint, "negotiate")
+	negotiateEndpoint, err := bzhttp.BuildEndpoint(s.connectionUrl.String(), "negotiate")
 	if err != nil {
 		return err
 	}
 
-	client := httpclient.New(s.logger, negotiateEndpoint, []byte{}, make(map[string][]string), s.params)
+	// LUCIE: what do we need params to be here? WHO USES THE PARAMS?!
+	client := httpclient.New(s.logger, negotiateEndpoint, []byte{}, make(map[string][]string), make(map[string][]string))
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel the context if we're dying but don't keep this go routine around forever
+	go func() {
+		select {
+		case <-s.tmb.Dying():
+			cancel()
+		case <-time.After(httpclient.HTTPTimeout):
+			return
+		}
+	}()
 
 	// Make negotiate call
-	// LUCIE: make it a real context
-	_, err = client.Post(context.TODO())
+	_, err = client.Post(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to make negotiate POST: %w", err)
 	}
@@ -301,11 +322,26 @@ func (s *SignalR) wrap(message am.AgentMessage) error {
 	err = s.client.Send(msgBytes)
 
 	// Only track the message once we're absolutely sure it's been sent off
-	// this protects our invocator from tracking multiple messages with the
-	// same invocator ID
+	// this protects our invocator from tracking messages it will never receive
+	// a response for
 	if err != nil {
-		s.invocator.Track(message)
+		s.invocator.Track(invocationId, message)
 	}
 
 	return err
+}
+
+func buildUrl(serviceUrl string, endpoint string, params map[string][]string) (*url.URL, error) {
+	// Build our websocket url object
+	websocketUrl, err := url.Parse(serviceUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse connection node service url %s: %w", serviceUrl, err)
+	}
+	websocketUrl.Path = path.Join(websocketUrl.Path, endpoint)
+
+	// Set our params as encoded args
+	urlParams := url.Values(params)
+	websocketUrl.RawQuery = urlParams.Encode()
+
+	return websocketUrl, nil
 }

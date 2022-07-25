@@ -8,6 +8,7 @@ replace bastionzero.com/bctl/v1/bzerolib => ./
 
 require (
 	bastionzero.com/bctl/v1/bctl v0.0.0-00010101000000-000000000000
+	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.1.1
 	github.com/coreos/go-oidc/v3 v3.0.0
 	github.com/gofrs/flock v0.8.1

@@ -1,6 +1,7 @@
 package broadcast
 
 import (
+	"fmt"
 	"sync"
 
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
@@ -15,6 +16,7 @@ type Broadcaster interface {
 	Subscribe(id string, subscriber IChannel)
 	Unsubscribe(id string)
 	Broadcast(message am.AgentMessage)
+	Narrowcast(id string, message am.AgentMessage) error
 }
 
 type Broadcast struct {
@@ -54,5 +56,17 @@ func (b *Broadcast) Broadcast(message am.AgentMessage) {
 		}
 
 		channel.Receive(message)
+	}
+}
+
+func (b *Broadcast) Narrowcast(id string, message am.AgentMessage) error {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	if channel, ok := b.subscribers[id]; ok {
+		channel.Receive(message)
+		return nil
+	} else {
+		return fmt.Errorf("no subscriber with id: %s", id)
 	}
 }

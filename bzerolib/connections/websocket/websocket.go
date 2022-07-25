@@ -51,20 +51,21 @@ func (w *Websocket) Inbound() <-chan *[]byte {
 	return w.inbound
 }
 
-func (w *Websocket) Dial(endpoint string, params map[string][]string) error {
+func (w *Websocket) Send(message []byte) error {
+	if err := w.client.WriteMessage(gorilla.TextMessage, message); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *Websocket) Dial(websocketUrl *url.URL) (err error) {
 	// Reinitialize our variables every time in case this is post death
 	// LUCIE: race condition between done() and dial reconnecting after death?
 	w.doneChan = make(chan struct{})
 	w.tmb = tomb.Tomb{}
 
-	// Build websocket URL
-	websocketUrl, err := url.Parse(endpoint)
-	if err != nil {
-		return fmt.Errorf("error parsing url %s: %w", endpoint, err)
-	}
+	// Make sure url scheme is correct
 	websocketUrl.Scheme = "wss"
-	query := url.Values(params)
-	websocketUrl.RawQuery = query.Encode()
 
 	// Try to connect websocket once
 	if w.client, _, err = gorilla.DefaultDialer.Dial(websocketUrl.String(), http.Header{}); err != nil {
@@ -112,11 +113,4 @@ func (w *Websocket) receive() error {
 			w.inbound <- &rawMessage
 		}
 	}
-}
-
-func (w *Websocket) Send(message []byte) error {
-	if err := w.client.WriteMessage(gorilla.TextMessage, message); err != nil {
-		return err
-	}
-	return nil
 }

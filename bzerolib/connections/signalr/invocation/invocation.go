@@ -42,17 +42,17 @@ func (i *Invocation) Match(id string) (am.AgentMessage, bool) {
 }
 
 func (i *Invocation) GetInvocationId() string {
-	return fmt.Sprint(i.counter)
+	invocationId := fmt.Sprint(i.counter)
+	i.counter++
+
+	return invocationId
 }
 
-// The only reason this works is because SignalR processes in series, if we
-// ever wanted SignalR to process in parallel, we would need a much safer
-// mechanism to ensure we were giving unique invocationIds
-func (i *Invocation) Track(message am.AgentMessage) {
+// Invocation does not promise strictly increasing Invocation IDs
+// becuase messages can fail between getting the ID and Tracking
+func (i *Invocation) Track(id string, message am.AgentMessage) {
 	i.trackedMessagesLock.Lock()
 	defer i.trackedMessagesLock.Unlock()
 
-	i.trackedMessages[fmt.Sprint(i.counter)] = message
-
-	i.counter += 1
+	i.trackedMessages[id] = message
 }

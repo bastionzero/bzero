@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	httpTimeout = time.Second * 30
+	HTTPTimeout = time.Second * 30
 )
 
 type RequestMethod string
@@ -26,7 +26,7 @@ const (
 )
 
 type HttpClient struct {
-	logger logger.Logger
+	logger *logger.Logger
 
 	backoffParams *backoff.ExponentialBackOff
 
@@ -37,7 +37,7 @@ type HttpClient struct {
 }
 
 func New(
-	logger logger.Logger,
+	logger *logger.Logger,
 	endpoint string,
 	body []byte,
 	headers map[string][]string,
@@ -53,7 +53,7 @@ func New(
 }
 
 func NewWithBackoff(
-	logger logger.Logger,
+	logger *logger.Logger,
 	endpoint string,
 	body []byte,
 	headers map[string][]string,
@@ -123,7 +123,7 @@ func (h *HttpClient) request(method RequestMethod, ctx context.Context) (*http.R
 func (h *HttpClient) makeRequestOnce(method RequestMethod, ctx context.Context) (*http.Response, error) {
 	// Make our Client
 	client := http.Client{
-		Timeout: httpTimeout,
+		Timeout: HTTPTimeout,
 	}
 
 	// Build our Request

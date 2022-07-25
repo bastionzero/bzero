@@ -11,13 +11,13 @@ import (
 	"github.com/Masterminds/semver"
 	"gopkg.in/tomb.v2"
 
+	"bastionzero.com/bctl/v1/bctl/agent/datachannel/connectionhub"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/db"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/kube"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/shell"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/ssh"
 	"bastionzero.com/bctl/v1/bctl/agent/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
-	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	bzerror "bastionzero.com/bctl/v1/bzerolib/error"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -42,9 +42,9 @@ type DataChannel struct {
 
 	id string
 
-	websocket    websocket.IWebsocket
-	keysplitting IKeysplitting
-	plugin       IPlugin
+	connectionHub *connectionhub.ConnectionHub
+	keysplitting  IKeysplitting
+	plugin        IPlugin
 
 	// incoming and outgoing message channels
 	inputChan  chan am.AgentMessage
@@ -55,25 +55,21 @@ type DataChannel struct {
 }
 
 func New(
-	parentTmb *tomb.Tomb,
 	logger *logger.Logger,
-	websocket websocket.IWebsocket,
+	hub *connectionhub.ConnectionHub,
 	keysplitter IKeysplitting,
 	id string,
 	syn []byte,
 ) (*DataChannel, error) {
 
 	datachannel := &DataChannel{
-		logger:       logger,
-		id:           id,
-		websocket:    websocket,
-		keysplitting: keysplitter,
-		inputChan:    make(chan am.AgentMessage, 50),
-		outputChan:   make(chan am.AgentMessage, 10),
+		logger:        logger,
+		id:            id,
+		connectionHub: hub,
+		keysplitting:  keysplitter,
+		inputChan:     make(chan am.AgentMessage, 50),
+		outputChan:    make(chan am.AgentMessage, 10),
 	}
-
-	// register with websocket so datachannel can send a receive messages
-	websocket.Subscribe(id, datachannel)
 
 	// validate the Syn message
 	var synPayload ksmsg.KeysplittingMessage
@@ -93,7 +89,6 @@ func New(
 	// listener for incoming messages
 	datachannel.tmb.Go(func() error {
 		defer logger.Infof("Datachannel is dead")
-		defer websocket.Unsubscribe(id) // causes decoupling from websocket
 
 		datachannel.tmb.Go(func() error {
 			for {
@@ -108,9 +103,9 @@ func New(
 
 		for {
 			select {
-			case <-parentTmb.Dying(): // control channel is dying
+			case <-datachannel.connectionHub.Done():
 				datachannel.plugin.Kill()
-				return errors.New("agent was orphaned too young and can't be batman :'(")
+				return errors.New("connection is dead, no point in continuing on")
 			case <-datachannel.tmb.Dying():
 				logger.Infof("datachannel is dying...killing plugin")
 				datachannel.plugin.Kill()
@@ -121,7 +116,7 @@ func New(
 				return nil
 			case agentMessage := <-datachannel.outputChan:
 				// Push message to websocket channel output
-				datachannel.websocket.Send(agentMessage)
+				datachannel.connectionHub.Send(agentMessage)
 			}
 		}
 	})
@@ -134,7 +129,7 @@ func (d *DataChannel) flushAllOutputChannelMessages() {
 		select {
 		case agentMessage := <-d.outputChan:
 			// Push message to websocket channel output
-			d.websocket.Send(agentMessage)
+			d.connectionHub.Send(agentMessage)
 		case <-time.After(1 * time.Second):
 			return
 		}
