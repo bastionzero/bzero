@@ -9,8 +9,8 @@ import (
 	"github.com/Masterminds/semver"
 	orderedmap "github.com/wk8/go-ordered-map"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
-	bzcrt "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -26,7 +26,7 @@ const maxPipelineLimit = 8
 type Keysplitting struct {
 	logger *logger.Logger
 
-	bzcert bzcrt.IBZCert
+	bzcert bzcert.IDaemonBZCert
 
 	agentPubKey  string
 	ackPublicKey string
@@ -65,7 +65,7 @@ type Keysplitting struct {
 func New(
 	logger *logger.Logger,
 	agentPubKey string,
-	bzcert bzcrt.IBZCert,
+	bzcert bzcert.IDaemonBZCert,
 ) (*Keysplitting, error) {
 
 	keysplitter := &Keysplitting{
@@ -131,6 +131,12 @@ func (k *Keysplitting) Recover(errMessage rrr.ErrorMessage) error {
 	} else {
 		k.errorRecoveryAttempt++
 		k.logger.Infof("Attempt #%d to recover from error: %s", k.errorRecoveryAttempt, errMessage.Message)
+	}
+
+	// Refresh our BZCert before rebuilding the syn in case the cert expired.
+	// This may still fail if the initialId Token is no longer valid
+	if err := k.bzcert.Refresh(); err != nil {
+		return fmt.Errorf("failed to refresh BastionZero certificate: %w", err)
 	}
 
 	k.recovering = true
@@ -358,11 +364,6 @@ func (k *Keysplitting) buildSyn(action string, payload interface{}, send bool) (
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal action params")
-	}
-
-	// Refresh our BZCert
-	if err := k.bzcert.Refresh(); err != nil {
-		return nil, fmt.Errorf("failed to build new BastionZero certificate: %w", err)
 	}
 
 	// Build the keysplitting message

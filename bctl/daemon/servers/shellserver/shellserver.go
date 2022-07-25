@@ -10,11 +10,12 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzshell "bastionzero.com/bctl/v1/bzerolib/plugin/shell"
@@ -45,14 +46,14 @@ type ShellServer struct {
 	refreshTokenCommand string
 	configPath          string
 	agentPubKey         string
-	cert                *bzcert.BZCert
+	cert                *bzcert.DaemonBZCert
 }
 
 func StartShellServer(
 	logger *logger.Logger,
 	targetUser string,
 	dataChannelId string,
-	cert *bzcert.BZCert,
+	cert *bzcert.DaemonBZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
@@ -80,6 +81,7 @@ func StartShellServer(
 	// create our new datachannel
 	if err := server.newDataChannel(string(bzshell.DefaultShell), server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	return nil
@@ -130,7 +132,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	}
 
 	action = "shell/" + action
-	dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, synPayload, attach, false)
 	if err != nil {
 		return err
 	}
@@ -144,14 +146,20 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 				return
 			case <-dcTmb.Dead():
 				// bubble up our error to the user
-				if dcTmb.Err() != nil {
+				if err := dcTmb.Err(); err != nil {
+
+					// Handle custom daemon exit codes which will be reported by zli
+					exitcodes.HandleDaemonError(err, ss.logger)
+
+					// otherwise bubble up the error to stdout
 					// let's just take our innermost error to give the user
-					errs := strings.Split(dcTmb.Err().Error(), ": ")
+					errs := strings.Split(err.Error(), ": ")
 					errorString := fmt.Sprintf("error: %s", errs[len(errs)-1])
 					os.Stdout.Write([]byte(errorString))
+					os.Exit(exitcodes.UNSPECIFIED_ERROR)
+				} else {
+					os.Exit(exitcodes.SUCCESS)
 				}
-				errorCode := 1
-				os.Exit(errorCode)
 			}
 		}
 	}()

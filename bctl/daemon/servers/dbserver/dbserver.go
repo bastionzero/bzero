@@ -9,11 +9,12 @@ import (
 	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzdb "bastionzero.com/bctl/v1/bzerolib/plugin/db"
@@ -44,7 +45,7 @@ type DbServer struct {
 	headers     map[string]string
 	serviceUrl  string
 	agentPubKey string
-	cert        *bzcert.BZCert
+	cert        *bzcert.DaemonBZCert
 }
 
 func StartDbServer(logger *logger.Logger,
@@ -52,7 +53,7 @@ func StartDbServer(logger *logger.Logger,
 	localHost string,
 	remotePort int,
 	remoteHost string,
-	cert *bzcert.BZCert,
+	cert *bzcert.DaemonBZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
@@ -84,14 +85,14 @@ func StartDbServer(logger *logger.Logger,
 	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
 	if err != nil {
 		logger.Errorf("Failed to resolve TCP address %s", err)
-		os.Exit(1)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	logger.Infof("Setting up TCP listener")
 	localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
 	if err != nil {
 		logger.Errorf("Failed to open local port to listen: %s", err)
-		os.Exit(1)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	// Always ensure we close the local tcp connection when we exit

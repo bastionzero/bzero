@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/shellserver"
@@ -17,7 +19,7 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
+
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert/zliconfig"
 	bzlogger "bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -50,7 +52,7 @@ func main() {
 
 			if err := startServer(logger, headers, params); err != nil {
 				logger.Error(err)
-				os.Exit(1)
+				os.Exit(exitcodes.UNSPECIFIED_ERROR)
 			} else {
 				select {} // sleep forever
 			}
@@ -58,7 +60,7 @@ func main() {
 	}
 
 	// if we hit this, something has gone wrong
-	os.Exit(1)
+	os.Exit(exitcodes.UNSPECIFIED_ERROR)
 }
 
 func createLogger() (*bzlogger.Logger, error) {
@@ -112,9 +114,16 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 	if err != nil {
 		return err
 	}
+
+	// This validates the bzcert before creating the server so we can fail
+	// fast if the cert is no longer valid. This may result in prompting the
+	// user to login again if the cert contains expired IdP id tokens
 	cert, err := bzcert.New(zliConfig)
 	if err != nil {
-		return err
+		exitcodes.HandleDaemonError(err, logger)
+
+		logger.Errorf("unknown error verifying bbzcert: %s", err)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	switch bzplugin.PluginName(plugin) {
@@ -138,7 +147,7 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 	}
 }
 
-func startSshServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startSshServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("sshserver")
 
 	params["target_id"] = config[TARGET_ID].Value
@@ -170,7 +179,7 @@ func startSshServer(logger *bzlogger.Logger, headers map[string]string, params m
 	)
 }
 
-func startShellServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startShellServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("shellserver")
 
 	return shellserver.StartShellServer(
@@ -186,7 +195,7 @@ func startShellServer(logger *bzlogger.Logger, headers map[string]string, params
 	)
 }
 
-func startWebServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startWebServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("webserver")
 
 	params["target_id"] = config[TARGET_ID].Value
@@ -209,7 +218,7 @@ func startWebServer(logger *bzlogger.Logger, headers map[string]string, params m
 		targetSelectHandler)
 }
 
-func startDbServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startDbServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("dbserver")
 
 	params["target_id"] = config[TARGET_ID].Value
@@ -232,7 +241,7 @@ func startDbServer(logger *bzlogger.Logger, headers map[string]string, params ma
 		targetSelectHandler)
 }
 
-func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
 	subLogger := logger.GetComponentLogger("kubeserver")
 
 	// Set our param value for target_user and target_group

@@ -12,10 +12,10 @@ import (
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzkube "bastionzero.com/bctl/v1/bzerolib/plugin/kube"
@@ -53,7 +53,7 @@ type KubeServer struct {
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	// fields for new datachannels
-	cert         *bzcert.BZCert
+	cert         *bzcert.DaemonBZCert
 	targetUser   string
 	targetGroups []string
 	agentPubKey  string
@@ -65,7 +65,7 @@ func StartKubeServer(
 	localHost string,
 	certPath string,
 	keyPath string,
-	cert *bzcert.BZCert,
+	cert *bzcert.DaemonBZCert,
 	targetUser string,
 	targetGroups []string,
 	localhostToken string,
@@ -197,6 +197,7 @@ func (k *KubeServer) newDataChannel(dcId string, action string, websocket *webso
 					MessageType: string(am.CloseDataChannel),
 				}
 				k.websocket.Send(cdMessage)
+
 				return
 			}
 		}

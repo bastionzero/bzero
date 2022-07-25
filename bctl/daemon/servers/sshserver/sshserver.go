@@ -7,12 +7,13 @@ import (
 	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
@@ -48,14 +49,14 @@ type SshServer struct {
 	headers     map[string]string
 	serviceUrl  string
 	agentPubKey string
-	cert        *bzcert.BZCert
+	cert        *bzcert.DaemonBZCert
 }
 
 func StartSshServer(
 	logger *logger.Logger,
 	targetUser string,
 	dataChannelId string,
-	cert *bzcert.BZCert,
+	cert *bzcert.DaemonBZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
@@ -96,7 +97,7 @@ func StartSshServer(
 	// create our new datachannel
 	if err := server.newDataChannel(action, server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
-		return err
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	return nil
@@ -146,7 +147,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	}
 
 	action = "ssh/" + action
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, synPayload, attach, false)
 	if err != nil {
 		return err
 	}
@@ -159,14 +160,17 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 				dc.Close(errors.New("ssh server closing"))
 				return
 			case <-dcTmb.Dead():
-				if dcTmb.Err() != nil {
+				if err := dcTmb.Err(); err != nil {
+					// Handle custom daemon exit codes which will be reported by zli
+					exitcodes.HandleDaemonError(err, s.logger)
+
 					// just take our innermost error to give the user
 					errs := strings.Split(dcTmb.Err().Error(), ": ")
 					errorString := fmt.Sprintf("error: %s\n", errs[len(errs)-1])
 					os.Stdout.Write([]byte(errorString))
-					os.Exit(1)
+					os.Exit(exitcodes.UNSPECIFIED_ERROR)
 				} else {
-					os.Exit(0)
+					os.Exit(exitcodes.SUCCESS)
 				}
 			}
 		}

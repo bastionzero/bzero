@@ -230,13 +230,13 @@ func (d *DataChannel) Close(reason error) {
 func (d *DataChannel) openDataChannel(action string, synPayload interface{}) error {
 	synMessage, err := d.keysplitter.BuildSyn(action, synPayload, false)
 	if err != nil {
-		return fmt.Errorf("error building syn: %s", err)
+		return fmt.Errorf("error building syn: %w", err)
 	}
 
 	// Marshal the syn
 	synBytes, err := json.Marshal(synMessage)
 	if err != nil {
-		return fmt.Errorf("error marshalling syn: %s", err)
+		return fmt.Errorf("error marshalling syn: %w", err)
 	}
 
 	messagePayload := OpenDataChannelPayload{
@@ -247,7 +247,7 @@ func (d *DataChannel) openDataChannel(action string, synPayload interface{}) err
 	// Marshal the messagePayload
 	messagePayloadBytes, err := json.Marshal(messagePayload)
 	if err != nil {
-		return fmt.Errorf("error marshalling OpenDataChannelPayload: %s", err)
+		return fmt.Errorf("error marshalling OpenDataChannelPayload: %w", err)
 	}
 
 	// send new datachannel message to agent, as we can build the syn here
