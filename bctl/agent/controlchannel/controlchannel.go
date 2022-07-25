@@ -166,9 +166,9 @@ func (c *ControlChannel) createConnection(message OpenWebsocketMessage) error {
 
 	// LUCIE: ooooh nooooo. mixture of camelCase and underscores in type definitions...
 	params := map[string][]string{
-		"connection_id":  []string{message.ConnectionId},
-		"token":          []string{message.Token},
-		"connectionType": []string{message.Type},
+		"connection_id":  {message.ConnectionId},
+		"token":          {message.Token},
+		"connectionType": {message.Type},
 	}
 
 	connection, err := newsignalr.New(srLogger, newws.New(), message.ConnectionServiceUrl, agentDataChannelEndpoint, params)
