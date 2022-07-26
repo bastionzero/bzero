@@ -9,15 +9,17 @@ import (
 	"path"
 	"time"
 
-	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/connection/broadcast"
 	"bastionzero.com/bctl/v1/bzerolib/connection/httpclient"
 	"bastionzero.com/bctl/v1/bzerolib/connection/signalr/invocation"
 	"bastionzero.com/bctl/v1/bzerolib/connection/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
-	"github.com/cenkalti/backoff"
 	"gopkg.in/tomb.v2"
+)
+
+const (
+	negotiateEndpoint = "negotiate"
 )
 
 type SignalR struct {
@@ -44,32 +46,15 @@ type SignalR struct {
 func New(
 	logger *logger.Logger,
 	client *websocket.Websocket,
-	serviceUrl string,
-	endpoint string,
-	params map[string][]string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
-) (*SignalR, error) {
-	// Add the client protocol for SignalR
-	// LUCIE: figure out if I actually need this header; took it from bzhttp
-	params["clientProtocol"] = []string{"1.5"}
-
-	// build our URL object
-	connectionUrl, err := buildUrl(serviceUrl, endpoint, params)
-	if err != nil {
-		return nil, err
+) *SignalR {
+	return &SignalR{
+		logger:      logger,
+		doneChan:    make(chan struct{}),
+		outbound:    make(chan *am.AgentMessage, 200),
+		broadcaster: broadcast.New(),
+		invocator:   invocation.New(),
 	}
-
-	sr := &SignalR{
-		logger:        logger,
-		doneChan:      make(chan struct{}),
-		outbound:      make(chan *am.AgentMessage, 200),
-		connectionUrl: connectionUrl,
-		broadcaster:   broadcast.New(),
-		invocator:     invocation.New(),
-	}
-
-	err = sr.connect()
-	return sr, err
 }
 
 func (s *SignalR) Close(reason error) {
@@ -97,35 +82,106 @@ func (s *SignalR) Receive(msg am.AgentMessage) {
 	s.outbound <- &msg
 }
 
-func (s *SignalR) connect() error {
-	backoffParams := backoff.NewExponentialBackOff()
+// func (s *SignalR) connect() error {
+// 	backoffParams := backoff.NewExponentialBackOff()
 
-	// Configure our exponential backoff
-	backoffParams.MaxElapsedTime = time.Hour * 72 // Wait in total at most 72 hours
-	backoffParams.MaxInterval = time.Minute * 15  // At most 15 minutes in between requests
+// 	// Configure our exponential backoff
+// 	backoffParams.MaxElapsedTime = time.Hour * 72 // Wait in total at most 72 hours
+// 	backoffParams.MaxInterval = time.Minute * 15  // At most 15 minutes in between requests
 
-	ticker := backoff.NewTicker(backoffParams)
-	for {
-		select {
-		case _, ok := <-ticker.C:
-			if !ok {
-				return fmt.Errorf("failed to connect after %s", backoffParams.MaxElapsedTime)
-			}
+// 	ticker := backoff.NewTicker(backoffParams)
+// 	for {
+// 		select {
+// 		case _, ok := <-ticker.C:
+// 			if !ok {
+// 				return fmt.Errorf("failed to connect after %s", backoffParams.MaxElapsedTime)
+// 			}
 
-			if err := s.handshake(); err != nil {
-				s.logger.Errorf("retrying in %d because of error on connect: %w", backoffParams.NextBackOff().Round(time.Second), err)
-			} else {
-				s.logger.Infof("Connection successful to %s", s.connectionUrl.String())
-				return nil
-			}
-		}
+// 			if err := s.Handshake(); err != nil {
+// 				s.logger.Errorf("retrying in %d because of error on connect: %w", backoffParams.NextBackOff().Round(time.Second), err)
+// 			} else {
+// 				s.logger.Infof("Connection successful to %s", s.connectionUrl.String())
+// 				return nil
+// 			}
+// 		}
+// 	}
+
+// 	// Setup our processes for reading and writing from and to the connection
+// 	s.tmb.Go(func() error {
+// 		defer close(s.doneChan)
+// 		defer s.client.Close()
+
+// 		s.tmb.Go(func() error {
+// 			for {
+// 				select {
+// 				case <-s.tmb.Dying():
+// 					return nil
+// 				case msg := <-s.outbound:
+// 					if err := s.wrap(*msg); err != nil {
+// 						s.logger.Errorf("failed to send agent message: %w", err)
+// 					}
+// 				}
+// 			}
+// 		})
+
+// 		// Unwrap and forward incoming messages
+// 		for {
+// 			select {
+// 			case <-s.tmb.Dying():
+// 				return nil
+// 			case <-s.client.Done():
+// 				return fmt.Errorf("connection died")
+// 			case rawMsg := <-s.client.Inbound():
+// 				if err := s.unwrap(*rawMsg); err != nil {
+// 					s.logger.Errorf("error processing raw message from websocket: %w", err)
+// 				}
+// 			}
+// 		}
+// 	})
+
+// 	return nil
+// }
+
+func (s *SignalR) Connect(targetUrl string, endpoint string, params map[string][]string) error {
+	// Reset variables
+	s.tmb = tomb.Tomb{}
+	s.doneChan = make(chan struct{})
+
+	// Add the client protocol for SignalR
+	// LUCIE: figure out if I actually need this header; took it from bzhttp
+	params["clientProtocol"] = []string{"1.5"}
+
+	// Make negotiation call to initiate handshake
+	if err := s.negotiate(targetUrl); err != nil {
+		return fmt.Errorf("failed to complete SignalR handshake: %w", err)
 	}
 
-	// Setup our processes for reading and writing from and to the connection
+	// Build our Url
+	u, err := buildUrl(targetUrl, endpoint, params)
+	if err != nil {
+		return err
+	}
+
+	// Connect to our endpoint
+	if err := s.client.Dial(u); err != nil {
+		return fmt.Errorf("failed to connect to endpoint %s: %w", u.String(), err)
+	}
+
+	// Negotiate our SignalR version
+	// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go
+	versionMessageBytes := append([]byte(`{"protocol": "json","version": 1}`), signalRMessageTerminatorByte)
+	if err := s.client.Send(versionMessageBytes); err != nil {
+		s.client.Close()
+		return fmt.Errorf("failed to negotiate SignalR version: %w", err)
+	}
+
+	// If the handshake was successful, then we've made our connection and we can
+	// start listening and sending on it
 	s.tmb.Go(func() error {
 		defer close(s.doneChan)
 		defer s.client.Close()
 
+		// Wrap and send outbound messages
 		s.tmb.Go(func() error {
 			for {
 				select {
@@ -139,7 +195,7 @@ func (s *SignalR) connect() error {
 			}
 		})
 
-		// Unwrap and forward incoming messages
+		// Unwrap and forward inbound messages
 		for {
 			select {
 			case <-s.tmb.Dying():
@@ -157,35 +213,15 @@ func (s *SignalR) connect() error {
 	return nil
 }
 
-func (s *SignalR) handshake() error {
-	// Make negotiation call to initiate handshake
-	if err := s.negotiate(); err != nil {
-		return fmt.Errorf("failed to complete SignalR handshake: %w", err)
+func (s *SignalR) negotiate(connectionUrl string) error {
+	// LUCIE: what do we need params to be here? DOES NEGOTIATE USE THE PARAMS?!
+	options := httpclient.HTTPOptions{
+		Endpoint: negotiateEndpoint,
 	}
-
-	// Connect to our endpoint
-	if err := s.client.Dial(s.connectionUrl); err != nil {
-		return fmt.Errorf("failed to connect to endpoint %s: %w", s.connectionUrl.String(), err)
-	}
-
-	// Negotiate our SignalR version
-	// Ref: https://stackoverflow.com/questions/65214787/signalr-websockets-and-go
-	versionMessageBytes := append([]byte(`{"protocol": "json","version": 1}`), signalRMessageTerminatorByte)
-	if err := s.client.Send(versionMessageBytes); err != nil {
-		return fmt.Errorf("failed to negotiate SignalR version: %w", err)
-	}
-
-	return nil
-}
-
-func (s *SignalR) negotiate() error {
-	negotiateEndpoint, err := bzhttp.BuildEndpoint(s.connectionUrl.String(), "negotiate")
+	client, err := httpclient.New(s.logger, connectionUrl, options)
 	if err != nil {
 		return err
 	}
-
-	// LUCIE: what do we need params to be here? WHO USES THE PARAMS?!
-	client := httpclient.New(s.logger, negotiateEndpoint, []byte{}, make(map[string][]string), make(map[string][]string))
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -204,6 +240,11 @@ func (s *SignalR) negotiate() error {
 	if err != nil {
 		return fmt.Errorf("failed to make negotiate POST: %w", err)
 	}
+
+	// LUCIE: might need this here
+	// w.params["id"] = m["connectionId"].(string)
+	// w.params["clientProtocol"] = "1.5"
+	// w.params["transport"] = "WebSockets"
 
 	return nil
 }

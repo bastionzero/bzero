@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"time"
 
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -25,40 +26,61 @@ const (
 	Patch RequestMethod = "PATCH"
 )
 
+type HTTPOptions struct {
+	Endpoint string
+	Body     []byte
+	Headers  map[string][]string
+	Params   map[string][]string
+}
+
 type HttpClient struct {
 	logger *logger.Logger
 
 	backoffParams *backoff.ExponentialBackOff
 
-	endpoint string
-	body     io.Reader
-	headers  map[string][]string
-	params   map[string][]string
+	targetUrl string
+	body      io.Reader
+	headers   map[string][]string
+	params    map[string][]string
 }
 
 func New(
 	logger *logger.Logger,
-	endpoint string,
-	body []byte,
-	headers map[string][]string,
-	params map[string][]string,
-) *HttpClient {
-	return &HttpClient{
-		logger:   logger,
-		endpoint: endpoint,
-		body:     bytes.NewBuffer(body),
-		headers:  headers,
-		params:   params,
+	serviceUrl string,
+	options HTTPOptions,
+) (*HttpClient, error) {
+
+	if options.Endpoint != "" {
+		combo, err := url.Parse(serviceUrl)
+		if err != nil {
+			return nil, err
+		}
+		combo.Path = path.Join(combo.Path, options.Endpoint)
+		serviceUrl = combo.String()
 	}
+
+	if options.Headers == nil {
+		options.Headers = make(map[string][]string)
+	}
+
+	if options.Params == nil {
+		options.Params = make(map[string][]string)
+	}
+
+	return &HttpClient{
+		logger:    logger,
+		targetUrl: serviceUrl,
+		body:      bytes.NewBuffer(options.Body),
+		headers:   options.Headers,
+		params:    options.Params,
+	}, nil
 }
 
 func NewWithBackoff(
 	logger *logger.Logger,
-	endpoint string,
-	body []byte,
-	headers map[string][]string,
-	params map[string][]string,
-) *HttpClient {
+	serviceUrl string,
+	options HTTPOptions,
+) (*HttpClient, error) {
 	backoffParams := backoff.NewExponentialBackOff()
 
 	// Ref: https://github.com/cenkalti/backoff/blob/a78d3804c2c84f0a3178648138442c9b07665bda/exponential.go#L76
@@ -71,14 +93,7 @@ func NewWithBackoff(
 	backoffParams.MaxInterval = 15 * time.Minute
 	backoffParams.MaxElapsedTime = 72 * time.Hour
 
-	return &HttpClient{
-		logger:        logger,
-		backoffParams: backoffParams,
-		endpoint:      endpoint,
-		body:          bytes.NewBuffer(body),
-		headers:       headers,
-		params:        params,
-	}
+	return New(logger, serviceUrl, options)
 }
 
 func (h *HttpClient) Post(ctx context.Context) (*http.Response, error) {
@@ -127,7 +142,7 @@ func (h *HttpClient) makeRequestOnce(method RequestMethod, ctx context.Context) 
 	}
 
 	// Build our Request
-	request, _ := http.NewRequestWithContext(ctx, string(method), h.endpoint, h.body)
+	request, _ := http.NewRequestWithContext(ctx, string(method), h.targetUrl, h.body)
 	request.Header = http.Header(h.headers)
 
 	// Add params to request URL
