@@ -14,6 +14,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/connection/broker"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 
 	"gopkg.in/tomb.v2"
@@ -28,7 +29,7 @@ const (
 
 type wsMeta struct {
 	Client       websocket.IWebsocket
-	DataChannels map[string]websocket.IChannel
+	DataChannels map[string]broker.IChannel
 }
 
 type ControlChannel struct {
@@ -184,7 +185,7 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 		c.logger.Infof("created websocket with id: %s", message.ConnectionId)
 		meta := wsMeta{
 			Client:       ws,
-			DataChannels: make(map[string]websocket.IChannel),
+			DataChannels: make(map[string]broker.IChannel),
 		}
 		c.updateConnectionsMap(message.ConnectionId, meta)
 	}

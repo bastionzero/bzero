@@ -1,4 +1,4 @@
-package broadcast
+package broker
 
 import (
 	"fmt"
@@ -12,32 +12,38 @@ type IChannel interface {
 	Close(reason error)
 }
 
-type Broadcaster interface {
-	Subscribe(id string, subscriber IChannel)
-	Unsubscribe(id string)
-	Broadcast(message am.AgentMessage)
-	Narrowcast(id string, message am.AgentMessage) error
-}
-
-type Broadcast struct {
+type Broker struct {
 	subscribers map[string]IChannel
-	lock        sync.Mutex
+	lock        sync.RWMutex
 }
 
-func New() *Broadcast {
-	return &Broadcast{
+func New() *Broker {
+	return &Broker{
 		subscribers: map[string]IChannel{},
 	}
 }
 
-func (b *Broadcast) Subscribe(id string, subscriber IChannel) {
+func (b *Broker) Close(reason error) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	for _, channel := range b.subscribers {
+		if channel == nil {
+			continue
+		}
+
+		channel.Close(reason)
+	}
+}
+
+func (b *Broker) Subscribe(id string, subscriber IChannel) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
 	b.subscribers[id] = subscriber
 }
 
-func (b *Broadcast) Unsubscribe(id string) {
+func (b *Broker) Unsubscribe(id string) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -46,9 +52,9 @@ func (b *Broadcast) Unsubscribe(id string) {
 
 // Allows for broadcasting to any number of IChannels, should we be blocking
 // until someone's listening?
-func (b *Broadcast) Broadcast(message am.AgentMessage) {
-	b.lock.Lock()
-	defer b.lock.Unlock()
+func (b *Broker) Broadcast(message am.AgentMessage) {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
 
 	for _, channel := range b.subscribers {
 		if channel == nil {
@@ -59,14 +65,14 @@ func (b *Broadcast) Broadcast(message am.AgentMessage) {
 	}
 }
 
-func (b *Broadcast) Narrowcast(id string, message am.AgentMessage) error {
-	b.lock.Lock()
-	defer b.lock.Unlock()
+func (b *Broker) Narrowcast(id string, message am.AgentMessage) error {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
 
 	if channel, ok := b.subscribers[id]; ok {
 		channel.Receive(message)
 		return nil
 	} else {
-		return fmt.Errorf("no subscriber with id: %s", id)
+		return fmt.Errorf("no subscriber with id %s", id)
 	}
 }

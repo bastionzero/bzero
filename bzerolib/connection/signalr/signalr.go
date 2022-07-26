@@ -10,7 +10,7 @@ import (
 	"time"
 
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
-	"bastionzero.com/bctl/v1/bzerolib/connection/broadcast"
+	"bastionzero.com/bctl/v1/bzerolib/connection/broker"
 	"bastionzero.com/bctl/v1/bzerolib/connection/httpclient"
 	"bastionzero.com/bctl/v1/bzerolib/connection/signalr/invocation"
 	"bastionzero.com/bctl/v1/bzerolib/connection/websocket"
@@ -27,16 +27,16 @@ type SignalR struct {
 	logger   *logger.Logger
 	doneChan chan struct{}
 
-	connectionUrl *url.URL
-	client        *websocket.Websocket
-	outbound      chan *am.AgentMessage
+	client   *websocket.Websocket
+	outbound chan *am.AgentMessage
+	inbound  chan *SignalRMessage
 
 	// Function for choosing target method
 	targetSelector func(am.AgentMessage) (string, error)
 
 	// Used for broadcasting the same recieved agent message to any number of
 	// listeners
-	broadcaster *broadcast.Broadcast
+	broadcaster *broker.Broker
 
 	// Thread-safe implementation for tracking whether SignalR messages
 	// are received/processed successfully or not
@@ -52,7 +52,7 @@ func New(
 		logger:      logger,
 		doneChan:    make(chan struct{}),
 		outbound:    make(chan *am.AgentMessage, 200),
-		broadcaster: broadcast.New(),
+		broadcaster: broker.New(),
 		invocator:   invocation.New(),
 	}
 }
@@ -70,7 +70,11 @@ func (s *SignalR) Done() <-chan struct{} {
 	return s.doneChan
 }
 
-func (s *SignalR) Subscribe(id string, channel broadcast.IChannel) {
+func (s *SignalR) Inbound() <-chan *SignalRMessage {
+	return s.inbound
+}
+
+func (s *SignalR) Subscribe(id string, channel broker.IChannel) {
 	s.broadcaster.Subscribe(id, channel)
 }
 
@@ -81,66 +85,6 @@ func (s *SignalR) Unsubscribe(id string) {
 func (s *SignalR) Receive(msg am.AgentMessage) {
 	s.outbound <- &msg
 }
-
-// func (s *SignalR) connect() error {
-// 	backoffParams := backoff.NewExponentialBackOff()
-
-// 	// Configure our exponential backoff
-// 	backoffParams.MaxElapsedTime = time.Hour * 72 // Wait in total at most 72 hours
-// 	backoffParams.MaxInterval = time.Minute * 15  // At most 15 minutes in between requests
-
-// 	ticker := backoff.NewTicker(backoffParams)
-// 	for {
-// 		select {
-// 		case _, ok := <-ticker.C:
-// 			if !ok {
-// 				return fmt.Errorf("failed to connect after %s", backoffParams.MaxElapsedTime)
-// 			}
-
-// 			if err := s.Handshake(); err != nil {
-// 				s.logger.Errorf("retrying in %d because of error on connect: %w", backoffParams.NextBackOff().Round(time.Second), err)
-// 			} else {
-// 				s.logger.Infof("Connection successful to %s", s.connectionUrl.String())
-// 				return nil
-// 			}
-// 		}
-// 	}
-
-// 	// Setup our processes for reading and writing from and to the connection
-// 	s.tmb.Go(func() error {
-// 		defer close(s.doneChan)
-// 		defer s.client.Close()
-
-// 		s.tmb.Go(func() error {
-// 			for {
-// 				select {
-// 				case <-s.tmb.Dying():
-// 					return nil
-// 				case msg := <-s.outbound:
-// 					if err := s.wrap(*msg); err != nil {
-// 						s.logger.Errorf("failed to send agent message: %w", err)
-// 					}
-// 				}
-// 			}
-// 		})
-
-// 		// Unwrap and forward incoming messages
-// 		for {
-// 			select {
-// 			case <-s.tmb.Dying():
-// 				return nil
-// 			case <-s.client.Done():
-// 				return fmt.Errorf("connection died")
-// 			case rawMsg := <-s.client.Inbound():
-// 				if err := s.unwrap(*rawMsg); err != nil {
-// 					s.logger.Errorf("error processing raw message from websocket: %w", err)
-// 				}
-// 			}
-// 		}
-// 	})
-
-// 	return nil
-// }
 
 func (s *SignalR) Connect(targetUrl string, endpoint string, params map[string][]string) error {
 	// Reset variables
@@ -281,19 +225,8 @@ func (s *SignalR) unwrap(raw []byte) error {
 				return fmt.Errorf("error unmarshalling SignalR message: %s. Error: %w", string(rawMessage), err)
 			}
 
-			// Enforce assumption that there is only one AgentMessage in each SignalR wrapper
-			if len(message.Arguments) != 1 {
-				return fmt.Errorf("expected a single agent message but got %d arguments", len(message.Arguments))
-			}
-
-			// Extract out the AgentMessage
-			var agentMessage am.AgentMessage
-			if err := json.Unmarshal(message.Arguments[0], &agentMessage); err != nil {
-				return fmt.Errorf("error unmarshalling agent message from websocket with method %s. Error: %w", message.Target, err)
-			}
-
 			// Push message to whoever's listening
-			s.broadcaster.Broadcast(agentMessage)
+			s.inbound <- &message
 
 		default:
 			s.logger.Infof("Ignoring SignalR message with type %v", SignalRMessageType(signalRMessageType.Type))
@@ -340,7 +273,7 @@ func (s *SignalR) wrap(message am.AgentMessage) error {
 
 	messageBytes, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("Failed to marshal agent message: %w", err)
+		return fmt.Errorf("failed to marshal agent message: %w", err)
 	}
 
 	invocationId := s.invocator.GetInvocationId()
