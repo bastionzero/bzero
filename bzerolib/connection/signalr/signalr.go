@@ -190,6 +190,11 @@ func (s *SignalR) negotiate(connectionUrl string) error {
 	// w.params["clientProtocol"] = "1.5"
 	// w.params["transport"] = "WebSockets"
 
+	// In which case we might need this too:
+	// type AgentConnectedMessage struct {
+	// 	ConnectionId string `json:"connectionId"`
+	// }
+
 	return nil
 }
 

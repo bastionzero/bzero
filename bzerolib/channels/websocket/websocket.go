@@ -22,6 +22,10 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
+type AgentConnectedMessage struct {
+	ConnectionId string `json:"connectionId"`
+}
+
 // Connection Type enum
 type ConnectionType string
 
