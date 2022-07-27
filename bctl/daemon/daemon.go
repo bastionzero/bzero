@@ -65,7 +65,7 @@ func main() {
 				for {
 					select {
 					case signal := <-osShutdownChan:
-						logger.Errorf("got signal: %v value: %v", signal, signal.String())
+						logger.Errorf("received shutdown signal: %s", signal.String())
 						close(daemonShutdownChan)
 					case err := <-serverDoneChan:
 						// TODO: maybe do the whole "innermost error thing" here...

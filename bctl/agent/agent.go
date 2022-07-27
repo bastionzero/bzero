@@ -121,7 +121,7 @@ func run(logger *logger.Logger) {
 		osShutdownChan := bzos.OsShutdownChan()
 		signal := <-osShutdownChan
 		// TODO: revisit
-		control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
+		control.Close(fmt.Errorf("received shutdown signal: %s", signal.String()))
 		os.Exit(1)
 	}
 }
