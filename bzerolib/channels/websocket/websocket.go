@@ -317,7 +317,7 @@ func (w *Websocket) connect(connectionUrl *url.URL, endpoint string, headers map
 			}
 
 			if err := w.client.Connect(connectionUrl.String(), endpoint, params); err != nil {
-				w.logger.Errorf("retrying in %s because of and error on connect: %w", backoffParams.NextBackOff().Round(time.Second), err)
+				w.logger.Errorf("retrying in %s because of and error on connect: %s", backoffParams.NextBackOff().Round(time.Second), err)
 			} else {
 				w.logger.Info("Connection successful!")
 				w.client = w.client
