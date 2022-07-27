@@ -13,7 +13,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
-	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -31,9 +31,9 @@ const (
 )
 
 type WebServer struct {
-	logger    *logger.Logger
-	websocket *bzwebsocket.Websocket
-	tmb       tomb.Tomb
+	logger     *logger.Logger
+	connection *websocket.Websocket
+	tmb        tomb.Tomb
 
 	// Web specific vars
 	// Either user the full dns (i.e. targetHostName) or the host:port
@@ -43,9 +43,6 @@ type WebServer struct {
 	// fields for new datachannels
 	localPort   string
 	localHost   string
-	params      map[string]string
-	headers     map[string]string
-	serviceUrl  string
 	agentPubKey string
 	cert        *bzcert.BZCert
 }
@@ -57,16 +54,14 @@ func StartWebServer(logger *logger.Logger,
 	targetHost string,
 	cert *bzcert.BZCert,
 	serviceUrl string,
-	params map[string]string,
-	headers map[string]string,
+	connUrl string,
+	params map[string][]string,
+	headers map[string][]string,
 	agentPubKey string,
 ) error {
 
 	server := &WebServer{
 		logger:      logger,
-		serviceUrl:  serviceUrl,
-		params:      params,
-		headers:     headers,
 		cert:        cert,
 		localPort:   localPort,
 		localHost:   localHost,
@@ -75,10 +70,12 @@ func StartWebServer(logger *logger.Logger,
 		agentPubKey: agentPubKey,
 	}
 
-	// Create a new websocket
-	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
+	// Create our one connection in the form of a websocket
+	subLogger := logger.GetWebsocketLogger(uuid.New().String())
+	if client, err := websocket.New(subLogger, serviceUrl, connUrl, params, headers, autoReconnect, websocket.DaemonWebsocket); err != nil {
 		return err
+	} else {
+		server.connection = client
 	}
 
 	// Create HTTP Server listens for incoming kubectl commands
@@ -142,7 +139,7 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 		action = bzweb.Websocket
 	}
 
-	if err := w.newDataChannel(dcId, action, w.websocket, plugin); err != nil {
+	if err := w.newDataChannel(dcId, action, w.connection, plugin); err != nil {
 		w.logger.Errorf("error starting datachannel: %s", err)
 	}
 	if err := plugin.StartAction(action, writer, request); err != nil {
@@ -150,19 +147,8 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 	}
 }
 
-// for creating new websockets
-func (h *WebServer) newWebsocket(wsId string) error {
-	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := bzwebsocket.New(subLogger, h.serviceUrl, h.params, h.headers, autoReconnect, getChallenge, bzwebsocket.Web); err != nil {
-		return err
-	} else {
-		h.websocket = wsClient
-		return nil
-	}
-}
-
 // for creating new datachannels
-func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocket *bzwebsocket.Websocket, plugin *web.WebDaemonPlugin) error {
+func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, connection *websocket.Websocket, plugin *web.WebDaemonPlugin) error {
 	attach := false
 	subLogger := w.logger.GetDatachannelLogger(dcId)
 
@@ -181,7 +167,7 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 	}
 
 	actString := "web/" + string(action)
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, connection, keysplitter, plugin, actString, synPayload, attach, true)
 	if err != nil {
 		return err
 	}
@@ -200,7 +186,7 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 					ChannelId:   dcId,
 					MessageType: string(am.CloseDataChannel),
 				}
-				w.websocket.Send(cdMessage)
+				w.connection.Send(cdMessage)
 				return
 			}
 		}

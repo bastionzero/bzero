@@ -26,9 +26,9 @@ const (
 )
 
 type SshServer struct {
-	logger    *logger.Logger
-	websocket *websocket.Websocket
-	tmb       tomb.Tomb
+	logger     *logger.Logger
+	connection *websocket.Websocket
+	tmb        tomb.Tomb
 
 	remoteHost   string
 	remotePort   int
@@ -36,9 +36,6 @@ type SshServer struct {
 	identityFile string
 
 	// fields for new datachannels
-	params      map[string]string
-	headers     map[string]string
-	serviceUrl  string
 	agentPubKey string
 	cert        *bzcert.BZCert
 }
@@ -49,8 +46,9 @@ func StartSshServer(
 	dataChannelId string,
 	cert *bzcert.BZCert,
 	serviceUrl string,
-	params map[string]string,
-	headers map[string]string,
+	connUrl string,
+	params map[string][]string,
+	headers map[string][]string,
 	agentPubKey string,
 	identityFile string,
 	remoteHost string,
@@ -59,43 +57,31 @@ func StartSshServer(
 
 	server := &SshServer{
 		logger:       logger,
-		serviceUrl:   serviceUrl,
 		targetUser:   targetUser,
-		params:       params,
-		headers:      headers,
 		cert:         cert,
 		identityFile: identityFile,
 		remoteHost:   remoteHost,
 		remotePort:   remotePort,
 	}
 
-	// Create a new websocket
-	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
+	// Create our one connection in the form of a websocket
+	subLogger := logger.GetWebsocketLogger(uuid.New().String())
+	if client, err := websocket.New(subLogger, serviceUrl, connUrl, params, headers, autoReconnect, websocket.DaemonWebsocket); err != nil {
 		return err
+	} else {
+		server.connection = client
 	}
 
 	// create our new datachannel
-	if err := server.newDataChannel(string(bzssh.OpaqueSsh), server.websocket); err != nil {
+	if err := server.newDataChannel(string(bzssh.OpaqueSsh), server.connection); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 
 	return nil
 }
 
-// for creating new websockets
-func (s *SshServer) newWebsocket(wsId string) error {
-	subLogger := s.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, s.serviceUrl, s.params, s.headers, autoReconnect, getChallenge, websocket.Ssh); err != nil {
-		return err
-	} else {
-		s.websocket = wsClient
-		return nil
-	}
-}
-
 // for creating new datachannels
-func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket) error {
+func (s *SshServer) newDataChannel(action string, connection *websocket.Websocket) error {
 	dcId := uuid.New().String()
 	attach := false
 	subLogger := s.logger.GetDatachannelLogger(dcId)
@@ -122,7 +108,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	}
 
 	action = "ssh/" + action
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, connection, keysplitter, plugin, action, synPayload, attach, true)
 	if err != nil {
 		return err
 	}

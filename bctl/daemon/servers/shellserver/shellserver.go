@@ -26,18 +26,15 @@ const (
 )
 
 type ShellServer struct {
-	logger    *logger.Logger
-	websocket *websocket.Websocket
-	tmb       tomb.Tomb
+	logger     *logger.Logger
+	connection *websocket.Websocket
+	tmb        tomb.Tomb
 
 	// Shell specific vars
 	targetUser    string
 	dataChannelId string
 
 	// fields for new datachannels
-	params      map[string]string
-	headers     map[string]string
-	serviceUrl  string
 	configPath  string
 	agentPubKey string
 	cert        *bzcert.BZCert
@@ -49,49 +46,38 @@ func StartShellServer(
 	dataChannelId string,
 	cert *bzcert.BZCert,
 	serviceUrl string,
-	params map[string]string,
-	headers map[string]string,
+	connUrl string,
+	params map[string][]string,
+	headers map[string][]string,
 	agentPubKey string,
 ) error {
 
 	server := &ShellServer{
 		logger:        logger,
-		serviceUrl:    serviceUrl,
-		params:        params,
-		headers:       headers,
 		cert:          cert,
 		targetUser:    targetUser,
 		dataChannelId: dataChannelId,
 		agentPubKey:   agentPubKey,
 	}
 
-	// Create a new websocket
-	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
+	// Create our one connection in the form of a websocket
+	subLogger := logger.GetWebsocketLogger(uuid.New().String())
+	if client, err := websocket.New(subLogger, serviceUrl, connUrl, params, headers, autoReconnect, websocket.DaemonWebsocket); err != nil {
 		return err
+	} else {
+		server.connection = client
 	}
 
 	// create our new datachannel
-	if err := server.newDataChannel(string(bzshell.DefaultShell), server.websocket); err != nil {
+	if err := server.newDataChannel(string(bzshell.DefaultShell), server.connection); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
 	}
 
 	return nil
 }
 
-// for creating new websockets
-func (ss *ShellServer) newWebsocket(wsId string) error {
-	subLogger := ss.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, ss.serviceUrl, ss.params, ss.headers, autoReconnect, getChallenge, websocket.Shell); err != nil {
-		return err
-	} else {
-		ss.websocket = wsClient
-		return nil
-	}
-}
-
 // for creating new datachannels
-func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websocket) error {
+func (ss *ShellServer) newDataChannel(action string, connection *websocket.Websocket) error {
 	var attach bool
 	if ss.dataChannelId == "" {
 		ss.dataChannelId = uuid.New().String()
@@ -124,7 +110,7 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	}
 
 	action = "shell/" + action
-	dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, &ss.tmb, connection, keysplitter, plugin, action, synPayload, attach, true)
 	if err != nil {
 		return err
 	}

@@ -22,13 +22,12 @@ import (
 const (
 	// websocket connection parameters for all datachannels created by tcp server
 	autoReconnect = true
-	getChallenge  = false
 )
 
 type DbServer struct {
-	logger    *logger.Logger
-	websocket *websocket.Websocket
-	tmb       tomb.Tomb
+	logger     *logger.Logger
+	connection *websocket.Websocket
+	tmb        tomb.Tomb
 
 	// Db specific vars
 	remotePort int
@@ -37,9 +36,6 @@ type DbServer struct {
 	// fields for new datachannels
 	localPort   string
 	localHost   string
-	params      map[string]string
-	headers     map[string]string
-	serviceUrl  string
 	agentPubKey string
 	cert        *bzcert.BZCert
 }
@@ -51,16 +47,14 @@ func StartDbServer(logger *logger.Logger,
 	remoteHost string,
 	cert *bzcert.BZCert,
 	serviceUrl string,
-	params map[string]string,
-	headers map[string]string,
+	connUrl string,
+	params map[string][]string,
+	headers map[string][]string,
 	agentPubKey string,
 ) error {
 
 	server := &DbServer{
 		logger:      logger,
-		serviceUrl:  serviceUrl,
-		params:      params,
-		headers:     headers,
 		cert:        cert,
 		localPort:   localPort,
 		localHost:   localHost,
@@ -69,10 +63,12 @@ func StartDbServer(logger *logger.Logger,
 		agentPubKey: agentPubKey,
 	}
 
-	// Create a new websocket
-	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
+	// Create our one connection in the form of a websocket
+	subLogger := logger.GetWebsocketLogger(uuid.New().String())
+	if client, err := websocket.New(subLogger, serviceUrl, connUrl, params, headers, autoReconnect, websocket.DaemonWebsocket); err != nil {
 		return err
+	} else {
+		server.connection = client
 	}
 
 	// Now create our local listener for TCP connections
@@ -115,26 +111,15 @@ func StartDbServer(logger *logger.Logger,
 			plugin := db.New(pluginLogger)
 			if err := plugin.StartAction(bzdb.Dial, conn); err != nil {
 				logger.Errorf("error starting action: %s", err)
-			} else if err := server.newDataChannel(dcId, string(bzdb.Dial), server.websocket, plugin); err != nil {
+			} else if err := server.newDataChannel(dcId, string(bzdb.Dial), server.connection, plugin); err != nil {
 				logger.Errorf("error starting datachannel: %s", err)
 			}
 		}()
 	}
 }
 
-// for creating new websockets
-func (d *DbServer) newWebsocket(wsId string) error {
-	subLogger := d.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, d.serviceUrl, d.params, d.headers, autoReconnect, getChallenge, websocket.Db); err != nil {
-		return err
-	} else {
-		d.websocket = wsClient
-		return nil
-	}
-}
-
 // for creating new datachannels
-func (d *DbServer) newDataChannel(dcId string, action string, websocket *websocket.Websocket, plugin *db.DbDaemonPlugin) error {
+func (d *DbServer) newDataChannel(dcId string, action string, connection *websocket.Websocket, plugin *db.DbDaemonPlugin) error {
 	subLogger := d.logger.GetDatachannelLogger(dcId)
 
 	d.logger.Infof("Creating new datachannel id: %s", dcId)
@@ -153,7 +138,7 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 
 	action = "db/" + action
 	attach := false
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, connection, keysplitter, plugin, action, synPayload, attach, true)
 	if err != nil {
 		return err
 	}
@@ -172,7 +157,7 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 					ChannelId:   dcId,
 					MessageType: string(am.CloseDataChannel),
 				}
-				d.websocket.Send(cdMessage)
+				d.connection.Send(cdMessage)
 
 				return
 			}

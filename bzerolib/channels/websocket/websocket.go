@@ -30,12 +30,12 @@ type AgentConnectedMessage struct {
 type ConnectionType string
 
 const (
-	SHELL  ConnectionType = "SHELL"
-	TUNNEL ConnectionType = "TUNNEL"
-	FUD    ConnectionType = "FUD"
-	KUBE   ConnectionType = "CLUSTER"
-	DB     ConnectionType = "DB"
-	WEB    ConnectionType = "WEB"
+	SHELL ConnectionType = "SHELL"
+	SSH   ConnectionType = "TUNNEL"
+	FUD   ConnectionType = "FUD"
+	KUBE  ConnectionType = "CLUSTER"
+	DB    ConnectionType = "DB"
+	WEB   ConnectionType = "WEB"
 )
 
 type WebsocketType int
@@ -62,6 +62,13 @@ const (
 	AgentConnectedWebsocketTimeout = 30 * time.Second
 	closeConnectionEndpoint        = "/api/v2/connections/$ID/close"
 )
+
+type IWebsocket interface {
+	Subscribe(id string, channel broker.IChannel)
+	Unsubscribe(id string)
+	Close(reason error)
+	Send(agentMessage am.AgentMessage)
+}
 
 // This will be the client that we use to store our websocket connection
 type Websocket struct {
@@ -97,7 +104,7 @@ func New(
 	wtype WebsocketType,
 ) (*Websocket, error) {
 
-	// Check if the serviceUrl is a valid url
+	// Check if the serviceUrl is a validly formatted url
 	u, err := url.Parse(connectionUrl)
 	if err != nil {
 		return nil, err
@@ -256,8 +263,7 @@ func (w *Websocket) Send(agentMessage am.AgentMessage) {
 // within the connection process are considered transient, and thus trigger a retry. Others are
 // considered fatal, and return an error
 func (w *Websocket) connect(connectionUrl *url.URL, headers map[string][]string, params map[string][]string) error {
-	// determine our target endpoint
-	// Switch based on the targetType
+	// determine our target endpoint and target select handler
 	var endpoint string
 	var targetSelectHandler func(msg am.AgentMessage) (string, error)
 	switch w.myType {
@@ -306,7 +312,7 @@ func (w *Websocket) connect(connectionUrl *url.URL, headers map[string][]string,
 				}
 
 				// And sign our agent version
-				// LUCIE: this is a bit messy right now but with Sebby's changes this should streamline signing
+				// LUCIE: this is a bit messy right now but Sebby's changes will streamline signing
 				if signedAgentVersion, err := challenge.Solve(params["version"][0], config.Data.PrivateKey); err != nil {
 					return fmt.Errorf("error signing agent version: %s", err)
 				} else {
@@ -318,6 +324,7 @@ func (w *Websocket) connect(connectionUrl *url.URL, headers map[string][]string,
 				w.logger.Errorf("retrying in %s because of and error on connect: %w", backoffParams.NextBackOff().Round(time.Second), err)
 			} else {
 				w.logger.Info("Connection successful!")
+				w.client = conn
 				return nil
 			}
 

@@ -15,6 +15,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/sshserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
+	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert/zliconfig"
@@ -65,17 +66,7 @@ func main() {
 		if flagErr != nil {
 			reportError(logger, flagErr)
 		} else {
-			// Create our headers and params
-			headers := make(map[string]string)
-			headers["Authorization"] = authHeader
-
-			// Add our sessionId and token into the header
-			headers["Cookie"] = fmt.Sprintf("sessionId=%s; sessionToken=%s", sessionId, sessionToken)
-
-			params := make(map[string]string)
-			params["version"] = daemonVersion
-
-			if err := startServer(logger, headers, params); err != nil {
+			if err := startServer(logger); err != nil {
 				logger.Error(err)
 				os.Exit(1)
 			} else {
@@ -123,12 +114,8 @@ func reportError(logger *bzlogger.Logger, errorReport error) {
 	errorreport.ReportError(logger, serviceUrl, errReport)
 }
 
-func startServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string) error {
+func startServer(logger *bzlogger.Logger) error {
 	logger.Infof("Opening websocket to the Connection Node: %s for plugin %s", connectionServiceUrl, plugin)
-
-	params["connection_id"] = connectionId
-	params["connectionServiceUrl"] = connectionServiceUrl
-	params["connectionServiceAuthToken"] = connectionServiceAuthToken
 
 	// create our MrZAP object
 	config, err := zliconfig.New(configPath, refreshTokenCommand)
@@ -140,34 +127,41 @@ func startServer(logger *bzlogger.Logger, headers map[string]string, params map[
 		return err
 	}
 
+	// Create our headers, these are shared by everyone
+	headers := map[string][]string{
+		"Authorization": {authHeader},
+		"Cookie":        {fmt.Sprintf("sessionId=%s", sessionId), fmt.Sprintf("sessionToken=%s", sessionToken)},
+	}
+
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Db:
-		params["websocketType"] = "db"
-		return startDbServer(logger, headers, params, cert)
+		return startDbServer(logger, headers, cert)
 	case bzplugin.Kube:
-		params["websocketType"] = "cluster"
-		return startKubeServer(logger, headers, params, cert)
+		return startKubeServer(logger, headers, cert)
 	case bzplugin.Shell:
-		params["websocketType"] = "shell"
-		return startShellServer(logger, headers, params, cert)
+		return startShellServer(logger, headers, cert)
 	case bzplugin.Ssh:
-		params["websocketType"] = "ssh"
-		return startSshServer(logger, headers, params, cert)
+		return startSshServer(logger, headers, cert)
 	case bzplugin.Web:
-		params["websocketType"] = "web"
-		return startWebServer(logger, headers, params, cert)
+		return startWebServer(logger, headers, cert)
 	default:
 		return fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
 }
 
-func startSshServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startSshServer(logger *bzlogger.Logger, headers map[string][]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("sshserver")
 
-	params["target_id"] = targetId
-	params["target_user"] = targetUser
-	params["remote_host"] = remoteHost
-	params["remote_port"] = fmt.Sprintf("%d", remotePort)
+	params := map[string][]string{
+		"connectionId":   {connectionId},
+		"authToken":      {connectionServiceAuthToken},
+		"connectionType": {string(websocket.SSH)},
+
+		"target_id":   {targetId},
+		"target_user": {targetUser},
+		"remote_host": {remoteHost},
+		"remote_port": {fmt.Sprint(remotePort)},
+	}
 
 	return sshserver.StartSshServer(
 		subLogger,
@@ -175,6 +169,7 @@ func startSshServer(logger *bzlogger.Logger, headers map[string]string, params m
 		dataChannelId,
 		cert,
 		serviceUrl,
+		connectionServiceUrl,
 		params,
 		headers,
 		agentPubKey,
@@ -184,8 +179,14 @@ func startSshServer(logger *bzlogger.Logger, headers map[string]string, params m
 	)
 }
 
-func startShellServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startShellServer(logger *bzlogger.Logger, headers map[string][]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("shellserver")
+
+	params := map[string][]string{
+		"connectionId":   {connectionId},
+		"authToken":      {connectionServiceAuthToken},
+		"connectionType": {string(websocket.SHELL)},
+	}
 
 	return shellserver.StartShellServer(
 		subLogger,
@@ -193,16 +194,23 @@ func startShellServer(logger *bzlogger.Logger, headers map[string]string, params
 		dataChannelId,
 		cert,
 		serviceUrl,
+		connectionServiceUrl,
 		params,
 		headers,
 		agentPubKey,
 	)
 }
 
-func startWebServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startWebServer(logger *bzlogger.Logger, headers map[string][]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("webserver")
 
-	params["target_id"] = targetId
+	params := map[string][]string{
+		"connectionId":   {connectionId},
+		"authToken":      {connectionServiceAuthToken},
+		"connectionType": {string(websocket.WEB)},
+
+		"target_id": {targetId},
+	}
 
 	return webserver.StartWebServer(subLogger,
 		localPort,
@@ -211,16 +219,23 @@ func startWebServer(logger *bzlogger.Logger, headers map[string]string, params m
 		remoteHost,
 		cert,
 		serviceUrl,
+		connectionServiceUrl,
 		params,
 		headers,
 		agentPubKey,
 	)
 }
 
-func startDbServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startDbServer(logger *bzlogger.Logger, headers map[string][]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("dbserver")
 
-	params["target_id"] = targetId
+	params := map[string][]string{
+		"connectionId":   {connectionId},
+		"authToken":      {connectionServiceAuthToken},
+		"connectionType": {string(websocket.DB)},
+
+		"target_id": {targetId},
+	}
 
 	return dbserver.StartDbServer(subLogger,
 		localPort,
@@ -229,19 +244,26 @@ func startDbServer(logger *bzlogger.Logger, headers map[string]string, params ma
 		remoteHost,
 		cert,
 		serviceUrl,
+		connectionServiceUrl,
 		params,
 		headers,
 		agentPubKey,
 	)
 }
 
-func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.BZCert) error {
+func startKubeServer(logger *bzlogger.Logger, headers map[string][]string, cert *bzcert.BZCert) error {
 	subLogger := logger.GetComponentLogger("kubeserver")
 
 	// Set our param value for target_user and target_group
-	params["target_id"] = targetId
-	params["target_user"] = targetUser
-	params["target_groups"] = targetGroupsRaw
+	params := map[string][]string{
+		"connectionId":   {connectionId},
+		"authToken":      {connectionServiceAuthToken},
+		"connectionType": {string(websocket.KUBE)},
+
+		"target_id":     {targetId},
+		"target_user":   {targetUser},
+		"target_groups": {targetGroupsRaw},
+	}
 
 	return kubeserver.StartKubeServer(subLogger,
 		localPort,
@@ -253,6 +275,7 @@ func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params 
 		targetGroups,
 		localhostToken,
 		serviceUrl,
+		connectionServiceUrl,
 		params,
 		headers,
 		agentPubKey,
