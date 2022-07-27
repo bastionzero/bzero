@@ -68,7 +68,6 @@ type DataChannel struct {
 func New(
 	logger *logger.Logger,
 	id string,
-	parentTmb *tomb.Tomb, // daemon has ability to rage quit and take everything down with it
 	websocket websocket.IWebsocket,
 	keysplitter IKeysplitting,
 	plugin IPlugin,
@@ -117,10 +116,6 @@ func New(
 
 		for {
 			select {
-			case <-parentTmb.Dying(): // daemon is dying
-				dc.logger.Info("Datachannel was orphaned too young and can't be batman :'(")
-				dc.plugin.Kill()
-				return nil
 			case <-dc.tmb.Dying():
 				dc.logger.Infof("Datachannel dying: %s", dc.tmb.Err().Error())
 				dc.plugin.Kill()
