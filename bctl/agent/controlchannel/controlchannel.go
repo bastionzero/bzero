@@ -168,17 +168,16 @@ func (c *ControlChannel) openWebsocket(message OpenWebsocketMessage) error {
 	subLogger := c.logger.GetWebsocketLogger(message.ConnectionId)
 
 	// Create our headers and params, headers are empty
-	headers := make(map[string]string)
+	headers := make(map[string][]string)
 
 	// Add our token to our params
-	params := make(map[string]string)
-	params["connection_id"] = message.ConnectionId
-	params["connection_node_id"] = message.ConnectionNodeId
-	params["token"] = message.Token
-	params["connectionType"] = message.Type
-	params["connection_service_url"] = message.ConnectionServiceUrl
+	params := map[string][]string{
+		"connection_id":  {message.ConnectionId},
+		"token":          {message.Token},
+		"connectionType": {message.Type},
+	}
 
-	if ws, err := websocket.New(subLogger, c.serviceUrl, params, headers, false, false, websocket.AgentWebsocket); err != nil {
+	if ws, err := websocket.New(subLogger, c.serviceUrl, message.ConnectionServiceUrl, params, headers, false, websocket.AgentDataChannel); err != nil {
 		return fmt.Errorf("could not create new websocket: %s", err)
 	} else {
 		// add the websocket to our connections dictionary

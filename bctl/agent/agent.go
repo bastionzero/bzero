@@ -198,21 +198,18 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 		return nil, fmt.Errorf("failed to retrieve vault: %s", err)
 	}
 
-	// Create our headers and params, headers are empty
-	headers := make(map[string]string)
-
-	// Make and add our params
-	params := map[string]string{
-		"public_key": config.Data.PublicKey,
-		"version":    agentVersion,
-		"target_id":  config.Data.TargetId,
-		"agent_type": agentType,
+	headers := make(map[string][]string)
+	params := map[string][]string{
+		"public_key": {config.Data.PublicKey},
+		"version":    {agentVersion},
+		"target_id":  {config.Data.TargetId},
+		"agent_type": {agentType},
 	}
 
 	// create a websocket
 	wsId := uuid.New().String()
-	wsLogger := logger.GetWebsocketLogger(wsId) // TODO: replace with actual connectionId
-	websocket, err := websocket.New(wsLogger, serviceUrl, params, headers, true, true, websocket.AgentControl)
+	wsLogger := logger.GetWebsocketLogger(wsId)
+	websocket, err := websocket.New(wsLogger, serviceUrl, serviceUrl, params, headers, true, websocket.AgentControlChannel)
 	if err != nil {
 		return nil, err
 	}

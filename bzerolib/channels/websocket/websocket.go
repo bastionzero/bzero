@@ -38,13 +38,13 @@ const (
 	WEB   ConnectionType = "WEB"
 )
 
-type WebsocketType int
+type ChannelType int
 
 const (
 	// Enum target types for agent side connections
-	AgentWebsocket  WebsocketType = -1
-	AgentControl    WebsocketType = -2
-	DaemonWebsocket WebsocketType = -3
+	AgentDataChannel    ChannelType = -1
+	AgentControlChannel ChannelType = -2
+	DaemonDataChannel   ChannelType = -3
 )
 
 const (
@@ -54,9 +54,8 @@ const (
 
 const (
 	// Hub endpoints
-	daemonHubEndpoint = "hub/daemon"
-	agentHubEndpoint  = "hub/agent"
-
+	daemonHubEndpoint  = "hub/daemon"
+	agentHubEndpoint   = "hub/agent"
 	controlHubEndpoint = "/api/v1/hub/control"
 
 	AgentConnectedWebsocketTimeout = 30 * time.Second
@@ -68,6 +67,7 @@ type IWebsocket interface {
 	Unsubscribe(id string)
 	Close(reason error)
 	Send(agentMessage am.AgentMessage)
+	Ready() bool
 }
 
 // This will be the client that we use to store our websocket connection
@@ -83,7 +83,7 @@ type Websocket struct {
 	sendQueue chan *am.AgentMessage
 
 	// Type of connection being made over the websocket
-	myType WebsocketType
+	myType ChannelType
 
 	// Agent Ready Channel indicates when the agent has connected to the
 	// corresponding websocket. This is only used for daemon websocket.
@@ -101,7 +101,7 @@ func New(
 	params map[string][]string,
 	headers map[string][]string,
 	autoReconnect bool,
-	wtype WebsocketType,
+	wtype ChannelType,
 ) (*Websocket, error) {
 
 	// Check if the serviceUrl is a validly formatted url
@@ -126,7 +126,7 @@ func New(
 
 			// If this is a daemon connection (i.e. we are not getting a challenge)
 			// we also need to make sure we close the connection in the backend
-			if ws.myType == AgentWebsocket || ws.myType == DaemonWebsocket {
+			if ws.myType == AgentDataChannel || ws.myType == DaemonDataChannel {
 				if err := ws.closeConnection(bastionUrl, params); err != nil {
 					ws.logger.Errorf("failed to close connection: %w", err)
 				}
@@ -156,13 +156,14 @@ func New(
 			case <-ws.tmb.Dying():
 				return nil
 			case <-ws.client.Done():
+				ws.sendQueueReady = false
 				if autoReconnect {
 					if err := ws.connect(u, headers, params); err != nil {
 						logger.Error(err)
 
 						// If this is a daemon connection (i.e. we are not getting a challenge)
 						// we also need to make sure we close the connection in the backend
-						if ws.myType == AgentWebsocket || ws.myType == DaemonWebsocket {
+						if ws.myType == AgentDataChannel || ws.myType == DaemonDataChannel {
 							if err := ws.closeConnection(bastionUrl, params); err != nil {
 								ws.logger.Errorf("failed to close connection: %w", err)
 							}
@@ -182,6 +183,10 @@ func New(
 	})
 
 	return &ws, nil
+}
+
+func (w *Websocket) Ready() bool {
+	return w.sendQueueReady
 }
 
 func (w *Websocket) Close(reason error) {
@@ -267,13 +272,13 @@ func (w *Websocket) connect(connectionUrl *url.URL, headers map[string][]string,
 	var endpoint string
 	var targetSelectHandler func(msg am.AgentMessage) (string, error)
 	switch w.myType {
-	case DaemonWebsocket:
+	case DaemonDataChannel:
 		endpoint = daemonHubEndpoint
 		targetSelectHandler = daemonTargetSelector
-	case AgentWebsocket:
+	case AgentDataChannel:
 		endpoint = agentHubEndpoint
 		targetSelectHandler = agentControlChannelTargetSelector
-	case AgentControl:
+	case AgentControlChannel:
 		endpoint = controlHubEndpoint
 		targetSelectHandler = agentDataChannelTargetSelector
 	default:
@@ -299,7 +304,7 @@ func (w *Websocket) connect(connectionUrl *url.URL, headers map[string][]string,
 				return fmt.Errorf("failed to connect after %s", backoffParams.MaxElapsedTime)
 			}
 
-			if w.myType == AgentControl {
+			if w.myType == AgentControlChannel {
 				// First get the config from the vault
 				config, err := vault.LoadVault()
 				if err != nil {
@@ -341,7 +346,7 @@ func (w *Websocket) waitForAgentWebsocketReady() {
 
 	// If this is a daemon websocket connection wait for the agent to
 	// connect before sending any messages from the output queue
-	if w.myType == DaemonWebsocket {
+	if w.myType == DaemonDataChannel {
 		select {
 		case <-w.agentReadyChan:
 			w.sendQueueReady = true
@@ -356,9 +361,9 @@ func (w *Websocket) waitForAgentWebsocketReady() {
 func (w *Websocket) closeConnection(bastionUrl string, params map[string][]string) error {
 	var connectionId string
 	switch w.myType {
-	case AgentWebsocket:
+	case AgentDataChannel:
 		connectionId = params["connection_id"][0]
-	case DaemonWebsocket:
+	case DaemonDataChannel:
 		connectionId = params["connectionId"][0]
 	}
 

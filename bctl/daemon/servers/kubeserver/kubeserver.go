@@ -80,7 +80,7 @@ func StartKubeServer(
 
 	// Create our one connection in the form of a websocket
 	subLogger := logger.GetWebsocketLogger(uuid.New().String())
-	if client, err := websocket.New(subLogger, serviceUrl, connUrl, params, headers, autoReconnect, websocket.DaemonWebsocket); err != nil {
+	if client, err := websocket.New(subLogger, serviceUrl, connUrl, params, headers, autoReconnect, websocket.DaemonDataChannel); err != nil {
 		return err
 	} else {
 		server.connection = client
