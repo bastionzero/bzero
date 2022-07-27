@@ -1,18 +1,17 @@
 package webserver
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
+	"bastionzero.com/bctl/v1/bctl/daemon/servers"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -31,9 +30,10 @@ const (
 )
 
 type WebServer struct {
-	logger    *logger.Logger
-	websocket *bzwebsocket.Websocket
-	tmb       tomb.Tomb
+	logger             *logger.Logger
+	daemonShutdownChan chan struct{}
+	doneChan           chan error
+	websocket          *bzwebsocket.Websocket
 
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
@@ -54,6 +54,7 @@ type WebServer struct {
 }
 
 func StartWebServer(logger *logger.Logger,
+	daemonShutdownChan chan struct{},
 	localPort string,
 	localHost string,
 	targetPort int,
@@ -63,10 +64,12 @@ func StartWebServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) (chan error, error) {
 
 	server := &WebServer{
 		logger:              logger,
+		daemonShutdownChan:  daemonShutdownChan,
+		doneChan:            make(chan error),
 		serviceUrl:          serviceUrl,
 		params:              params,
 		headers:             headers,
@@ -81,8 +84,7 @@ func StartWebServer(logger *logger.Logger,
 
 	// Create a new websocket
 	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
-		return err
+		return nil, fmt.Errorf("failed to create websocket: %s", err)
 	}
 
 	// Create HTTP Server listens for incoming kubectl commands
@@ -96,7 +98,7 @@ func StartWebServer(logger *logger.Logger,
 		}
 	}()
 
-	return nil
+	return server.doneChan, nil
 }
 
 // this function operates as middleware between the http handler and the handleHttp call below
@@ -185,30 +187,12 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 	}
 
 	actString := "web/" + string(action)
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, websocket, keysplitter, plugin, actString, synPayload, attach, true)
 	if err != nil {
 		return err
 	}
 
-	// create a function to listen to the datachannel dying and then laugh
-	go func() {
-		for {
-			select {
-			case <-w.tmb.Dying():
-				dc.Close(errors.New("web server closing"))
-				return
-			case <-dcTmb.Dead():
-				// notify agent to close the datachannel
-				w.logger.Info("Sending DataChannel Close")
-				cdMessage := am.AgentMessage{
-					ChannelId:   dcId,
-					MessageType: string(am.CloseDataChannel),
-				}
-				w.websocket.Send(cdMessage)
-
-				return
-			}
-		}
-	}()
+	// listen for shutdown orders from the daemon or news that the datachannel has died
+	go servers.ComeUpWithCoolName(w.daemonShutdownChan, w.doneChan, w.websocket, dc, dcTmb)
 	return nil
 }

@@ -35,5 +35,6 @@ func HandleDaemonError(err error, logger *logger.Logger) {
 		os.Exit(BZCERT_ID_TOKEN_ERROR)
 	}
 
+	logger.Errorf("shutting down with unhandled error: %s", err)
 	os.Exit(UNSPECIFIED_ERROR)
 }

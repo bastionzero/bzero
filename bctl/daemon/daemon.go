@@ -56,7 +56,7 @@ func main() {
 			// TODO: how will this scale?
 			if serverDoneChan, err := startServer(logger, daemonShutdownChan, headers, params); err != nil {
 				logger.Errorf("failed to start %s server: %s", config[PLUGIN], err)
-				os.Exit(int(exitcodes.UNSPECIFIED_ERROR))
+				exitcodes.HandleDaemonError(err, logger)
 			} else {
 				// we should never exit without allowing our server(s?) to shutdown gracefully
 				// therefore our response to a SIGINT or SIGTERM is to tell the server to say its goodbyes
@@ -76,9 +76,6 @@ func main() {
 			}
 		}
 	}
-
-	// if we hit this, something has gone wrong
-	os.Exit(int(exitcodes.UNSPECIFIED_ERROR))
 }
 
 func createLogger() (*bzlogger.Logger, error) {
@@ -139,9 +136,6 @@ func startServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, head
 	cert, err := bzcert.New(zliConfig)
 	if err != nil {
 		exitcodes.HandleDaemonError(err, logger)
-
-		logger.Errorf("unknown error verifying bbzcert: %s", err)
-		os.Exit(int(exitcodes.UNSPECIFIED_ERROR))
 	}
 
 	switch bzplugin.PluginName(plugin) {
@@ -203,6 +197,7 @@ func startShellServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{},
 
 	return shellserver.StartShellServer(
 		subLogger,
+		daemonShutdownChan,
 		config[TARGET_USER].Value,
 		config[DATACHANNEL_ID].Value,
 		cert,
@@ -225,6 +220,7 @@ func startWebServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, h
 
 	return webserver.StartWebServer(
 		subLogger,
+		daemonShutdownChan,
 		config[LOCAL_PORT].Value,
 		config[LOCAL_HOST].Value,
 		remotePort,
@@ -248,6 +244,7 @@ func startDbServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, he
 
 	return dbserver.StartDbServer(
 		subLogger,
+		daemonShutdownChan,
 		config[LOCAL_PORT].Value,
 		config[LOCAL_HOST].Value,
 		remotePort,
@@ -275,6 +272,7 @@ func startKubeServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, 
 
 	return kubeserver.StartKubeServer(
 		subLogger,
+		daemonShutdownChan,
 		config[LOCAL_PORT].Value,
 		config[LOCAL_HOST].Value,
 		config[CERT_PATH].Value,

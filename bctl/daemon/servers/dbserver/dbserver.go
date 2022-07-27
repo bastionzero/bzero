@@ -1,18 +1,16 @@
 package dbserver
 
 import (
-	"errors"
+	"fmt"
 	"net"
-	"os"
 
 	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
-	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/db"
+	"bastionzero.com/bctl/v1/bctl/daemon/servers"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -27,9 +25,10 @@ const (
 )
 
 type DbServer struct {
-	logger    *logger.Logger
-	websocket *websocket.Websocket
-	tmb       tomb.Tomb
+	logger             *logger.Logger
+	daemonShutdownChan chan struct{}
+	doneChan           chan error
+	websocket          *websocket.Websocket
 
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
@@ -49,6 +48,7 @@ type DbServer struct {
 }
 
 func StartDbServer(logger *logger.Logger,
+	daemonShutdownChan chan struct{},
 	localPort string,
 	localHost string,
 	remotePort int,
@@ -58,10 +58,12 @@ func StartDbServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) (chan error, error) {
 
 	server := &DbServer{
 		logger:              logger,
+		daemonShutdownChan:  daemonShutdownChan,
+		doneChan:            make(chan error),
 		serviceUrl:          serviceUrl,
 		params:              params,
 		headers:             headers,
@@ -76,23 +78,20 @@ func StartDbServer(logger *logger.Logger,
 
 	// Create a new websocket
 	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
-		return err
+		return nil, fmt.Errorf("failed to create websocket: %s", err)
 	}
 
 	// Now create our local listener for TCP connections
 	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
 	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
 	if err != nil {
-		logger.Errorf("Failed to resolve TCP address %s", err)
-		os.Exit(exitcodes.UNSPECIFIED_ERROR)
+		return nil, fmt.Errorf("failed to resolve TCP address %s", err)
 	}
 
 	logger.Infof("Setting up TCP listener")
 	localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
 	if err != nil {
-		logger.Errorf("Failed to open local port to listen: %s", err)
-		os.Exit(exitcodes.UNSPECIFIED_ERROR)
+		return nil, fmt.Errorf("failed to open local port to listen: %s", err)
 	}
 
 	// Always ensure we close the local tcp connection when we exit
@@ -158,31 +157,12 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 
 	action = "db/" + action
 	attach := false
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &d.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, websocket, keysplitter, plugin, action, synPayload, attach, true)
 	if err != nil {
 		return err
 	}
 
-	// create a function to listen to the datachannel dying and then laugh
-	go func() {
-		for {
-			select {
-			// TODO: this is redundant and/or not used -- we should take a dedicated look at daemon shutdown procedure
-			case <-d.tmb.Dying():
-				dc.Close(errors.New("db server closing"))
-				return
-			case <-dcTmb.Dead():
-				// notify agent to close the datachannel
-				d.logger.Info("Sending DataChannel Close")
-				cdMessage := am.AgentMessage{
-					ChannelId:   dcId,
-					MessageType: string(am.CloseDataChannel),
-				}
-				d.websocket.Send(cdMessage)
-
-				return
-			}
-		}
-	}()
+	// listen for shutdown orders from the daemon or news that the datachannel has died
+	go servers.ComeUpWithCoolName(d.daemonShutdownChan, d.doneChan, d.websocket, dc, dcTmb)
 	return nil
 }

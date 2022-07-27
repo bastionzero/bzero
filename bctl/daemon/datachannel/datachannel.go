@@ -220,6 +220,7 @@ func (d *DataChannel) zapPluginOutput() error {
 
 func (d *DataChannel) Close(reason error) {
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
+	d.tmb.Wait()
 }
 
 func (d *DataChannel) openDataChannel(action string, synPayload interface{}) error {
