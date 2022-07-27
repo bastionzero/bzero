@@ -110,8 +110,28 @@ func New(
 		return nil, err
 	}
 
+	// determine our target endpoint and target select handler
+	var endpoint string
+	var targetSelectHandler func(msg am.AgentMessage) (string, error)
+	switch wtype {
+	case DaemonDataChannel:
+		endpoint = daemonHubEndpoint
+		targetSelectHandler = daemonTargetSelector
+	case AgentDataChannel:
+		endpoint = agentHubEndpoint
+		targetSelectHandler = agentControlChannelTargetSelector
+	case AgentControlChannel:
+		endpoint = controlHubEndpoint
+		targetSelectHandler = agentDataChannelTargetSelector
+	}
+
+	// Create our signalr object
+	srLogger := logger.GetComponentLogger("SignalR")
+	conn := signalr.New(srLogger, newws.New(), targetSelectHandler)
+
 	ws := Websocket{
 		logger:         logger,
+		client:         conn,
 		broker:         broker.New(),
 		sendQueue:      make(chan *am.AgentMessage, 50),
 		myType:         wtype,
@@ -120,7 +140,7 @@ func New(
 
 	// Connect to the websocket in a go routine in case it takes a long time
 	go func() {
-		if err := ws.connect(u, headers, params); err != nil {
+		if err := ws.connect(u, endpoint, headers, params); err != nil {
 			logger.Error(err)
 			ws.Close(fmt.Errorf("process was unable to connect to BastionZero"))
 
@@ -158,21 +178,13 @@ func New(
 			case <-ws.client.Done():
 				ws.sendQueueReady = false
 				if autoReconnect {
-					if err := ws.connect(u, headers, params); err != nil {
-						logger.Error(err)
-
-						// If this is a daemon connection (i.e. we are not getting a challenge)
-						// we also need to make sure we close the connection in the backend
-						if ws.myType == AgentDataChannel || ws.myType == DaemonDataChannel {
-							if err := ws.closeConnection(bastionUrl, params); err != nil {
-								ws.logger.Errorf("failed to close connection: %w", err)
-							}
-						}
-
-						return fmt.Errorf("process was unable to reconnect to BastionZero after being disconnected")
+					if err := ws.connect(u, endpoint, headers, params); err != nil {
+						logger.Errorf("failed to connect to BastionZero: %w", err)
+						return nil
 					}
 				} else {
-					return fmt.Errorf("connection has been lost and we're not retrying")
+					logger.Infof("Connection with BastionZero closed and we're not retrying")
+					return nil
 				}
 			case message := <-ws.client.Inbound():
 				if err := ws.receive(*message); err != nil {
@@ -267,28 +279,7 @@ func (w *Websocket) Send(agentMessage am.AgentMessage) {
 // it must handle its own retry logic. For this, we use an exponential backoff. Some failures
 // within the connection process are considered transient, and thus trigger a retry. Others are
 // considered fatal, and return an error
-func (w *Websocket) connect(connectionUrl *url.URL, headers map[string][]string, params map[string][]string) error {
-	// determine our target endpoint and target select handler
-	var endpoint string
-	var targetSelectHandler func(msg am.AgentMessage) (string, error)
-	switch w.myType {
-	case DaemonDataChannel:
-		endpoint = daemonHubEndpoint
-		targetSelectHandler = daemonTargetSelector
-	case AgentDataChannel:
-		endpoint = agentHubEndpoint
-		targetSelectHandler = agentControlChannelTargetSelector
-	case AgentControlChannel:
-		endpoint = controlHubEndpoint
-		targetSelectHandler = agentDataChannelTargetSelector
-	default:
-		return fmt.Errorf("unhandled connection type: %v", w.myType)
-	}
-
-	// Create our signalr object
-	srLogger := w.logger.GetComponentLogger("SignalR")
-	conn := signalr.New(srLogger, newws.New(), targetSelectHandler)
-
+func (w *Websocket) connect(connectionUrl *url.URL, endpoint string, headers map[string][]string, params map[string][]string) error {
 	// Setup our exponential backoff parameters
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 72 // Wait in total at most 72 hours
@@ -325,11 +316,11 @@ func (w *Websocket) connect(connectionUrl *url.URL, headers map[string][]string,
 				}
 			}
 
-			if err := conn.Connect(connectionUrl.String(), endpoint, params); err != nil {
+			if err := w.client.Connect(connectionUrl.String(), endpoint, params); err != nil {
 				w.logger.Errorf("retrying in %s because of and error on connect: %w", backoffParams.NextBackOff().Round(time.Second), err)
 			} else {
 				w.logger.Info("Connection successful!")
-				w.client = conn
+				w.client = w.client
 				return nil
 			}
 
