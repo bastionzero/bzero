@@ -182,7 +182,7 @@ func (s *SignalR) negotiate(connectionUrl string) error {
 	// Make negotiate call
 	_, err = client.Post(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to make negotiate POST: %w", err)
+		return fmt.Errorf("failed on call to negotiate: %s", err)
 	}
 
 	// LUCIE: might need this here

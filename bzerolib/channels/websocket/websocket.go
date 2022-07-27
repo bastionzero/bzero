@@ -324,7 +324,7 @@ func (w *Websocket) connect(connectionUrl *url.URL, endpoint string, headers map
 				return nil
 			}
 
-			w.logger.Infof("failed to connect at %s. Will try again in about %s", tick, backoffParams.NextBackOff())
+			w.logger.Infof("failed to connect retrying in %s", tick, backoffParams.NextBackOff().Round(time.Second))
 		}
 	}
 }
