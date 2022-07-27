@@ -9,9 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"os/signal"
-	"syscall"
-
 	"github.com/google/uuid"
 
 	"bastionzero.com/bctl/v1/bctl/agent/controlchannel"
@@ -19,6 +16,7 @@ import (
 	"bastionzero.com/bctl/v1/bctl/agent/registration"
 	"bastionzero.com/bctl/v1/bctl/agent/vault"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
+	"bastionzero.com/bctl/v1/bzerolib/bzos"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
@@ -120,7 +118,9 @@ func run(logger *logger.Logger) {
 		reportError(logger, err)
 	} else {
 		// wait until we recieve a kill signal and quit
-		signal := blockUntilSignaled()
+		osShutdownChan := bzos.OsShutdownChan()
+		signal := <-osShutdownChan
+		// TODO: revisit
 		control.Close(fmt.Errorf("got signal: %v value: %v", signal, signal.String()))
 		os.Exit(1)
 	}
@@ -172,24 +172,6 @@ func reportError(logger *logger.Logger, errorReport error) {
 	}
 
 	errorreport.ReportError(logger, serviceUrl, errReport)
-}
-
-// ref: https://github.com/bastionzero/bzero-ssm-agent/blob/76d133c565bb7e11683f63fbc23d39fa0840df14/core/agent.go#L89
-func blockUntilSignaled() os.Signal {
-	// Below channel will handle all machine initiated shutdown/reboot requests.
-
-	// Set up channel on which to receive signal notifications.
-	// We must use a buffered channel or risk missing the signal
-	// if we're not ready to receive when the signal is sent.
-	c := make(chan os.Signal, 1)
-
-	// Listening for OS signals is a blocking call.
-	// Only listen to signals that require us to exit.
-	// Otherwise we will continue execution and exit the program.
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-
-	s := <-c
-	return s
 }
 
 func startControlChannel(logger *logger.Logger, agentVersion string) (*controlchannel.ControlChannel, error) {

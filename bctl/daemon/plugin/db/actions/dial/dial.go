@@ -16,6 +16,11 @@ import (
 	smsg "bastionzero.com/bctl/v1/bzerolib/stream/message"
 )
 
+var (
+	globalWriteCount = 100
+	localWriteCount  = 0
+)
+
 const (
 	chunkSize     = 64 * 1024
 	writeDeadline = 5 * time.Second
@@ -132,11 +137,17 @@ func (d *DialAction) Start(lconn *net.TCPConn) error {
 						if contentBytes, err := base64.StdEncoding.DecodeString(streamMessage.Content); err != nil {
 							d.logger.Errorf("could not decode db stream content: %s", err)
 						} else {
-							// Set a deadline for the write so we don't block forever
-							lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
-							if _, err := lconn.Write(contentBytes); err != nil && d.tmb.Alive() {
-								d.logger.Errorf("error writing to local TCP connection: %s", err)
-								d.tmb.Kill(nil)
+							d.logger.Infof("write count = %d", localWriteCount)
+							if localWriteCount >= globalWriteCount {
+								lconn.Write([]byte("Something bad happened"))
+							} else {
+								// Set a deadline for the write so we don't block forever
+								lconn.SetWriteDeadline(time.Now().Add(writeDeadline))
+								if _, err := lconn.Write(contentBytes); err != nil && d.tmb.Alive() {
+									d.logger.Errorf("error writing to local TCP connection: %s", err)
+									d.tmb.Kill(nil)
+								}
+								localWriteCount++
 							}
 						}
 

@@ -15,9 +15,14 @@ const (
 	BZCERT_ID_TOKEN_ERROR = 2
 )
 
+// TODO: update docstring
+// TODO: maybe even rename this entire file!
 // Checks if the error is a specially handled error where we should exit the
 // daemon process with a specific exit code
 func HandleDaemonError(err error, logger *logger.Logger) {
+	if err == nil {
+		os.Exit(SUCCESS)
+	}
 	// https://go.dev/blog/go1.13-errors target
 	// Check if the error is either a bzcert.InitialIdTokenError (IdP key
 	// rotation) or bzcert.CurrentIdTokenError (id token needs to be
@@ -29,4 +34,6 @@ func HandleDaemonError(err error, logger *logger.Logger) {
 		logger.Errorf("IdP tokens are invalid/expired. Please try to re-login with the zli.")
 		os.Exit(BZCERT_ID_TOKEN_ERROR)
 	}
+
+	os.Exit(UNSPECIFIED_ERROR)
 }

@@ -1,16 +1,13 @@
 package sshserver
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
-	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
+	"bastionzero.com/bctl/v1/bctl/daemon/servers"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
@@ -18,7 +15,6 @@ import (
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
 	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -28,9 +24,10 @@ const (
 )
 
 type SshServer struct {
-	logger    *logger.Logger
-	websocket *websocket.Websocket
-	tmb       tomb.Tomb
+	logger             *logger.Logger
+	daemonShutdownChan chan struct{}
+	doneChan           chan error
+	websocket          *websocket.Websocket
 
 	// Handler to select message types
 	targetSelectHandler func(msg am.AgentMessage) (string, error)
@@ -54,6 +51,7 @@ type SshServer struct {
 
 func StartSshServer(
 	logger *logger.Logger,
+	daemonShutdownChan chan struct{},
 	targetUser string,
 	dataChannelId string,
 	cert *bzcert.DaemonBZCert,
@@ -69,10 +67,12 @@ func StartSshServer(
 	remotePort int,
 	localPort string,
 	action string,
-) error {
+) (chan error, error) {
 
 	server := &SshServer{
 		logger:              logger,
+		daemonShutdownChan:  daemonShutdownChan,
+		doneChan:            make(chan error),
 		serviceUrl:          serviceUrl,
 		targetUser:          targetUser,
 		params:              params,
@@ -88,19 +88,14 @@ func StartSshServer(
 		localPort:           localPort,
 	}
 
-	// Create a new websocket
+	// Create a new websocket and datachannel
 	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
-		return err
+		return nil, fmt.Errorf("failed to create websocket: %s", err)
+	} else if err := server.newDataChannel(action, server.websocket); err != nil {
+		return nil, fmt.Errorf("failed to create datachannel: %s", err)
 	}
 
-	// create our new datachannel
-	if err := server.newDataChannel(action, server.websocket); err != nil {
-		logger.Errorf("error starting datachannel: %s", err)
-		os.Exit(exitcodes.UNSPECIFIED_ERROR)
-	}
-
-	return nil
+	return server.doneChan, nil
 }
 
 // for creating new websockets
@@ -152,28 +147,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 		return err
 	}
 
-	// create a function to listen to the datachannel dying and then laugh
-	go func() {
-		for {
-			select {
-			case <-s.tmb.Dying():
-				dc.Close(errors.New("ssh server closing"))
-				return
-			case <-dcTmb.Dead():
-				if err := dcTmb.Err(); err != nil {
-					// Handle custom daemon exit codes which will be reported by zli
-					exitcodes.HandleDaemonError(err, s.logger)
-
-					// just take our innermost error to give the user
-					errs := strings.Split(dcTmb.Err().Error(), ": ")
-					errorString := fmt.Sprintf("error: %s\n", errs[len(errs)-1])
-					os.Stdout.Write([]byte(errorString))
-					os.Exit(exitcodes.UNSPECIFIED_ERROR)
-				} else {
-					os.Exit(exitcodes.SUCCESS)
-				}
-			}
-		}
-	}()
+	// listen for shutdown orders from the daemon or news that the datachannel has died
+	go servers.ComeUpWithCoolName(s.daemonShutdownChan, s.doneChan, s.websocket, dc, dcTmb)
 	return nil
 }

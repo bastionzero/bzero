@@ -24,6 +24,8 @@ import (
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 )
 
+var hardMode = false
+
 const (
 	// Enum target types
 	Cluster = 2
@@ -411,6 +413,10 @@ func (w *Websocket) Send(agentMessage am.AgentMessage) {
 // NOTE: with the exception of negotiate(), underlying bzhttp requests have their own 8-hour
 // exponential backoff, and so their errors are considered fatal
 func (w *Websocket) connect() error {
+
+	if hardMode {
+		return nil
+	}
 
 	backoffParams := backoff.NewExponentialBackOff()
 	backoffParams.MaxElapsedTime = time.Hour * 8 // Wait in total at most 8 hours
