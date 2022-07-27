@@ -32,10 +32,10 @@ type ConnectionType string
 const (
 	SHELL ConnectionType = "SHELL"
 	SSH   ConnectionType = "TUNNEL"
-	FUD   ConnectionType = "FUD"
-	KUBE  ConnectionType = "CLUSTER"
-	DB    ConnectionType = "DB"
-	WEB   ConnectionType = "WEB"
+	// FUD   ConnectionType = "FUD" LUCIE: We don't use this, can I remove it?
+	KUBE ConnectionType = "CLUSTER"
+	DB   ConnectionType = "DB"
+	WEB  ConnectionType = "WEB"
 )
 
 type ChannelType int

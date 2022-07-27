@@ -195,7 +195,7 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 	// Load in our saved config
 	config, err := vault.LoadVault()
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve vault: %s", err)
+		return nil, fmt.Errorf("failed to retrieve vault: %w", err)
 	}
 
 	headers := make(map[string][]string)
