@@ -127,7 +127,7 @@ func (h *HttpClient) request(method RequestMethod, ctx context.Context) (*http.R
 
 			if response, err := h.makeRequestOnce(method, ctx); err != nil {
 				nextRequestTime := h.backoffParams.NextBackOff().Round(time.Second)
-				h.logger.Errorf("Retrying in %s: %s", nextRequestTime, string(method), err)
+				h.logger.Errorf("retrying in %s: %s", nextRequestTime, err)
 			} else {
 				return response, err
 			}

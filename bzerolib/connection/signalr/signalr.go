@@ -86,25 +86,27 @@ func (s *SignalR) Receive(msg am.AgentMessage) {
 	s.outbound <- &msg
 }
 
-func (s *SignalR) Connect(targetUrl string, endpoint string, params map[string][]string) error {
+func (s *SignalR) Connect(targetUrl string, params map[string][]string) error {
 	// Reset variables
 	s.tmb = tomb.Tomb{}
 	s.doneChan = make(chan struct{})
 
 	// Add the client protocol for SignalR
 	// LUCIE: figure out if I actually need this header; took it from bzhttp
-	params["clientProtocol"] = []string{"1.5"}
+	// params["clientProtocol"] = []string{"1.5"}
 
 	// Make negotiation call to initiate handshake
-	if err := s.negotiate(targetUrl); err != nil {
+	if err := s.negotiate(targetUrl, params); err != nil {
 		return fmt.Errorf("failed to complete SignalR handshake: %w", err)
 	}
 
 	// Build our Url
-	u, err := buildUrl(targetUrl, endpoint, params)
+	u, err := buildUrl(targetUrl, params)
 	if err != nil {
 		return err
 	}
+
+	s.logger.Infof("URL %+v", u)
 
 	// Connect to our endpoint
 	if err := s.client.Dial(u); err != nil {
@@ -157,11 +159,17 @@ func (s *SignalR) Connect(targetUrl string, endpoint string, params map[string][
 	return nil
 }
 
-func (s *SignalR) negotiate(connectionUrl string) error {
+func (s *SignalR) negotiate(connectionUrl string, params map[string][]string) error {
 	// LUCIE: what do we need params to be here? DOES NEGOTIATE USE THE PARAMS?!
 	options := httpclient.HTTPOptions{
 		Endpoint: negotiateEndpoint,
+		Params:   params,
 	}
+
+	combo, _ := url.Parse(connectionUrl)
+	combo.Path = path.Join(combo.Path, options.Endpoint)
+
+	s.logger.Infof("PARAMS: %+v, ENDPOINT: %s", params, combo.String())
 	client, err := httpclient.New(s.logger, connectionUrl, options)
 	if err != nil {
 		return err
@@ -308,13 +316,12 @@ func (s *SignalR) wrap(message am.AgentMessage) error {
 	return err
 }
 
-func buildUrl(serviceUrl string, endpoint string, params map[string][]string) (*url.URL, error) {
+func buildUrl(serviceUrl string, params map[string][]string) (*url.URL, error) {
 	// Build our websocket url object
 	websocketUrl, err := url.Parse(serviceUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse connection node service url %s: %w", serviceUrl, err)
 	}
-	websocketUrl.Path = path.Join(websocketUrl.Path, endpoint)
 
 	// Set our params as encoded args
 	urlParams := url.Values(params)

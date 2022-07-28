@@ -203,7 +203,6 @@ func startControlChannel(logger *logger.Logger, agentVersion string) (*controlch
 		"public_key": {config.Data.PublicKey},
 		"version":    {agentVersion},
 		"target_id":  {config.Data.TargetId},
-		"agent_type": {agentType},
 	}
 
 	// create a websocket
