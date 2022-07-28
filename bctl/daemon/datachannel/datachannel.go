@@ -142,6 +142,7 @@ func New(
 
 		// this area is effectively the datachannel's shutdown process
 		// as of now, the only thing it's responsibile for is sending this message
+		dc.logger.Infof("sending CloseDataChannel message to the agent")
 		websocket.Send(am.AgentMessage{
 			ChannelId:   dc.id,
 			MessageType: string(am.CloseDataChannel),
