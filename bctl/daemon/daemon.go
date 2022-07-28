@@ -31,6 +31,10 @@ const (
 	prodServiceUrl = "https://cloud.bastionzero.com"
 )
 
+type IServer interface {
+	Shutdown(err error)
+}
+
 func main() {
 	envErr := loadEnvironment()
 
@@ -141,6 +145,8 @@ func startServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, done
 		return
 	}
 
+	var server IServer
+
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Db:
 		params["websocketType"] = "db"
@@ -153,16 +159,29 @@ func startServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, done
 		startShellServer(logger, daemonShutdownChan, doneChan, headers, params, cert)
 	case bzplugin.Ssh:
 		params["websocketType"] = "ssh"
-		startSshServer(logger, daemonShutdownChan, doneChan, headers, params, cert)
+		server, err = startSshServer(logger, doneChan, headers, params, cert)
 	case bzplugin.Web:
 		params["websocketType"] = "web"
 		startWebServer(logger, daemonShutdownChan, doneChan, headers, params, cert)
 	default:
 		doneChan <- fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
+
+	if err != nil {
+		doneChan <- fmt.Errorf("failed to start %s server: %s", plugin, err)
+	} else {
+		// await external shutdown
+		go listenForShutdown(daemonShutdownChan, server)
+	}
 }
 
-func startSshServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, doneChan chan error, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) {
+func listenForShutdown(shutdownChan <-chan struct{}, server IServer) {
+	if _, ok := <-shutdownChan; !ok {
+		server.Shutdown(fmt.Errorf("daemon was shut down"))
+	}
+}
+
+func startSshServer(logger *bzlogger.Logger, doneChan chan error, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) (*sshserver.SshServer, error) {
 	subLogger := logger.GetComponentLogger("sshserver")
 
 	params["target_id"] = config[TARGET_ID].Value
@@ -171,13 +190,11 @@ func startSshServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, d
 	params["remote_port"] = config[REMOTE_PORT].Value
 	remotePort, err := strconv.Atoi(config[REMOTE_PORT].Value)
 	if err != nil {
-		doneChan <- fmt.Errorf("failed to parse remote port: %s", err)
-		return
+		return nil, fmt.Errorf("failed to parse remote port: %s", err)
 	}
 
-	sshserver.StartSshServer(
+	return sshserver.StartSshServer(
 		subLogger,
-		daemonShutdownChan,
 		doneChan,
 		config[TARGET_USER].Value,
 		config[DATACHANNEL_ID].Value,
@@ -194,7 +211,7 @@ func startSshServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, d
 		remotePort,
 		config[LOCAL_PORT].Value,
 		config[SSH_ACTION].Value,
-	)
+	), nil
 }
 
 func startShellServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, doneChan chan error, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) {
