@@ -7,7 +7,7 @@ import (
 )
 
 // ref: https://github.com/bastionzero/bzero-ssm-agent/blob/76d133c565bb7e11683f63fbc23d39fa0840df14/core/agent.go#L89
-// block until we receive a SIGINT or SIGTERM
+// provide a channel listening for SIGINT and SIGTERM
 func OsShutdownChan() chan os.Signal {
 	// Below channel will handle all machine initiated shutdown/reboot requests.
 
