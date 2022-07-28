@@ -4,12 +4,12 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/shell"
-	"bastionzero.com/bctl/v1/bctl/daemon/servers"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -24,29 +24,24 @@ const (
 )
 
 type ShellServer struct {
-	logger             *logger.Logger
-	daemonShutdownChan chan struct{}
-	doneChan           chan error
-	websocket          *websocket.Websocket
+	logger   *logger.Logger
+	doneChan chan error
 
-	// Handler to select message types
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
+	websocket *websocket.Websocket
+	dc        *datachannel.DataChannel
+	dcTmb     *tomb.Tomb
 
 	// Shell specific vars
 	targetUser    string
 	dataChannelId string
 
 	// fields for new datachannels
-	params      map[string]string
-	headers     map[string]string
-	serviceUrl  string
 	agentPubKey string
 	cert        *bzcert.DaemonBZCert
 }
 
 func StartShellServer(
 	logger *logger.Logger,
-	daemonShutdownChan chan struct{},
 	doneChan chan error,
 	targetUser string,
 	dataChannelId string,
@@ -55,34 +50,39 @@ func StartShellServer(
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) {
+	targetSelectHandler func(msg am.AgentMessage) (string, error),
+) (*ShellServer, error) {
 
 	server := &ShellServer{
-		logger:              logger,
-		daemonShutdownChan:  daemonShutdownChan,
-		doneChan:            doneChan,
-		serviceUrl:          serviceUrl,
-		params:              params,
-		headers:             headers,
-		targetSelectHandler: targetSelectHandler,
-		cert:                cert,
-		targetUser:          targetUser,
-		dataChannelId:       dataChannelId,
-		agentPubKey:         agentPubKey,
+		logger:        logger,
+		doneChan:      doneChan,
+		cert:          cert,
+		targetUser:    targetUser,
+		dataChannelId: dataChannelId,
+		agentPubKey:   agentPubKey,
 	}
 
 	// Create a new websocket and datachannel
-	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		doneChan <- fmt.Errorf("failed to create websocket: %s", err)
+	if err := server.newWebsocket(uuid.New().String(), serviceUrl, params, headers, targetSelectHandler); err != nil {
+		return nil, fmt.Errorf("failed to create websocket: %s", err)
 	} else if err := server.newDataChannel(string(bzshell.DefaultShell), server.websocket); err != nil {
-		doneChan <- fmt.Errorf("failed to create datachannel: %s", err)
+		server.websocket.Close(err)
+		return nil, fmt.Errorf("failed to create datachannel: %s", err)
 	}
+	return server, nil
+}
+
+func (ss *ShellServer) Shutdown(err error) {
+	if ss.websocket != nil {
+		ss.websocket.Close(err)
+	}
+	ss.doneChan <- err
 }
 
 // for creating new websockets
-func (ss *ShellServer) newWebsocket(wsId string) error {
+func (ss *ShellServer) newWebsocket(wsId string, serviceUrl string, params map[string]string, headers map[string]string, targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 	subLogger := ss.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, ss.serviceUrl, ss.params, ss.headers, ss.targetSelectHandler, autoReconnect, getChallenge, websocket.Shell); err != nil {
+	if wsClient, err := websocket.New(subLogger, serviceUrl, params, headers, targetSelectHandler, autoReconnect, getChallenge, websocket.Shell); err != nil {
 		return err
 	} else {
 		ss.websocket = wsClient
@@ -124,12 +124,17 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	}
 
 	action = "shell/" + action
-	dc, dcTmb, err := datachannel.New(subLogger, ss.dataChannelId, websocket, keysplitter, plugin, action, synPayload, attach, false)
+	ss.dc, ss.dcTmb, err = datachannel.New(subLogger, ss.dataChannelId, websocket, keysplitter, plugin, action, synPayload, attach, false)
 	if err != nil {
 		return err
 	}
 
-	// listen for shutdown orders from the daemon or news that the datachannel has died
-	go servers.ComeUpWithCoolName(ss.logger, ss.daemonShutdownChan, ss.doneChan, ss.websocket, dc, dcTmb)
+	// listen for news that the datachannel has died
+	go ss.listenForDatachannelDone()
 	return nil
+}
+
+func (ss *ShellServer) listenForDatachannelDone() {
+	<-ss.dcTmb.Dead()
+	ss.Shutdown(ss.dcTmb.Err())
 }

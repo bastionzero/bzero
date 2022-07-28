@@ -13,7 +13,6 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/kube"
-	"bastionzero.com/bctl/v1/bctl/daemon/servers"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -38,20 +37,14 @@ type StatusMessage struct {
 }
 
 type KubeServer struct {
-	logger             *logger.Logger
-	daemonShutdownChan chan struct{}
-	doneChan           chan error
-	websocket          *websocket.Websocket
-	exitMessage        string
+	logger   *logger.Logger
+	doneChan chan error
+
+	websocket   *websocket.Websocket
+	exitMessage string
 
 	// fields for processing incoming kubectl commands
 	localhostToken string
-
-	// fields for opening websockets
-	serviceUrl          string
-	params              map[string]string
-	headers             map[string]string
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	// fields for new datachannels
 	cert         *bzcert.DaemonBZCert
@@ -62,7 +55,6 @@ type KubeServer struct {
 
 func StartKubeServer(
 	logger *logger.Logger,
-	daemonShutdownChan chan struct{},
 	doneChan chan error,
 	localPort string,
 	localHost string,
@@ -76,28 +68,23 @@ func StartKubeServer(
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) {
+	targetSelectHandler func(msg am.AgentMessage) (string, error),
+) (*KubeServer, error) {
 
 	server := &KubeServer{
-		logger:              logger,
-		daemonShutdownChan:  daemonShutdownChan,
-		doneChan:            doneChan,
-		exitMessage:         "",
-		localhostToken:      localhostToken,
-		serviceUrl:          serviceUrl,
-		params:              params,
-		headers:             headers,
-		targetSelectHandler: targetSelectHandler,
-		cert:                cert,
-		targetUser:          targetUser,
-		targetGroups:        targetGroups,
-		agentPubKey:         agentPubKey,
+		logger:         logger,
+		doneChan:       doneChan,
+		exitMessage:    "",
+		localhostToken: localhostToken,
+		cert:           cert,
+		targetUser:     targetUser,
+		targetGroups:   targetGroups,
+		agentPubKey:    agentPubKey,
 	}
 
 	// Create a new websocket
-	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		doneChan <- fmt.Errorf("failed to create websocket: %s", err)
-		return
+	if err := server.newWebsocket(uuid.New().String(), serviceUrl, params, headers, targetSelectHandler); err != nil {
+		return nil, fmt.Errorf("failed to create websocket: %s", err)
 	}
 
 	// Create HTTP Server listens for incoming kubectl commands
@@ -119,6 +106,14 @@ func StartKubeServer(
 			logger.Error(err)
 		}
 	}()
+	return server, nil
+}
+
+func (k *KubeServer) Shutdown(err error) {
+	if k.websocket != nil {
+		k.websocket.Close(err)
+	}
+	k.doneChan <- err
 }
 
 // TODO: this logic may no longer be necessary, but would require a zli change to remove
@@ -142,9 +137,9 @@ func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // for creating new websockets
-func (k *KubeServer) newWebsocket(wsId string) error {
+func (k *KubeServer) newWebsocket(wsId string, serviceUrl string, params map[string]string, headers map[string]string, targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 	subLogger := k.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, k.serviceUrl, k.params, k.headers, k.targetSelectHandler, autoReconnect, getChallenge, websocket.Cluster); err != nil {
+	if wsClient, err := websocket.New(subLogger, serviceUrl, params, headers, targetSelectHandler, autoReconnect, getChallenge, websocket.Cluster); err != nil {
 		return err
 	} else {
 		k.websocket = wsClient
@@ -172,13 +167,11 @@ func (k *KubeServer) newDataChannel(dcId string, action string, websocket *webso
 
 	action = "kube/" + action
 	attach := false
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	_, _, err = datachannel.New(subLogger, dcId, websocket, keysplitter, plugin, action, synPayload, attach, true)
+
 	if err != nil {
 		return err
 	}
-
-	// listen for shutdown orders from the daemon or news that the datachannel has died
-	go servers.ComeUpWithCoolName(k.logger, k.daemonShutdownChan, k.doneChan, k.websocket, dc, dcTmb)
 	return nil
 }
 

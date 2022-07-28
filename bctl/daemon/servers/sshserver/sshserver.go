@@ -63,7 +63,7 @@ func StartSshServer(
 	remotePort int,
 	localPort string,
 	action string,
-) *SshServer {
+) (*SshServer, error) {
 
 	server := &SshServer{
 		logger:         logger,
@@ -81,13 +81,12 @@ func StartSshServer(
 
 	// Create a new websocket and datachannel
 	if err := server.newWebsocket(uuid.New().String(), serviceUrl, params, headers, targetSelectHandler); err != nil {
-		doneChan <- fmt.Errorf("failed to create websocket: %s", err)
-		return nil
+		return nil, fmt.Errorf("failed to create websocket: %s", err)
 	} else if err := server.newDataChannel(action, server.websocket); err != nil {
-		server.Shutdown(err)
-		return nil
+		server.websocket.Close(err)
+		return nil, fmt.Errorf("failed to create datachannel: %s", err)
 	}
-	return server
+	return server, nil
 }
 
 func (s *SshServer) Shutdown(err error) {
@@ -113,17 +112,15 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	dcId := uuid.New().String()
 	attach := false
 	subLogger := s.logger.GetDatachannelLogger(dcId)
-	var err error
 
 	s.logger.Infof("Creating new datachannel id: %s", dcId)
-
-	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
 
 	fileIo := bzio.OsFileIo{}
 
 	idFile := bzssh.NewIdentityFile(s.identityFile, fileIo)
 	khFile := bzssh.NewKnownHosts(s.knownHostsFile, s.hostNames, fileIo)
 
+	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
 	plugin := ssh.New(pluginLogger, s.localPort, idFile, khFile, bzio.StdIo{})
 	if err := plugin.StartAction(action); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)
@@ -148,12 +145,11 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	}
 
 	// listen for news that the datachannel has died
-	go s.listenForDone()
+	go s.listenForDatachannelDone()
 	return nil
 }
 
-func (s *SshServer) listenForDone() {
+func (s *SshServer) listenForDatachannelDone() {
 	<-s.dcTmb.Dead()
-	s.doneChan <- s.dcTmb.Err()
-	return
+	s.Shutdown(s.dcTmb.Err())
 }
