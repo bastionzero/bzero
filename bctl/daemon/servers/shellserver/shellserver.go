@@ -47,6 +47,7 @@ type ShellServer struct {
 func StartShellServer(
 	logger *logger.Logger,
 	daemonShutdownChan chan struct{},
+	doneChan chan error,
 	targetUser string,
 	dataChannelId string,
 	cert *bzcert.DaemonBZCert,
@@ -54,12 +55,12 @@ func StartShellServer(
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) (chan error, error) {
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) {
 
 	server := &ShellServer{
 		logger:              logger,
 		daemonShutdownChan:  daemonShutdownChan,
-		doneChan:            make(chan error),
+		doneChan:            doneChan,
 		serviceUrl:          serviceUrl,
 		params:              params,
 		headers:             headers,
@@ -72,12 +73,10 @@ func StartShellServer(
 
 	// Create a new websocket and datachannel
 	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		return nil, fmt.Errorf("failed to create websocket: %s", err)
+		doneChan <- fmt.Errorf("failed to create websocket: %s", err)
 	} else if err := server.newDataChannel(string(bzshell.DefaultShell), server.websocket); err != nil {
-		return nil, fmt.Errorf("failed to create datachannel: %s", err)
+		doneChan <- fmt.Errorf("failed to create datachannel: %s", err)
 	}
-
-	return server.doneChan, nil
 }
 
 // for creating new websockets
@@ -131,6 +130,6 @@ func (ss *ShellServer) newDataChannel(action string, websocket *websocket.Websoc
 	}
 
 	// listen for shutdown orders from the daemon or news that the datachannel has died
-	go servers.ComeUpWithCoolName(ss.daemonShutdownChan, ss.doneChan, ss.websocket, dc, dcTmb)
+	go servers.ComeUpWithCoolName(ss.logger, ss.daemonShutdownChan, ss.doneChan, ss.websocket, dc, dcTmb)
 	return nil
 }

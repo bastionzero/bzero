@@ -55,6 +55,7 @@ type WebServer struct {
 
 func StartWebServer(logger *logger.Logger,
 	daemonShutdownChan chan struct{},
+	doneChan chan error,
 	localPort string,
 	localHost string,
 	targetPort int,
@@ -64,12 +65,12 @@ func StartWebServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) (chan error, error) {
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) {
 
 	server := &WebServer{
 		logger:              logger,
 		daemonShutdownChan:  daemonShutdownChan,
-		doneChan:            make(chan error),
+		doneChan:            doneChan,
 		serviceUrl:          serviceUrl,
 		params:              params,
 		headers:             headers,
@@ -84,7 +85,8 @@ func StartWebServer(logger *logger.Logger,
 
 	// Create a new websocket
 	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		return nil, fmt.Errorf("failed to create websocket: %s", err)
+		doneChan <- fmt.Errorf("failed to create websocket: %s", err)
+		return
 	}
 
 	// Create HTTP Server listens for incoming kubectl commands
@@ -97,8 +99,6 @@ func StartWebServer(logger *logger.Logger,
 			logger.Error(err)
 		}
 	}()
-
-	return server.doneChan, nil
 }
 
 // this function operates as middleware between the http handler and the handleHttp call below
@@ -193,6 +193,6 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 	}
 
 	// listen for shutdown orders from the daemon or news that the datachannel has died
-	go servers.ComeUpWithCoolName(w.daemonShutdownChan, w.doneChan, w.websocket, dc, dcTmb)
+	go servers.ComeUpWithCoolName(w.logger, w.daemonShutdownChan, w.doneChan, w.websocket, dc, dcTmb)
 	return nil
 }

@@ -52,26 +52,26 @@ func main() {
 			params["version"] = daemonVersion
 
 			daemonShutdownChan := make(chan struct{})
+			serverDoneChan := make(chan error)
 
 			// TODO: how will this scale?
-			if serverDoneChan, err := startServer(logger, daemonShutdownChan, headers, params); err != nil {
-				logger.Errorf("failed to start %s server: %s", config[PLUGIN], err)
-				exitcodes.HandleDaemonError(err, logger)
-			} else {
-				// we should never exit without allowing our server(s?) to shutdown gracefully
-				// therefore our response to a SIGINT or SIGTERM is to tell the server to say its goodbyes
-				// but we still wait for it to signal that it's ready to die
-				osShutdownChan := bzos.OsShutdownChan()
-				for {
-					select {
-					case signal := <-osShutdownChan:
-						logger.Errorf("received shutdown signal: %s", signal.String())
-						close(daemonShutdownChan)
-					case err := <-serverDoneChan:
-						// TODO: maybe do the whole "innermost error thing" here...
-						exitcodes.HandleDaemonError(err, logger)
-						// TODO: any other cleanup?
-					}
+			go startServer(logger, daemonShutdownChan, serverDoneChan, headers, params)
+
+			// we should never exit without allowing our server(s?) to shutdown gracefully
+			// therefore our response to a SIGINT or SIGTERM is to tell the server to say its goodbyes
+			// but we still wait for it to signal that it's ready to die
+			// TODO: put this comment in better spot
+			osShutdownChan := bzos.OsShutdownChan()
+			for {
+				select {
+				case signal := <-osShutdownChan:
+					logger.Errorf("received shutdown signal: %s", signal.String())
+					close(daemonShutdownChan)
+				case err := <-serverDoneChan:
+					logger.Errorf("So did I see something here?")
+					// TODO: maybe do the whole "innermost error thing" here...
+					exitcodes.HandleDaemonError(err, logger)
+					// TODO: any other cleanup?
 				}
 			}
 		}
@@ -114,7 +114,7 @@ func reportError(logger *bzlogger.Logger, errorReport error) {
 	errorreport.ReportError(logger, config[SERVICE_URL].Value, errReport)
 }
 
-func startServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, headers map[string]string, params map[string]string) (chan error, error) {
+func startServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, doneChan chan error, headers map[string]string, params map[string]string) {
 	connectionServiceUrl := config[CONNECTION_SERVICE_URL].Value
 	plugin := config[PLUGIN].Value
 
@@ -127,7 +127,8 @@ func startServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, head
 	// create our MrZAP object
 	zliConfig, err := zliconfig.New(config[CONFIG_PATH].Value, config[REFRESH_TOKEN_COMMAND].Value)
 	if err != nil {
-		return nil, err
+		doneChan <- err
+		return
 	}
 
 	// This validates the bzcert before creating the server so we can fail
@@ -135,31 +136,33 @@ func startServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, head
 	// user to login again if the cert contains expired IdP id tokens
 	cert, err := bzcert.New(zliConfig)
 	if err != nil {
-		exitcodes.HandleDaemonError(err, logger)
+		// don't attach a message here because we read this error type
+		doneChan <- err
+		return
 	}
 
 	switch bzplugin.PluginName(plugin) {
 	case bzplugin.Db:
 		params["websocketType"] = "db"
-		return startDbServer(logger, daemonShutdownChan, headers, params, cert)
+		startDbServer(logger, daemonShutdownChan, doneChan, headers, params, cert)
 	case bzplugin.Kube:
 		params["websocketType"] = "cluster"
-		return startKubeServer(logger, daemonShutdownChan, headers, params, cert)
+		startKubeServer(logger, daemonShutdownChan, doneChan, headers, params, cert)
 	case bzplugin.Shell:
 		params["websocketType"] = "shell"
-		return startShellServer(logger, daemonShutdownChan, headers, params, cert)
+		startShellServer(logger, daemonShutdownChan, doneChan, headers, params, cert)
 	case bzplugin.Ssh:
 		params["websocketType"] = "ssh"
-		return startSshServer(logger, daemonShutdownChan, headers, params, cert)
+		startSshServer(logger, daemonShutdownChan, doneChan, headers, params, cert)
 	case bzplugin.Web:
 		params["websocketType"] = "web"
-		return startWebServer(logger, daemonShutdownChan, headers, params, cert)
+		startWebServer(logger, daemonShutdownChan, doneChan, headers, params, cert)
 	default:
-		return nil, fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
+		doneChan <- fmt.Errorf("unhandled plugin passed when trying to start server: %s", plugin)
 	}
 }
 
-func startSshServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) (chan error, error) {
+func startSshServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, doneChan chan error, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) {
 	subLogger := logger.GetComponentLogger("sshserver")
 
 	params["target_id"] = config[TARGET_ID].Value
@@ -168,12 +171,14 @@ func startSshServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, h
 	params["remote_port"] = config[REMOTE_PORT].Value
 	remotePort, err := strconv.Atoi(config[REMOTE_PORT].Value)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse remote port: %s", err)
+		doneChan <- fmt.Errorf("failed to parse remote port: %s", err)
+		return
 	}
 
-	return sshserver.StartSshServer(
+	sshserver.StartSshServer(
 		subLogger,
 		daemonShutdownChan,
+		doneChan,
 		config[TARGET_USER].Value,
 		config[DATACHANNEL_ID].Value,
 		cert,
@@ -192,12 +197,13 @@ func startSshServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, h
 	)
 }
 
-func startShellServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) (chan error, error) {
+func startShellServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, doneChan chan error, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) {
 	subLogger := logger.GetComponentLogger("shellserver")
 
-	return shellserver.StartShellServer(
+	shellserver.StartShellServer(
 		subLogger,
 		daemonShutdownChan,
+		doneChan,
 		config[TARGET_USER].Value,
 		config[DATACHANNEL_ID].Value,
 		cert,
@@ -209,18 +215,20 @@ func startShellServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{},
 	)
 }
 
-func startWebServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) (chan error, error) {
+func startWebServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, doneChan chan error, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) {
 	subLogger := logger.GetComponentLogger("webserver")
 
 	params["target_id"] = config[TARGET_ID].Value
 	remotePort, err := strconv.Atoi(config[REMOTE_PORT].Value)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse remote port: %s", err)
+		doneChan <- fmt.Errorf("failed to parse remote port: %s", err)
+		return
 	}
 
-	return webserver.StartWebServer(
+	webserver.StartWebServer(
 		subLogger,
 		daemonShutdownChan,
+		doneChan,
 		config[LOCAL_PORT].Value,
 		config[LOCAL_HOST].Value,
 		remotePort,
@@ -230,21 +238,24 @@ func startWebServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, h
 		params,
 		headers,
 		config[AGENT_PUB_KEY].Value,
-		targetSelectHandler)
+		targetSelectHandler,
+	)
 }
 
-func startDbServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) (chan error, error) {
+func startDbServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, doneChan chan error, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) {
 	subLogger := logger.GetComponentLogger("dbserver")
 
 	params["target_id"] = config[TARGET_ID].Value
 	remotePort, err := strconv.Atoi(config[REMOTE_PORT].Value)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse remote port: %s", err)
+		doneChan <- fmt.Errorf("failed to parse remote port: %s", err)
+		return
 	}
 
-	return dbserver.StartDbServer(
+	dbserver.StartDbServer(
 		subLogger,
 		daemonShutdownChan,
+		doneChan,
 		config[LOCAL_PORT].Value,
 		config[LOCAL_HOST].Value,
 		remotePort,
@@ -254,10 +265,11 @@ func startDbServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, he
 		params,
 		headers,
 		config[AGENT_PUB_KEY].Value,
-		targetSelectHandler)
+		targetSelectHandler,
+	)
 }
 
-func startKubeServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) (chan error, error) {
+func startKubeServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, doneChan chan error, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) {
 	subLogger := logger.GetComponentLogger("kubeserver")
 
 	// Set our param value for target_user and target_group
@@ -270,9 +282,10 @@ func startKubeServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, 
 		targetGroups = strings.Split(config[TARGET_GROUPS].Value, ",")
 	}
 
-	return kubeserver.StartKubeServer(
+	kubeserver.StartKubeServer(
 		subLogger,
 		daemonShutdownChan,
+		doneChan,
 		config[LOCAL_PORT].Value,
 		config[LOCAL_HOST].Value,
 		config[CERT_PATH].Value,
@@ -285,7 +298,8 @@ func startKubeServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, 
 		params,
 		headers,
 		config[AGENT_PUB_KEY].Value,
-		targetSelectHandler)
+		targetSelectHandler,
+	)
 }
 
 func targetSelectHandler(agentMessage am.AgentMessage) (string, error) {

@@ -49,6 +49,7 @@ type DbServer struct {
 
 func StartDbServer(logger *logger.Logger,
 	daemonShutdownChan chan struct{},
+	doneChan chan error,
 	localPort string,
 	localHost string,
 	remotePort int,
@@ -58,12 +59,12 @@ func StartDbServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) (chan error, error) {
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) {
 
 	server := &DbServer{
 		logger:              logger,
 		daemonShutdownChan:  daemonShutdownChan,
-		doneChan:            make(chan error),
+		doneChan:            doneChan,
 		serviceUrl:          serviceUrl,
 		params:              params,
 		headers:             headers,
@@ -78,20 +79,23 @@ func StartDbServer(logger *logger.Logger,
 
 	// Create a new websocket
 	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		return nil, fmt.Errorf("failed to create websocket: %s", err)
+		doneChan <- fmt.Errorf("failed to create websocket: %s", err)
+		return
 	}
 
 	// Now create our local listener for TCP connections
 	logger.Infof("Resolving TCP address for host:port %s:%s", localHost, localPort)
 	localTcpAddress, err := net.ResolveTCPAddr("tcp", localHost+":"+localPort)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve TCP address %s", err)
+		doneChan <- fmt.Errorf("failed to resolve TCP address %s", err)
+		return
 	}
 
 	logger.Infof("Setting up TCP listener")
 	localTcpListener, err := net.ListenTCP("tcp", localTcpAddress)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open local port to listen: %s", err)
+		doneChan <- fmt.Errorf("failed to open local port to listen: %s", err)
+		return
 	}
 
 	// Always ensure we close the local tcp connection when we exit
@@ -123,6 +127,7 @@ func StartDbServer(logger *logger.Logger,
 				logger.Errorf("error starting datachannel: %s", err)
 			}
 		}()
+		// TODO: what happens here?
 	}
 }
 
@@ -163,6 +168,6 @@ func (d *DbServer) newDataChannel(dcId string, action string, websocket *websock
 	}
 
 	// listen for shutdown orders from the daemon or news that the datachannel has died
-	go servers.ComeUpWithCoolName(d.daemonShutdownChan, d.doneChan, d.websocket, dc, dcTmb)
+	go servers.ComeUpWithCoolName(d.logger, d.daemonShutdownChan, d.doneChan, d.websocket, dc, dcTmb)
 	return nil
 }

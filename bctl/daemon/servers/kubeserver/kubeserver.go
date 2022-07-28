@@ -63,6 +63,7 @@ type KubeServer struct {
 func StartKubeServer(
 	logger *logger.Logger,
 	daemonShutdownChan chan struct{},
+	doneChan chan error,
 	localPort string,
 	localHost string,
 	certPath string,
@@ -75,13 +76,12 @@ func StartKubeServer(
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error),
-) (chan error, error) {
+	targetSelectHandler func(msg am.AgentMessage) (string, error)) {
 
 	server := &KubeServer{
 		logger:              logger,
 		daemonShutdownChan:  daemonShutdownChan,
-		doneChan:            make(chan error),
+		doneChan:            doneChan,
 		exitMessage:         "",
 		localhostToken:      localhostToken,
 		serviceUrl:          serviceUrl,
@@ -96,7 +96,8 @@ func StartKubeServer(
 
 	// Create a new websocket
 	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		return nil, fmt.Errorf("failed to create websocket: %s", err)
+		doneChan <- fmt.Errorf("failed to create websocket: %s", err)
+		return
 	}
 
 	// Create HTTP Server listens for incoming kubectl commands
@@ -118,8 +119,6 @@ func StartKubeServer(
 			logger.Error(err)
 		}
 	}()
-
-	return server.doneChan, nil
 }
 
 // TODO: this logic may no longer be necessary, but would require a zli change to remove
@@ -179,7 +178,7 @@ func (k *KubeServer) newDataChannel(dcId string, action string, websocket *webso
 	}
 
 	// listen for shutdown orders from the daemon or news that the datachannel has died
-	go servers.ComeUpWithCoolName(k.daemonShutdownChan, k.doneChan, k.websocket, dc, dcTmb)
+	go servers.ComeUpWithCoolName(k.logger, k.daemonShutdownChan, k.doneChan, k.websocket, dc, dcTmb)
 	return nil
 }
 

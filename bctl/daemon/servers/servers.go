@@ -3,28 +3,37 @@ package servers
 import (
 	"fmt"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
-	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"gopkg.in/tomb.v2"
 )
 
-func ComeUpWithCoolName(daemonShutdownChan chan struct{}, doneChan chan error, websocket *websocket.Websocket, dc *datachannel.DataChannel, dcTmb *tomb.Tomb) {
+type IServer interface {
+	Shutdown(err error)
+	DaemonShutdownChan() chan struct{}
+}
+
+type IEphemeralServer interface {
+	IServer
+	DataChannelTomb() *tomb.Tomb
+	DoneChan() chan error // TODO: make write-only
+}
+
+func CoolServerFunc(server IServer) {
+	if _, ok := <-server.DaemonShutdownChan(); !ok {
+		server.Shutdown(fmt.Errorf("daemon was shut down"))
+	}
+}
+
+func CoolEphemeralServerFunc(server IEphemeralServer) {
+	dcTmb := server.DataChannelTomb()
 	for {
 		select {
-		case _, ok := <-daemonShutdownChan:
+		case _, ok := <-server.DaemonShutdownChan():
 			if !ok {
-				// TODO: not entirely certain this is right
-				err := fmt.Errorf("daemon was shut down")
-				websocket.Close(err)
-				dc.Close(err)
-				// TODO: break?
+				server.Shutdown(fmt.Errorf("daemon was shut down"))
 			}
-		// FIXME: how do we wait for both the websocket and datachannel...
-		// websocket.Close() has a tmb.Wait(), that's good
-		// does datachannel.Close() need one?
 		case <-dcTmb.Dead():
-			doneChan <- dcTmb.Err()
-			break
+			server.DoneChan() <- dcTmb.Err()
+			return
 		}
 	}
 }
