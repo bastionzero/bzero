@@ -50,6 +50,7 @@ func New(
 ) *SignalR {
 	return &SignalR{
 		logger:      logger,
+		client:      client,
 		doneChan:    make(chan struct{}),
 		outbound:    make(chan *am.AgentMessage, 200),
 		broadcaster: broker.New(),
@@ -193,7 +194,16 @@ func (s *SignalR) negotiate(connectionUrl string, params map[string][]string) er
 		return fmt.Errorf("failed on call to negotiate: %s", err)
 	}
 
-	// LUCIE: might need this here
+	// var negotiateResponse struct {
+	// 	ConnectionId string `json:"connectionId"`
+	// }
+	// body, err := ioutil.ReadAll(response.Body)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to read negotiate response")
+	// }
+	// if err := json.Unmarshal()
+
+	// // LUCIE: might need this here
 	// w.params["id"] = m["connectionId"].(string)
 	// w.params["clientProtocol"] = "1.5"
 	// w.params["transport"] = "WebSockets"
@@ -222,6 +232,10 @@ func (s *SignalR) unwrap(raw []byte) error {
 		}
 
 		switch SignalRMessageType(signalRMessageType.Type) {
+		// This SignalR close message can be thrown on `OnConnectedAsync` as a result of
+		//  of failed param validation
+		case Close:
+			s.Close(fmt.Errorf("received SignalR message to close the connection"))
 
 		// These messages let us know if a previous message was recieved correctly
 		// and provides us with the resulting error if not

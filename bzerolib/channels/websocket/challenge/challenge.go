@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"bastionzero.com/bctl/v1/bzerolib/connection/httpclient"
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -24,7 +25,13 @@ type ChallengeResponse struct {
 	Challenge string `json:"challenge"`
 }
 
-func Get(serviceUrl string, targetId string, version string, signingKey string) (string, error) {
+func Get(
+	logger *logger.Logger,
+	serviceUrl string,
+	targetId string,
+	version string,
+	signingKey string,
+) (string, error) {
 	// Build our request body
 	request := ChallengeRequest{
 		TargetId: targetId,
@@ -41,7 +48,8 @@ func Get(serviceUrl string, targetId string, version string, signingKey string) 
 		Endpoint: challengeEndpoint,
 		Body:     requestBytes,
 	}
-	client, err := httpclient.New(nil, serviceUrl, options)
+	logger.Infof("BODY: %s", string(requestBytes))
+	client, err := httpclient.New(logger, serviceUrl, options)
 	if err != nil {
 		return "", err
 	}

@@ -59,6 +59,8 @@ func New(
 		serviceUrl = combo.String()
 	}
 
+	logger.Infof("HTTP URL: %s", serviceUrl)
+
 	if options.Headers == nil {
 		options.Headers = make(map[string][]string)
 	}
@@ -122,7 +124,7 @@ func (h *HttpClient) request(method RequestMethod, ctx context.Context) (*http.R
 			return nil, fmt.Errorf("context cancelled before successful http response")
 		case _, ok := <-ticker.C:
 			if !ok {
-				return nil, fmt.Errorf("failed to get successful http response after %s", h.backoffParams.MaxElapsedTime)
+				return nil, fmt.Errorf("failed to get successful http response after %s", h.backoffParams.MaxElapsedTime.Round(time.Second))
 			}
 
 			if response, err := h.makeRequestOnce(method, ctx); err != nil {
@@ -148,6 +150,8 @@ func (h *HttpClient) makeRequestOnce(method RequestMethod, ctx context.Context) 
 	// Add params to request URL
 	query := url.Values(h.params)
 	request.URL.RawQuery = query.Encode()
+
+	h.logger.Infof("PARAMS %+v", h.params)
 
 	// Make our Request
 	response, err := client.Do(request)

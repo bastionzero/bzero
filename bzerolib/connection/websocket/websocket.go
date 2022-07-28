@@ -31,6 +31,7 @@ type Websocket struct {
 
 func New() *Websocket {
 	return &Websocket{
+		doneChan: make(chan struct{}),
 		inbound:  make(chan *[]byte, 200),
 		outbound: make(chan *[]byte, 200),
 	}

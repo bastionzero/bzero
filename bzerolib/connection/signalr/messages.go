@@ -12,6 +12,8 @@ const (
 	Invocation SignalRMessageType = 1
 	// Ref: https://github.com/aspnet/SignalR/blob/master/specs/HubProtocol.md#completion-message-encoding
 	Completion SignalRMessageType = 3
+	// Ref: https://docs.microsoft.com/en-us/javascript/api/@microsoft/signalr/messagetype?view=signalr-js-latest
+	Close SignalRMessageType = 7
 )
 
 type MessageTypeOnly struct {
