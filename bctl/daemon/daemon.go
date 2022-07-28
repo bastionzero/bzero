@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
+	"bastionzero.com/bctl/v1/bctl/daemon/exit"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/dbserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/kubeserver"
@@ -57,25 +57,21 @@ func main() {
 
 			daemonShutdownChan := make(chan struct{})
 			serverDoneChan := make(chan error)
-
-			// TODO: how will this scale?
 			go startServer(logger, daemonShutdownChan, serverDoneChan, headers, params)
 
-			// we should never exit without allowing our server(s?) to shutdown gracefully
+			// we should never exit without allowing our server to shutdown gracefully
 			// therefore our response to a SIGINT or SIGTERM is to tell the server to say its goodbyes
-			// but we still wait for it to signal that it's ready to die
-			// TODO: put this comment in better spot
 			osShutdownChan := bzos.OsShutdownChan()
 			for {
 				select {
 				case signal := <-osShutdownChan:
 					logger.Errorf("received shutdown signal: %s", signal.String())
 					close(daemonShutdownChan)
+					// but we still wait for it to signal that it's ready to die
 				case err := <-serverDoneChan:
-					logger.Errorf("So did I see something here?")
 					// TODO: maybe do the whole "innermost error thing" here...
-					exitcodes.HandleDaemonError(err, logger)
-					// TODO: any other cleanup?
+					exit.HandleDaemonExit(err, logger)
+					// TODO: any other cleanup we need?
 				}
 			}
 		}
@@ -177,7 +173,7 @@ func startServer(logger *bzlogger.Logger, daemonShutdownChan chan struct{}, done
 
 func listenForShutdown(shutdownChan <-chan struct{}, server IServer) {
 	if _, ok := <-shutdownChan; !ok {
-		server.Shutdown(fmt.Errorf("daemon was shut down"))
+		server.Shutdown(fmt.Errorf("daemon was shut down by external signal"))
 	}
 }
 

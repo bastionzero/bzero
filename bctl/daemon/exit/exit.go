@@ -1,4 +1,4 @@
-package exitcodes
+package exit
 
 import (
 	"errors"
@@ -15,11 +15,10 @@ const (
 	BZCERT_ID_TOKEN_ERROR = 2
 )
 
-// TODO: update docstring
-// TODO: maybe even rename this entire file!
+// this should be the one and only path by which the daemon exits
 // Checks if the error is a specially handled error where we should exit the
 // daemon process with a specific exit code
-func HandleDaemonError(err error, logger *logger.Logger) {
+func HandleDaemonExit(err error, logger *logger.Logger) {
 	if err == nil {
 		os.Exit(SUCCESS)
 	}

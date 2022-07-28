@@ -120,7 +120,6 @@ func run(logger *logger.Logger) {
 		// wait until we recieve a kill signal and quit
 		osShutdownChan := bzos.OsShutdownChan()
 		signal := <-osShutdownChan
-		// TODO: revisit
 		control.Close(fmt.Errorf("received shutdown signal: %s", signal.String()))
 		os.Exit(1)
 	}
