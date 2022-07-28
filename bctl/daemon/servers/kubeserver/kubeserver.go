@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
@@ -38,19 +37,14 @@ type StatusMessage struct {
 }
 
 type KubeServer struct {
-	logger      *logger.Logger
-	websocket   *websocket.Websocket // TODO: This will need to be a dictionary for when we have multiple
-	tmb         tomb.Tomb
+	logger   *logger.Logger
+	doneChan chan error
+
+	websocket   *websocket.Websocket
 	exitMessage string
 
 	// fields for processing incoming kubectl commands
 	localhostToken string
-
-	// fields for opening websockets
-	serviceUrl          string
-	params              map[string]string
-	headers             map[string]string
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	// fields for new datachannels
 	cert         *bzcert.DaemonBZCert
@@ -61,6 +55,7 @@ type KubeServer struct {
 
 func StartKubeServer(
 	logger *logger.Logger,
+	doneChan chan error,
 	localPort string,
 	localHost string,
 	certPath string,
@@ -74,26 +69,22 @@ func StartKubeServer(
 	headers map[string]string,
 	agentPubKey string,
 	targetSelectHandler func(msg am.AgentMessage) (string, error),
-) error {
+) (*KubeServer, error) {
 
 	server := &KubeServer{
-		logger:              logger,
-		exitMessage:         "",
-		localhostToken:      localhostToken,
-		serviceUrl:          serviceUrl,
-		params:              params,
-		headers:             headers,
-		targetSelectHandler: targetSelectHandler,
-		cert:                cert,
-		targetUser:          targetUser,
-		targetGroups:        targetGroups,
-		agentPubKey:         agentPubKey,
+		logger:         logger,
+		doneChan:       doneChan,
+		exitMessage:    "",
+		localhostToken: localhostToken,
+		cert:           cert,
+		targetUser:     targetUser,
+		targetGroups:   targetGroups,
+		agentPubKey:    agentPubKey,
 	}
 
 	// Create a new websocket
-	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
-		return err
+	if err := server.newWebsocket(uuid.New().String(), serviceUrl, params, headers, targetSelectHandler); err != nil {
+		return nil, fmt.Errorf("failed to create websocket: %s", err)
 	}
 
 	// Create HTTP Server listens for incoming kubectl commands
@@ -115,8 +106,14 @@ func StartKubeServer(
 			logger.Error(err)
 		}
 	}()
+	return server, nil
+}
 
-	return nil
+func (k *KubeServer) Shutdown(err error) {
+	if k.websocket != nil {
+		k.websocket.Close(err)
+	}
+	k.doneChan <- err
 }
 
 // TODO: this logic may no longer be necessary, but would require a zli change to remove
@@ -140,9 +137,9 @@ func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // for creating new websockets
-func (k *KubeServer) newWebsocket(wsId string) error {
+func (k *KubeServer) newWebsocket(wsId string, serviceUrl string, params map[string]string, headers map[string]string, targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
 	subLogger := k.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, k.serviceUrl, k.params, k.headers, k.targetSelectHandler, autoReconnect, getChallenge, websocket.Cluster); err != nil {
+	if wsClient, err := websocket.New(subLogger, serviceUrl, params, headers, targetSelectHandler, autoReconnect, getChallenge, websocket.Cluster); err != nil {
 		return err
 	} else {
 		k.websocket = wsClient
@@ -170,38 +167,11 @@ func (k *KubeServer) newDataChannel(dcId string, action string, websocket *webso
 
 	action = "kube/" + action
 	attach := false
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &k.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	_, _, err = datachannel.New(subLogger, dcId, websocket, keysplitter, plugin, action, synPayload, attach, true)
+
 	if err != nil {
 		return err
 	}
-
-	// create a function to listen to the datachannel dying and then laugh
-	go func() {
-		for {
-			select {
-			case <-k.tmb.Dying():
-				dc.Close(errors.New("kube server closing"))
-				return
-			case <-dcTmb.Dead():
-				// only report the error if it's not nil.  Otherwise,  we assume the datachannel closed legitimately.
-				if err := dcTmb.Err(); err != nil {
-					errs := strings.Split(dcTmb.Err().Error(), ": ")
-					msg := fmt.Sprintf("error: %s", errs[len(errs)-1])
-					k.bubbleUpError(writer, msg, 500)
-				}
-
-				// notify agent to close the datachannel
-				k.logger.Info("Sending DataChannel Close")
-				cdMessage := am.AgentMessage{
-					ChannelId:   dcId,
-					MessageType: string(am.CloseDataChannel),
-				}
-				k.websocket.Send(cdMessage)
-
-				return
-			}
-		}
-	}()
 	return nil
 }
 

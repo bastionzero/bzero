@@ -1,4 +1,4 @@
-package exitcodes
+package exit
 
 import (
 	"errors"
@@ -15,9 +15,13 @@ const (
 	BZCERT_ID_TOKEN_ERROR = 2
 )
 
+// this should be the one and only path by which the daemon exits
 // Checks if the error is a specially handled error where we should exit the
 // daemon process with a specific exit code
-func HandleDaemonError(err error, logger *logger.Logger) {
+func HandleDaemonExit(err error, logger *logger.Logger) {
+	if err == nil {
+		os.Exit(SUCCESS)
+	}
 	// https://go.dev/blog/go1.13-errors target
 	// Check if the error is either a bzcert.InitialIdTokenError (IdP key
 	// rotation) or bzcert.CurrentIdTokenError (id token needs to be
@@ -29,4 +33,7 @@ func HandleDaemonError(err error, logger *logger.Logger) {
 		logger.Errorf("IdP tokens are invalid/expired. Please try to re-login with the zli.")
 		os.Exit(BZCERT_ID_TOKEN_ERROR)
 	}
+
+	logger.Errorf("shutting down with unhandled error: %s", err)
+	os.Exit(UNSPECIFIED_ERROR)
 }

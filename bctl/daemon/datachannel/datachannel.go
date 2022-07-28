@@ -68,7 +68,6 @@ type DataChannel struct {
 func New(
 	logger *logger.Logger,
 	id string,
-	parentTmb *tomb.Tomb, // daemon has ability to rage quit and take everything down with it
 	websocket websocket.IWebsocket,
 	keysplitter IKeysplitting,
 	plugin IPlugin,
@@ -105,42 +104,51 @@ func New(
 	}
 
 	dc.tmb.Go(func() error {
+		var err error
 		defer websocket.Unsubscribe(id) // causes decoupling from websocket
 		defer dc.logger.Info("Datachannel done")
 
 		// wait for the syn/ack to our intial syn message or an error
-		if err := dc.handshakeOrTimeout(); err != nil {
+		if err = dc.handshakeOrTimeout(); err != nil {
 			dc.logger.Error(err)
 			return err
 		}
 		dc.logger.Info("Initial handshake complete")
 
+	mainLoop:
 		for {
 			select {
-			case <-parentTmb.Dying(): // daemon is dying
-				dc.logger.Info("Datachannel was orphaned too young and can't be batman :'(")
-				dc.plugin.Kill()
-				return nil
 			case <-dc.tmb.Dying():
 				dc.logger.Infof("Datachannel dying: %s", dc.tmb.Err().Error())
 				dc.plugin.Kill()
-				return nil
+				break mainLoop
 			case <-dc.plugin.Done():
 				dc.logger.Infof("%s is done", action)
 				if processInputChanBeforeExit {
 					// wait for any in-flight messages to come in and ensure all outgoing messages go out
 					return dc.waitForRemainingMessages()
 				}
-				return nil
+				break mainLoop
 			case agentMessage := <-dc.inputChan: // receive messages
 				if err := dc.processInputMessage(agentMessage); err != nil {
 					dc.logger.Error(err)
 				}
 			case <-time.After(datachannelIdleTimeout):
 				dc.logger.Info("Datachannel has been idle for too long, ceasing operation")
-				return fmt.Errorf("cleaning up stale datachannel")
+				err = fmt.Errorf("cleaning up stale datachannel")
+				break mainLoop
 			}
 		}
+
+		// this area is effectively the datachannel's shutdown process
+		// as of now, the only thing it's responsibile for is sending this message
+		dc.logger.Infof("sending CloseDataChannel message to the agent")
+		websocket.Send(am.AgentMessage{
+			ChannelId:   dc.id,
+			MessageType: string(am.CloseDataChannel),
+		})
+
+		return err
 	})
 
 	go dc.sendKeysplitting()
@@ -225,6 +233,7 @@ func (d *DataChannel) zapPluginOutput() error {
 
 func (d *DataChannel) Close(reason error) {
 	d.tmb.Kill(reason) // kills all datachannel, plugin, and action goroutines
+	d.tmb.Wait()
 }
 
 func (d *DataChannel) openDataChannel(action string, synPayload interface{}) error {

@@ -1,20 +1,18 @@
 package webserver
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
-	"gopkg.in/tomb.v2"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/web"
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
-	bzwebsocket "bastionzero.com/bctl/v1/bzerolib/channels/websocket"
+	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzweb "bastionzero.com/bctl/v1/bzerolib/plugin/web"
@@ -31,12 +29,10 @@ const (
 )
 
 type WebServer struct {
-	logger    *logger.Logger
-	websocket *bzwebsocket.Websocket
-	tmb       tomb.Tomb
+	logger   *logger.Logger
+	doneChan chan error
 
-	// Handler to select message types
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
+	websocket *websocket.Websocket
 
 	// Web specific vars
 	// Either user the full dns (i.e. targetHostName) or the host:port
@@ -46,14 +42,12 @@ type WebServer struct {
 	// fields for new datachannels
 	localPort   string
 	localHost   string
-	params      map[string]string
-	headers     map[string]string
-	serviceUrl  string
 	agentPubKey string
 	cert        *bzcert.DaemonBZCert
 }
 
 func StartWebServer(logger *logger.Logger,
+	doneChan chan error,
 	localPort string,
 	localHost string,
 	targetPort int,
@@ -63,26 +57,23 @@ func StartWebServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	targetSelectHandler func(msg am.AgentMessage) (string, error),
+) (*WebServer, error) {
 
 	server := &WebServer{
-		logger:              logger,
-		serviceUrl:          serviceUrl,
-		params:              params,
-		headers:             headers,
-		targetSelectHandler: targetSelectHandler,
-		cert:                cert,
-		localPort:           localPort,
-		localHost:           localHost,
-		targetHost:          targetHost,
-		targetPort:          targetPort,
-		agentPubKey:         agentPubKey,
+		logger:      logger,
+		doneChan:    doneChan,
+		cert:        cert,
+		localPort:   localPort,
+		localHost:   localHost,
+		targetHost:  targetHost,
+		targetPort:  targetPort,
+		agentPubKey: agentPubKey,
 	}
 
 	// Create a new websocket
-	if err := server.newWebsocket(uuid.New().String()); err != nil {
-		server.logger.Error(err)
-		return err
+	if err := server.newWebsocket(uuid.New().String(), serviceUrl, params, headers, targetSelectHandler); err != nil {
+		return nil, fmt.Errorf("failed to create websocket: %s", err)
 	}
 
 	// Create HTTP Server listens for incoming kubectl commands
@@ -95,8 +86,14 @@ func StartWebServer(logger *logger.Logger,
 			logger.Error(err)
 		}
 	}()
+	return server, nil
+}
 
-	return nil
+func (w *WebServer) Shutdown(err error) {
+	if w.websocket != nil {
+		w.websocket.Close(err)
+	}
+	w.doneChan <- err
 }
 
 // this function operates as middleware between the http handler and the handleHttp call below
@@ -155,18 +152,18 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 }
 
 // for creating new websockets
-func (h *WebServer) newWebsocket(wsId string) error {
-	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := bzwebsocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, bzwebsocket.Web); err != nil {
+func (w *WebServer) newWebsocket(wsId string, serviceUrl string, params map[string]string, headers map[string]string, targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+	subLogger := w.logger.GetWebsocketLogger(wsId)
+	if wsClient, err := websocket.New(subLogger, serviceUrl, params, headers, targetSelectHandler, autoReconnect, getChallenge, websocket.Web); err != nil {
 		return err
 	} else {
-		h.websocket = wsClient
+		w.websocket = wsClient
 		return nil
 	}
 }
 
 // for creating new datachannels
-func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocket *bzwebsocket.Websocket, plugin *web.WebDaemonPlugin) error {
+func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocket *websocket.Websocket, plugin *web.WebDaemonPlugin) error {
 	attach := false
 	subLogger := w.logger.GetDatachannelLogger(dcId)
 
@@ -185,30 +182,9 @@ func (w *WebServer) newDataChannel(dcId string, action bzweb.WebAction, websocke
 	}
 
 	actString := "web/" + string(action)
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &w.tmb, websocket, keysplitter, plugin, actString, synPayload, attach, true)
+	_, _, err = datachannel.New(subLogger, dcId, websocket, keysplitter, plugin, actString, synPayload, attach, true)
 	if err != nil {
 		return err
 	}
-
-	// create a function to listen to the datachannel dying and then laugh
-	go func() {
-		for {
-			select {
-			case <-w.tmb.Dying():
-				dc.Close(errors.New("web server closing"))
-				return
-			case <-dcTmb.Dead():
-				// notify agent to close the datachannel
-				w.logger.Info("Sending DataChannel Close")
-				cdMessage := am.AgentMessage{
-					ChannelId:   dcId,
-					MessageType: string(am.CloseDataChannel),
-				}
-				w.websocket.Send(cdMessage)
-
-				return
-			}
-		}
-	}()
 	return nil
 }
