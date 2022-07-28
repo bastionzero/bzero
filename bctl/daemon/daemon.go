@@ -55,7 +55,9 @@ func main() {
 			params := make(map[string]string)
 			params["version"] = daemonVersion
 
+			// how the daemon tells the server to stop
 			daemonShutdownChan := make(chan struct{})
+			// how the server tells the daemon it has stopped
 			serverDoneChan := make(chan error)
 			go startServer(logger, daemonShutdownChan, serverDoneChan, headers, params)
 
