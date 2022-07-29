@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"bastionzero.com/bctl/v1/bctl/daemon/datachannel"
+	"bastionzero.com/bctl/v1/bctl/daemon/exitcodes"
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting"
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
 	bzssh "bastionzero.com/bctl/v1/bzerolib/plugin/ssh"
@@ -30,43 +31,55 @@ type SshServer struct {
 	websocket *websocket.Websocket
 	tmb       tomb.Tomb
 
-	remoteHost   string
-	remotePort   int
-	targetUser   string
-	identityFile string
+	remoteHost string
+	remotePort int
+	localPort  string
+	targetUser string
+
+	identityFile   string
+	knownHostsFile string
+	hostNames      []string
 
 	// fields for new datachannels
 	params      map[string]string
 	headers     map[string]string
 	serviceUrl  string
 	agentPubKey string
-	cert        *bzcert.BZCert
+	cert        *bzcert.DaemonBZCert
 }
 
 func StartSshServer(
 	logger *logger.Logger,
 	targetUser string,
 	dataChannelId string,
-	cert *bzcert.BZCert,
+	cert *bzcert.DaemonBZCert,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
 	identityFile string,
+	knownHostsFile string,
+	hostNames []string,
 	remoteHost string,
 	remotePort int,
+	localPort string,
+	action string,
 ) error {
 
 	server := &SshServer{
-		logger:       logger,
-		serviceUrl:   serviceUrl,
-		targetUser:   targetUser,
-		params:       params,
-		headers:      headers,
-		cert:         cert,
-		identityFile: identityFile,
-		remoteHost:   remoteHost,
-		remotePort:   remotePort,
+		logger:         logger,
+		serviceUrl:     serviceUrl,
+		targetUser:     targetUser,
+		params:         params,
+		headers:        headers,
+		cert:           cert,
+		agentPubKey:    agentPubKey,
+		identityFile:   identityFile,
+		knownHostsFile: knownHostsFile,
+		hostNames:      hostNames,
+		remoteHost:     remoteHost,
+		remotePort:     remotePort,
+		localPort:      localPort,
 	}
 
 	// Create a new websocket
@@ -76,8 +89,9 @@ func StartSshServer(
 	}
 
 	// create our new datachannel
-	if err := server.newDataChannel(string(bzssh.OpaqueSsh), server.websocket); err != nil {
+	if err := server.newDataChannel(action, server.websocket); err != nil {
 		logger.Errorf("error starting datachannel: %s", err)
+		os.Exit(exitcodes.UNSPECIFIED_ERROR)
 	}
 
 	return nil
@@ -104,8 +118,13 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 
 	pluginLogger := subLogger.GetPluginLogger(bzplugin.Ssh)
 
-	plugin := ssh.New(pluginLogger, s.identityFile, bzio.OsFileIo{}, bzio.StdIo{})
-	if err := plugin.StartAction(); err != nil {
+	fileIo := bzio.OsFileIo{}
+
+	idFile := bzssh.NewIdentityFile(s.identityFile, fileIo)
+	khFile := bzssh.NewKnownHosts(s.knownHostsFile, s.hostNames, fileIo)
+
+	plugin := ssh.New(pluginLogger, s.localPort, idFile, khFile, bzio.StdIo{})
+	if err := plugin.StartAction(action); err != nil {
 		return fmt.Errorf("failed to start action: %s", err)
 	}
 
@@ -122,7 +141,7 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 	}
 
 	action = "ssh/" + action
-	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, synPayload, attach, true)
+	dc, dcTmb, err := datachannel.New(subLogger, dcId, &s.tmb, websocket, keysplitter, plugin, action, synPayload, attach, false)
 	if err != nil {
 		return err
 	}
@@ -135,14 +154,17 @@ func (s *SshServer) newDataChannel(action string, websocket *websocket.Websocket
 				dc.Close(errors.New("ssh server closing"))
 				return
 			case <-dcTmb.Dead():
-				if dcTmb.Err() != nil {
+				if err := dcTmb.Err(); err != nil {
+					// Handle custom daemon exit codes which will be reported by zli
+					exitcodes.HandleDaemonError(err, s.logger)
+
 					// just take our innermost error to give the user
 					errs := strings.Split(dcTmb.Err().Error(), ": ")
 					errorString := fmt.Sprintf("error: %s\n", errs[len(errs)-1])
 					os.Stdout.Write([]byte(errorString))
-					os.Exit(1)
+					os.Exit(exitcodes.UNSPECIFIED_ERROR)
 				} else {
-					os.Exit(0)
+					os.Exit(exitcodes.SUCCESS)
 				}
 			}
 		}

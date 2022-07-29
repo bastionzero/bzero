@@ -9,6 +9,7 @@ import (
 // for now, restricted to Stdin/Stdout
 type BzIo interface {
 	io.ReadWriter
+	WriteErr(b []byte) (n int, err error)
 }
 
 // the default implementation
@@ -20,4 +21,8 @@ func (s StdIo) Read(b []byte) (n int, err error) {
 
 func (s StdIo) Write(b []byte) (n int, err error) {
 	return os.Stdout.Write(b)
+}
+
+func (s StdIo) WriteErr(b []byte) (n int, err error) {
+	return os.Stderr.Write(b)
 }

@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	rrr "bastionzero.com/bctl/v1/bzerolib/error"
-	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
+	commonbzcert "bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert"
 	ksmsg "bastionzero.com/bctl/v1/bzerolib/keysplitting/message"
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/util"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -28,7 +29,7 @@ var _ = Describe("Daemon keysplitting", func() {
 	var sut *Keysplitting
 	var agentKeypair *tests.Ed25519KeyPair
 	var daemonKeypair *tests.Ed25519KeyPair
-	var mockBZCert bzcert.MockBZCert
+	var mockBZCert *bzcert.MockDaemonBZCert
 	var agentSchemaVersion string
 	const testAction string = "test/action"
 	const prePipeliningVersion string = "1.9"
@@ -132,7 +133,7 @@ var _ = Describe("Daemon keysplitting", func() {
 	agentSchemaVersion = ksmsg.SchemaVersion
 
 	// Setup mocks here
-	fakeBZCert := bzcert.BZCert{
+	fakeBZCert := commonbzcert.BZCert{
 		Rand:            "dummyCerRand",
 		SignatureOnRand: "dummyCerRandSignature",
 		InitialIdToken:  "dummyInitialIdToken",
@@ -140,18 +141,21 @@ var _ = Describe("Daemon keysplitting", func() {
 		ClientPublicKey: daemonKeypair.Base64EncodedPublicKey,
 	}
 
-	mockBZCert.On("PrivateKey").Return(daemonKeypair.Base64EncodedPrivateKey)
-	mockBZCert.On("Expired").Return(false)
-	mockBZCert.On("Hash").Return(fakeBZCert)
-	mockBZCert.On("Refresh").Return(nil)
-	mockBZCert.On("Verify", "", "").Return(nil)
-	mockBZCert.On("Cert").Return(&fakeBZCert)
-
 	// Configure the SUT's logger to print to Ginkgo's writer
 	logger := logger.MockLogger()
 
 	// Setup SUT that is used by all tests
 	BeforeEach(func() {
+
+		// Reset MockDaemonBZCert and set default mock returns
+		mockBZCert = &bzcert.MockDaemonBZCert{}
+		mockBZCert.On("PrivateKey").Return(daemonKeypair.Base64EncodedPrivateKey)
+		mockBZCert.On("Expired").Return(false)
+		mockBZCert.On("Refresh").Return(nil)
+		mockBZCert.On("Verify", "", "").Return(nil)
+		mockBZCert.On("Hash").Return(&fakeBZCert)
+		mockBZCert.On("Cert").Return(&fakeBZCert)
+
 		// Init the SUT
 		sut, err = New(logger, agentKeypair.Base64EncodedPublicKey, mockBZCert)
 		Expect(err).ShouldNot(HaveOccurred())
@@ -357,32 +361,16 @@ var _ = Describe("Daemon keysplitting", func() {
 		})
 
 		Context("bzcert failure modes", func() {
-			var mockBadBZCert bzcert.MockBZCert
-			mockBadBZCert.On("Cert").Return(&fakeBZCert)
-
-			When("bzcert fails to refresh", func() {
-				refreshError := errors.New("refresh error")
-				mockBadBZCert.On("Refresh").Return(refreshError).Once()
-
-				mockBadKeysplitting, err := New(logger, agentKeypair.Base64EncodedPublicKey, mockBadBZCert)
-				Expect(err).To(BeNil())
-
-				It("fails to build the syn", func() {
-					synMsg, buildSynError := mockBadKeysplitting.BuildSyn(testAction, []byte{}, true)
-					Expect(synMsg).To(BeNil())
-					Expect(buildSynError).To(MatchError(refreshError))
-				})
-			})
-
 			When("bzcert returns an invalid signing key", func() {
-				mockBadBZCert.On("Refresh").Return(nil).Once()
-				mockBadBZCert.On("PrivateKey").Return("badkey").Once()
 
-				mockBadKeysplitting, err := New(logger, agentKeypair.Base64EncodedPublicKey, mockBadBZCert)
-				Expect(err).To(BeNil())
+				BeforeEach(func() {
+					mockBZCert.ExpectedCalls = nil
+					mockBZCert.On("Cert").Return(&fakeBZCert).Once()
+					mockBZCert.On("PrivateKey").Return("badkey").Once()
+				})
 
 				It("fails to build the syn", func() {
-					synMsg, buildSynError := mockBadKeysplitting.BuildSyn(testAction, []byte{}, true)
+					synMsg, buildSynError := sut.BuildSyn(testAction, []byte{}, true)
 					Expect(synMsg).To(BeNil())
 					Expect(buildSynError.Error()).To(ContainSubstring(ErrFailedToSign.Error()))
 				})
@@ -861,6 +849,30 @@ var _ = Describe("Daemon keysplitting", func() {
 
 						It("daemon is still recovering", func() {
 							Expect(sut.Recovering()).Should(BeTrue())
+						})
+					})
+
+					Context("bzcert fails to refresh", func() {
+
+						BeforeEach(func() {
+							// Mock the Refresh
+							mockBZCert.ExpectedCalls = nil
+
+							mockBZCert.On("PrivateKey").Return(daemonKeypair.Base64EncodedPrivateKey)
+							mockBZCert.On("Hash").Return(&fakeBZCert)
+							mockBZCert.On("Cert").Return(&fakeBZCert)
+							refreshError := errors.New("refresh error")
+							mockBZCert.On("Refresh").Return(refreshError).Once()
+
+							By("Performing handshake without error")
+							PerformHandshake()
+							agentErrorMessage = SendDataAndBuildErrorMessage()
+						})
+
+						AssertFailedBehavior()
+
+						It("errors", func() {
+							Expect(recoverError).Should(HaveOccurred())
 						})
 					})
 

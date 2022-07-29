@@ -35,6 +35,7 @@ type IKeysplitting interface {
 	Validate(ksMessage *ksmsg.KeysplittingMessage) error
 	Recover(errorMessage rrr.ErrorMessage) error
 	Inbox(action string, actionPayload []byte) error
+	IsPipelineEmpty() bool
 	Outbox() <-chan *ksmsg.KeysplittingMessage
 	Release()
 	Recovering() bool
@@ -127,8 +128,8 @@ func New(
 			case <-dc.plugin.Done():
 				dc.logger.Infof("%s is done", action)
 				if processInputChanBeforeExit {
-					// wait for any in-flight messages to come in or timeout
-					return dc.waitOrTimeout()
+					// wait for any in-flight messages to come in and ensure all outgoing messages go out
+					return dc.waitForRemainingMessages()
 				}
 				return nil
 			case agentMessage := <-dc.inputChan: // receive messages
@@ -175,18 +176,21 @@ func (d *DataChannel) handshakeOrTimeout() error {
 	}
 }
 
-func (d *DataChannel) waitOrTimeout() error {
-	idleTimeout := 2 * time.Second
-	absoluteTimeout := time.NewTicker(10 * time.Second)
-	defer absoluteTimeout.Stop()
+func (d *DataChannel) waitForRemainingMessages() error {
+	checkOutboxInterval := time.Second
+
 	for {
 		select {
-		case <-d.inputChan:
-		case <-time.After(idleTimeout): // idle timeout
-			return nil
-		case <-absoluteTimeout.C:
-			d.logger.Errorf("timed out waiting for agent to finish sending messages after plugin closed")
-			return nil
+		// even if the plugin says it's done, we need to keep processing acks from the agent
+		case agentMessage := <-d.inputChan:
+			if err := d.processInputMessage(agentMessage); err != nil {
+				d.logger.Error(err)
+			}
+		case <-time.After(checkOutboxInterval):
+			// if the plugin has nothing pending and the pipeline is empty, we can safely stop
+			if len(d.plugin.Outbox()) == 0 && d.keysplitter.IsPipelineEmpty() {
+				return nil
+			}
 		}
 	}
 }
@@ -226,13 +230,13 @@ func (d *DataChannel) Close(reason error) {
 func (d *DataChannel) openDataChannel(action string, synPayload interface{}) error {
 	synMessage, err := d.keysplitter.BuildSyn(action, synPayload, false)
 	if err != nil {
-		return fmt.Errorf("error building syn: %s", err)
+		return fmt.Errorf("error building syn: %w", err)
 	}
 
 	// Marshal the syn
 	synBytes, err := json.Marshal(synMessage)
 	if err != nil {
-		return fmt.Errorf("error marshalling syn: %s", err)
+		return fmt.Errorf("error marshalling syn: %w", err)
 	}
 
 	messagePayload := OpenDataChannelPayload{
@@ -243,7 +247,7 @@ func (d *DataChannel) openDataChannel(action string, synPayload interface{}) err
 	// Marshal the messagePayload
 	messagePayloadBytes, err := json.Marshal(messagePayload)
 	if err != nil {
-		return fmt.Errorf("error marshalling OpenDataChannelPayload: %s", err)
+		return fmt.Errorf("error marshalling OpenDataChannelPayload: %w", err)
 	}
 
 	// send new datachannel message to agent, as we can build the syn here

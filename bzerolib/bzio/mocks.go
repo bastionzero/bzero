@@ -23,6 +23,11 @@ func (m MockBzIo) Write(b []byte) (n int, err error) {
 	return args.Int(0), args.Error(1)
 }
 
+func (m MockBzIo) WriteErr(b []byte) (n int, err error) {
+	args := m.Called(b)
+	return args.Int(0), args.Error(1)
+}
+
 // mocked version of BzFileIo
 type MockBzFileIo struct {
 	mock.Mock

@@ -20,7 +20,7 @@ import (
 )
 
 // what exec action will receive from "bastion"
-func buildStartActionPayload(headers map[string][]string, requestId string, version smsg.SchemaVersion) []byte {
+func buildStartActionPayload(headers map[string][]string, requestId string, version smsg.SchemaVersion, isStdIn bool) []byte {
 	payloadBytes, _ := json.Marshal(bzexec.KubeExecStartActionPayload{
 		Endpoint:             "test/endpoint",
 		RequestId:            requestId,
@@ -29,6 +29,7 @@ func buildStartActionPayload(headers map[string][]string, requestId string, vers
 		IsTty:                true,
 		Command:              []string{"command"},
 		CommandBeingRun:      "command",
+		IsStdIn:              isStdIn,
 	})
 	return payloadBytes
 }
@@ -66,29 +67,36 @@ var _ = Describe("Agent Exec action", Ordered, func() {
 	oldGetExecutor := getExecutor
 	oldGetConfig := getConfig
 
-	AfterAll(func() {
-		getExecutor = oldGetExecutor
-		getConfig = oldGetConfig
-	})
-
 	logger := logger.MockLogger()
 
 	requestId := "rid"
 	logId := "lid"
 	testString := "echo hi"
 
-	Context("Happy path", func() {
-		outputChan := make(chan smsg.StreamMessage, 5)
-		doneChan := make(chan struct{})
-		mockExecutor := MockExecutor{}
+	var doneChan chan struct{}
+	var outputChan chan smsg.StreamMessage
+	var mockExecutor MockExecutor
+
+	BeforeEach(func() {
+		doneChan = make(chan struct{})
+		outputChan = make(chan smsg.StreamMessage, 5)
+		mockExecutor = MockExecutor{}
 		stdoutWriter := NewStdWriter(outputChan, smsg.CurrentSchema, requestId, string(kube.Exec), smsg.StdOut, logId)
 		mockExecutor.On("Stream", stdoutWriter).Return(nil)
 		setGetExecutor(mockExecutor)
 		setGetConfig()
-		e := New(logger, outputChan, doneChan, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
+	})
 
+	AfterAll(func() {
+		getExecutor = oldGetExecutor
+		getConfig = oldGetConfig
+	})
+
+	Context("Happy path I - Command includes -it", func() {
 		It("handles the exec session correctly", func() {
-			startPayloadBytes := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema)
+			e := New(logger, outputChan, doneChan, "serviceAccountToken", "kubeHost", make([]string, 0), "test user")
+
+			startPayloadBytes := buildStartActionPayload(make(map[string][]string), requestId, smsg.CurrentSchema, true)
 
 			By("receiving an Exec request without error")
 			responsePayload, err := e.Receive(string(bzexec.ExecStart), startPayloadBytes)
