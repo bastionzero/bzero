@@ -5,7 +5,9 @@ and not have to reinvent our message structure.
 */
 package websocket
 
-import am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
+import "encoding/json"
+
+type SignalRWebsocketMethod string
 
 const (
 	// SignalR Constants
@@ -35,10 +37,10 @@ type SignalRMessageTypeOnly struct {
 	Type int `json:"type"`
 }
 type SignalRInvocationMessage struct {
-	Type         int               `json:"type"`
-	Target       string            `json:"target"` // hub name
-	Arguments    []am.AgentMessage `json:"arguments"`
-	InvocationId *string           `json:"invocationId,omitempty"`
+	Type         int                    `json:"type"`
+	Target       SignalRWebsocketMethod `json:"target"` // hub name
+	Arguments    []json.RawMessage      `json:"arguments"`
+	InvocationId *string                `json:"invocationId,omitempty"`
 }
 
 type SignalRCompletionMessage struct {

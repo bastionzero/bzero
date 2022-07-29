@@ -12,7 +12,6 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/keysplitting/bzcert"
 	"bastionzero.com/bctl/v1/bctl/daemon/plugin/ssh"
 	"bastionzero.com/bctl/v1/bzerolib/bzio"
-	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
 	bzplugin "bastionzero.com/bctl/v1/bzerolib/plugin"
@@ -31,9 +30,6 @@ type SshServer struct {
 	logger    *logger.Logger
 	websocket *websocket.Websocket
 	tmb       tomb.Tomb
-
-	// Handler to select message types
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
 
 	remoteHost string
 	remotePort int
@@ -61,7 +57,6 @@ func StartSshServer(
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	identityFile string,
 	knownHostsFile string,
 	hostNames []string,
@@ -72,20 +67,19 @@ func StartSshServer(
 ) error {
 
 	server := &SshServer{
-		logger:              logger,
-		serviceUrl:          serviceUrl,
-		targetUser:          targetUser,
-		params:              params,
-		headers:             headers,
-		targetSelectHandler: targetSelectHandler,
-		cert:                cert,
-		agentPubKey:         agentPubKey,
-		identityFile:        identityFile,
-		knownHostsFile:      knownHostsFile,
-		hostNames:           hostNames,
-		remoteHost:          remoteHost,
-		remotePort:          remotePort,
-		localPort:           localPort,
+		logger:         logger,
+		serviceUrl:     serviceUrl,
+		targetUser:     targetUser,
+		params:         params,
+		headers:        headers,
+		cert:           cert,
+		agentPubKey:    agentPubKey,
+		identityFile:   identityFile,
+		knownHostsFile: knownHostsFile,
+		hostNames:      hostNames,
+		remoteHost:     remoteHost,
+		remotePort:     remotePort,
+		localPort:      localPort,
 	}
 
 	// Create a new websocket
@@ -106,7 +100,7 @@ func StartSshServer(
 // for creating new websockets
 func (s *SshServer) newWebsocket(wsId string) error {
 	subLogger := s.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, s.serviceUrl, s.params, s.headers, s.targetSelectHandler, autoReconnect, getChallenge, websocket.Ssh); err != nil {
+	if wsClient, err := websocket.New(subLogger, s.serviceUrl, s.params, s.headers, autoReconnect, getChallenge, websocket.Ssh); err != nil {
 		return err
 	} else {
 		s.websocket = wsClient

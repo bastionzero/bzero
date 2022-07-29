@@ -41,6 +41,8 @@ const (
 	agentConnectionNodeHubEndpoint  = "hub/agent"
 
 	controlHubEndpoint = "/api/v1/hub/control"
+
+	AgentConnectedWebsocketTimeout = 30 * time.Second
 )
 
 // Connection Type enum
@@ -91,9 +93,6 @@ type Websocket struct {
 	sendQueue               chan signalRInvocationMessage
 	messagesWaitingResponse map[string]am.AgentMessage
 
-	// Function for figuring out correct Target SignalR Hub
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
-
 	// Flag to indicate if we should automatically try to reconnect
 	autoReconnect bool
 
@@ -111,6 +110,13 @@ type Websocket struct {
 
 	// Base url to make request
 	baseUrl string
+
+	// Agent Ready Channel indicates when the agent has connected to the
+	// corresponding websocket. This is only used for daemon websocket.
+	agentReadyChan chan struct{}
+
+	// True when websocket is ready to start sending output messages
+	sendQueueReady bool
 }
 
 // Constructor to create a new common websocket client object that can be shared by the daemon and server
@@ -118,7 +124,6 @@ func New(logger *logger.Logger,
 	serviceUrl string,
 	params map[string]string,
 	headers map[string]string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error),
 	autoReconnect bool,
 	getChallenge bool,
 	targetType int) (*Websocket, error) {
@@ -128,7 +133,6 @@ func New(logger *logger.Logger,
 		sendQueue:               make(chan signalRInvocationMessage, 100),
 		messagesWaitingResponse: make(map[string]am.AgentMessage),
 		channels:                make(map[string]IChannel),
-		targetSelectHandler:     targetSelectHandler,
 		getChallenge:            getChallenge,
 		autoReconnect:           autoReconnect,
 		serviceUrl:              serviceUrl,
@@ -138,6 +142,7 @@ func New(logger *logger.Logger,
 		subscribed:              false,
 		targetType:              targetType,
 		baseUrl:                 "",
+		agentReadyChan:          make(chan struct{}, 1),
 	}
 
 	// Connect to the websocket in a go routine in case it takes a long time
@@ -160,7 +165,6 @@ func New(logger *logger.Logger,
 		}
 	}()
 
-	// Listener for any incoming messages
 	ws.tmb.Go(func() error {
 		// Listener for any messages that need to be sent
 		ws.tmb.Go(func() error {
@@ -170,6 +174,7 @@ func New(logger *logger.Logger,
 					case <-ws.tmb.Dying():
 						return nil
 					case msg := <-ws.sendQueue:
+						ws.waitForAgentWebsocketReady()
 						ws.processOutput(msg)
 					}
 				}
@@ -265,15 +270,34 @@ func (w *Websocket) receive() error {
 		} else {
 			for _, message := range messages {
 				switch message.Target {
-				case "CloseConnection":
+				case DaemonCloseConnection:
 					rerr := errors.New("the bzero agent terminated the connection")
 					w.Close(rerr)
 					return rerr
+				case AgentConnected:
+					// Signal the agentReady channel when we receive a message
+					// from the connection node that the agent websocket is
+					// connected
+					var agentConnectedMessage AgentConnectedMessage
+					if err := json.Unmarshal(message.Arguments[0], &agentConnectedMessage); err != nil {
+						return fmt.Errorf("error unmarshalling agent connected message. Error: %s", err)
+					}
+
+					w.logger.Infof("Agent is connected and ready to receive methods in websocket for connection: %s", agentConnectedMessage.ConnectionId)
+
+					w.agentReadyChan <- struct{}{}
 				default:
 					w.ready = true
 
-					// push to the right channel
-					agentMessage := message.Arguments[0]
+					// Otherwise assume that the invocation contains a single AgentMessage argument
+					if len(message.Arguments) != 1 {
+						return fmt.Errorf("expected a single agent message argument but got %d arguments.", len(message.Arguments))
+					}
+
+					var agentMessage am.AgentMessage
+					if err := json.Unmarshal(message.Arguments[0], &agentMessage); err != nil {
+						return fmt.Errorf("error unmarshalling agent message from websocket method %s. Error: %s", message.Target, err)
+					}
 
 					if channel, ok := w.getChannel(agentMessage.ChannelId); ok {
 						channel.Receive(agentMessage)
@@ -338,12 +362,8 @@ func (w *Websocket) unwrapSignalR(rawMessage []byte) ([]SignalRInvocationMessage
 				return messages, fmt.Errorf("error unmarshalling SignalR invocation message from Bastion: %s. Error: %s", string(msg), err)
 			}
 
-			// make sure there is an AgentMessage
-			if len(invocationMessage.Arguments) != 0 {
-				messages = append(messages, invocationMessage)
-			} else {
-				w.logger.Errorf("Ignoring SignalR invocation message because it doesn't have an AgentMessage argument")
-			}
+			w.logger.Tracef("Received new Invocation Message with target: %s", invocationMessage.Target)
+			messages = append(messages, invocationMessage)
 		default:
 			msg := fmt.Sprintf("Ignoring SignalR message with type %v", signalRMessageType.Type)
 			w.logger.Tracef(msg)
@@ -360,17 +380,23 @@ func (w *Websocket) processOutput(message signalRInvocationMessage) {
 	defer w.socketLock.Unlock()
 
 	// Select SignalR Endpoint
-	target, err := w.targetSelectHandler(message.agentMessage) // Agent and Daemon specify their own function to choose target
+	target, err := w.websocketMethodSelector(message.agentMessage)
 	if err != nil {
 		rerr := fmt.Errorf("error in selecting SignalR Endpoint target name: %s", err)
 		w.logger.Error(rerr)
 		return
 	}
 
+	agentMessageArg, err := json.Marshal(message.agentMessage)
+	if err != nil {
+		w.logger.Errorf("Failed to marshal agent message in signalR invocation message: %s", err)
+		return
+	}
+
 	signalRMessage := SignalRInvocationMessage{
 		Target:       target,
 		Type:         int(Invocation),
-		Arguments:    []am.AgentMessage{message.agentMessage},
+		Arguments:    []json.RawMessage{agentMessageArg},
 		InvocationId: message.invocationId,
 	}
 
@@ -381,6 +407,56 @@ func (w *Websocket) processOutput(message signalRInvocationMessage) {
 		if err := w.client.WriteMessage(websocket.TextMessage, append(msgBytes, signalRMessageTerminatorByte)); err != nil {
 			w.logger.Error(err)
 		}
+	}
+}
+
+func (w *Websocket) websocketMethodSelector(agentMessage am.AgentMessage) (SignalRWebsocketMethod, error) {
+	// Select SignalR Endpoint
+	switch w.targetType {
+	case Cluster, Db, Web, Shell, Ssh:
+		return daemonWebsocketMethodSelector(agentMessage)
+	case AgentControl:
+		return agentControlChannelWebsocketMethodSelector(agentMessage)
+	case AgentWebsocket:
+		return agentDataChannelWebsocketMethodSelector(agentMessage)
+	default:
+		return "", fmt.Errorf("Unhandled signalR method for websocket type %d", w.targetType)
+	}
+}
+
+// daemon's data channel function to select signalR hub method based on agent message type
+func daemonWebsocketMethodSelector(agentMessage am.AgentMessage) (SignalRWebsocketMethod, error) {
+	switch am.MessageType(agentMessage.MessageType) {
+	case am.Keysplitting:
+		return RequestDaemonToBastionV1, nil
+	case am.OpenDataChannel:
+		return OpenDataChannelDaemonToBastionV1, nil
+	case am.CloseDataChannel:
+		return CloseDataChannelDaemonToBastionV1, nil
+	default:
+		return "", fmt.Errorf("unhandled message type: %s", agentMessage.MessageType)
+	}
+}
+
+// agent's control channel function to select signalR hub method based on agent message type
+func agentControlChannelWebsocketMethodSelector(agentMessage am.AgentMessage) (SignalRWebsocketMethod, error) {
+	switch am.MessageType(agentMessage.MessageType) {
+	case am.HealthCheck:
+		return AliveCheckAgentToBastion, nil
+	default:
+		return "", fmt.Errorf("unsupported message type")
+	}
+}
+
+// agent's data channel function to select signalR hub method based on agent message type
+func agentDataChannelWebsocketMethodSelector(agentMessage am.AgentMessage) (SignalRWebsocketMethod, error) {
+	switch am.MessageType(agentMessage.MessageType) {
+	case am.CloseDaemonWebsocket:
+		return CloseDaemonWebsocketV1, nil
+	case am.Keysplitting, am.Stream, am.Error:
+		return ResponseAgentToBastionV1, nil
+	default:
+		return "", fmt.Errorf("unable to determine SignalR endpoint for message type: %s", agentMessage.MessageType)
 	}
 }
 
@@ -668,4 +744,29 @@ func (w *Websocket) getAgentMessageFromInvocationId(invocationId string) am.Agen
 // can be used by other processes to check if our connection is open
 func (w *Websocket) Ready() bool {
 	return w.ready
+}
+
+// returns true if this is a daemon websocket connect
+func (w *Websocket) isDaemonWebsocket() bool {
+	return w.targetType > 0
+}
+
+func (w *Websocket) waitForAgentWebsocketReady() {
+	// If agent websocket is already ready return right away
+	if w.sendQueueReady {
+		return
+	}
+
+	// If this is a daemon websocket connection wait for the agent to
+	// connect before sending any messages from the output queue
+	if w.isDaemonWebsocket() {
+		select {
+		case <-w.agentReadyChan:
+			w.sendQueueReady = true
+		case <-time.After(AgentConnectedWebsocketTimeout):
+			w.Close(fmt.Errorf("Timed out waiting for agent websocket to connect"))
+		}
+	} else {
+		w.sendQueueReady = true
+	}
 }

@@ -35,9 +35,6 @@ type WebServer struct {
 	websocket *bzwebsocket.Websocket
 	tmb       tomb.Tomb
 
-	// Handler to select message types
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
-
 	// Web specific vars
 	// Either user the full dns (i.e. targetHostName) or the host:port
 	targetPort int
@@ -63,20 +60,19 @@ func StartWebServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+) error {
 
 	server := &WebServer{
-		logger:              logger,
-		serviceUrl:          serviceUrl,
-		params:              params,
-		headers:             headers,
-		targetSelectHandler: targetSelectHandler,
-		cert:                cert,
-		localPort:           localPort,
-		localHost:           localHost,
-		targetHost:          targetHost,
-		targetPort:          targetPort,
-		agentPubKey:         agentPubKey,
+		logger:      logger,
+		serviceUrl:  serviceUrl,
+		params:      params,
+		headers:     headers,
+		cert:        cert,
+		localPort:   localPort,
+		localHost:   localHost,
+		targetHost:  targetHost,
+		targetPort:  targetPort,
+		agentPubKey: agentPubKey,
 	}
 
 	// Create a new websocket
@@ -157,7 +153,7 @@ func (w *WebServer) handleHttp(writer http.ResponseWriter, request *http.Request
 // for creating new websockets
 func (h *WebServer) newWebsocket(wsId string) error {
 	subLogger := h.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := bzwebsocket.New(subLogger, h.serviceUrl, h.params, h.headers, h.targetSelectHandler, autoReconnect, getChallenge, bzwebsocket.Web); err != nil {
+	if wsClient, err := bzwebsocket.New(subLogger, h.serviceUrl, h.params, h.headers, autoReconnect, getChallenge, bzwebsocket.Web); err != nil {
 		return err
 	} else {
 		h.websocket = wsClient

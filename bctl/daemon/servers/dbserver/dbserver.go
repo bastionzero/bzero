@@ -31,9 +31,6 @@ type DbServer struct {
 	websocket *websocket.Websocket
 	tmb       tomb.Tomb
 
-	// Handler to select message types
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
-
 	// Db specific vars
 	remotePort int
 	remoteHost string
@@ -58,20 +55,19 @@ func StartDbServer(logger *logger.Logger,
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error)) error {
+) error {
 
 	server := &DbServer{
-		logger:              logger,
-		serviceUrl:          serviceUrl,
-		params:              params,
-		headers:             headers,
-		targetSelectHandler: targetSelectHandler,
-		cert:                cert,
-		localPort:           localPort,
-		localHost:           localHost,
-		remoteHost:          remoteHost,
-		remotePort:          remotePort,
-		agentPubKey:         agentPubKey,
+		logger:      logger,
+		serviceUrl:  serviceUrl,
+		params:      params,
+		headers:     headers,
+		cert:        cert,
+		localPort:   localPort,
+		localHost:   localHost,
+		remoteHost:  remoteHost,
+		remotePort:  remotePort,
+		agentPubKey: agentPubKey,
 	}
 
 	// Create a new websocket
@@ -130,7 +126,7 @@ func StartDbServer(logger *logger.Logger,
 // for creating new websockets
 func (d *DbServer) newWebsocket(wsId string) error {
 	subLogger := d.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, d.serviceUrl, d.params, d.headers, d.targetSelectHandler, autoReconnect, getChallenge, websocket.Db); err != nil {
+	if wsClient, err := websocket.New(subLogger, d.serviceUrl, d.params, d.headers, autoReconnect, getChallenge, websocket.Db); err != nil {
 		return err
 	} else {
 		d.websocket = wsClient

@@ -47,10 +47,9 @@ type KubeServer struct {
 	localhostToken string
 
 	// fields for opening websockets
-	serviceUrl          string
-	params              map[string]string
-	headers             map[string]string
-	targetSelectHandler func(msg am.AgentMessage) (string, error)
+	serviceUrl string
+	params     map[string]string
+	headers    map[string]string
 
 	// fields for new datachannels
 	cert         *bzcert.DaemonBZCert
@@ -73,21 +72,18 @@ func StartKubeServer(
 	params map[string]string,
 	headers map[string]string,
 	agentPubKey string,
-	targetSelectHandler func(msg am.AgentMessage) (string, error),
 ) error {
 
 	server := &KubeServer{
-		logger:              logger,
-		exitMessage:         "",
-		localhostToken:      localhostToken,
-		serviceUrl:          serviceUrl,
-		params:              params,
-		headers:             headers,
-		targetSelectHandler: targetSelectHandler,
-		cert:                cert,
-		targetUser:          targetUser,
-		targetGroups:        targetGroups,
-		agentPubKey:         agentPubKey,
+		logger:         logger,
+		exitMessage:    "",
+		localhostToken: localhostToken,
+		serviceUrl:     serviceUrl,
+		params:         params,
+		headers:        headers,
+		cert:           cert,
+		targetGroups:   targetGroups,
+		agentPubKey:    agentPubKey,
 	}
 
 	// Create a new websocket
@@ -142,7 +138,7 @@ func (k *KubeServer) statusCallback(w http.ResponseWriter, r *http.Request) {
 // for creating new websockets
 func (k *KubeServer) newWebsocket(wsId string) error {
 	subLogger := k.logger.GetWebsocketLogger(wsId)
-	if wsClient, err := websocket.New(subLogger, k.serviceUrl, k.params, k.headers, k.targetSelectHandler, autoReconnect, getChallenge, websocket.Cluster); err != nil {
+	if wsClient, err := websocket.New(subLogger, k.serviceUrl, k.params, k.headers, autoReconnect, getChallenge, websocket.Cluster); err != nil {
 		return err
 	} else {
 		k.websocket = wsClient

@@ -17,7 +17,6 @@ import (
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/sshserver"
 	"bastionzero.com/bctl/v1/bctl/daemon/servers/webserver"
 	"bastionzero.com/bctl/v1/bzerolib/bzhttp"
-	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/error/errorreport"
 
 	"bastionzero.com/bctl/v1/bzerolib/keysplitting/bzcert/zliconfig"
@@ -168,7 +167,6 @@ func startSshServer(logger *bzlogger.Logger, headers map[string]string, params m
 		params,
 		headers,
 		config[AGENT_PUB_KEY].Value,
-		targetSelectHandler,
 		config[IDENTITY_FILE].Value,
 		config[KNOWN_HOSTS_FILE].Value,
 		strings.Split(config[HOSTNAMES].Value, ","),
@@ -191,7 +189,6 @@ func startShellServer(logger *bzlogger.Logger, headers map[string]string, params
 		params,
 		headers,
 		config[AGENT_PUB_KEY].Value,
-		targetSelectHandler,
 	)
 }
 
@@ -215,7 +212,7 @@ func startWebServer(logger *bzlogger.Logger, headers map[string]string, params m
 		params,
 		headers,
 		config[AGENT_PUB_KEY].Value,
-		targetSelectHandler)
+	)
 }
 
 func startDbServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
@@ -238,7 +235,7 @@ func startDbServer(logger *bzlogger.Logger, headers map[string]string, params ma
 		params,
 		headers,
 		config[AGENT_PUB_KEY].Value,
-		targetSelectHandler)
+	)
 }
 
 func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params map[string]string, cert *bzcert.DaemonBZCert) error {
@@ -268,20 +265,7 @@ func startKubeServer(logger *bzlogger.Logger, headers map[string]string, params 
 		params,
 		headers,
 		config[AGENT_PUB_KEY].Value,
-		targetSelectHandler)
-}
-
-func targetSelectHandler(agentMessage am.AgentMessage) (string, error) {
-	switch am.MessageType(agentMessage.MessageType) {
-	case am.Keysplitting:
-		return "RequestDaemonToBastionV1", nil
-	case am.OpenDataChannel:
-		return "OpenDataChannelDaemonToBastionV1", nil
-	case am.CloseDataChannel:
-		return "CloseDataChannelDaemonToBastionV1", nil
-	default:
-		return "", fmt.Errorf("unhandled message type: %s", agentMessage.MessageType)
-	}
+	)
 }
 
 // read all environment variables and apply the processing for specific fields that need it
