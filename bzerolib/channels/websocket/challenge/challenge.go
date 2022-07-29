@@ -45,6 +45,9 @@ func Get(
 
 	// Initialize our http client
 	options := httpclient.HTTPOptions{
+		Headers: map[string][]string{
+			"Content-Type": {"application/json"},
+		},
 		Endpoint: challengeEndpoint,
 		Body:     requestBytes,
 	}
@@ -57,7 +60,7 @@ func Get(
 	// Make our request
 	response, err := client.Post(context.Background())
 	if err != nil {
-		return "", fmt.Errorf("failed to get challenge from BastionZero: %w", err)
+		return "", fmt.Errorf("failed to get challenge from BastionZero: %s", err)
 	}
 
 	defer response.Body.Close()

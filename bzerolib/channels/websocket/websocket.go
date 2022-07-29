@@ -1,13 +1,11 @@
 package websocket
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"path"
-	"strings"
 	"time"
 
 	backoff "github.com/cenkalti/backoff/v4"
@@ -17,7 +15,6 @@ import (
 	am "bastionzero.com/bctl/v1/bzerolib/channels/agentmessage"
 	"bastionzero.com/bctl/v1/bzerolib/channels/websocket/challenge"
 	"bastionzero.com/bctl/v1/bzerolib/connection/broker"
-	"bastionzero.com/bctl/v1/bzerolib/connection/httpclient"
 	"bastionzero.com/bctl/v1/bzerolib/connection/signalr"
 	newws "bastionzero.com/bctl/v1/bzerolib/connection/websocket"
 	"bastionzero.com/bctl/v1/bzerolib/logger"
@@ -43,9 +40,9 @@ type ChannelType int
 
 const (
 	// Enum target types for agent side connections
-	AgentDataChannel    ChannelType = -1
-	AgentControlChannel ChannelType = -2
-	DaemonDataChannel   ChannelType = -3
+	AgentDataChannel ChannelType = iota
+	AgentControlChannel
+	DaemonDataChannel
 )
 
 const (
@@ -60,7 +57,6 @@ const (
 	controlHubEndpoint = "/api/v1/hub/control"
 
 	AgentConnectedWebsocketTimeout = 30 * time.Second
-	closeConnectionEndpoint        = "/api/v2/connections/$ID/close"
 )
 
 type IWebsocket interface {
@@ -128,7 +124,8 @@ func New(
 
 	// Create our signalr object
 	srLogger := logger.GetComponentLogger("SignalR")
-	conn := signalr.New(srLogger, newws.New(), targetSelectHandler)
+	wsLogger := logger.GetComponentLogger("Websocket")
+	conn := signalr.New(srLogger, newws.New(wsLogger), targetSelectHandler)
 
 	ws := Websocket{
 		logger:         logger,
@@ -144,14 +141,6 @@ func New(
 		if err := ws.connect(u, endpoint, headers, params); err != nil {
 			logger.Error(err)
 			ws.Close(fmt.Errorf("process was unable to connect to BastionZero"))
-
-			// If this is a daemon connection (i.e. we are not getting a challenge)
-			// we also need to make sure we close the connection in the backend
-			if ws.myType == AgentDataChannel || ws.myType == DaemonDataChannel {
-				if err := ws.closeConnection(bastionUrl, params); err != nil {
-					ws.logger.Errorf("failed to close connection: %w", err)
-				}
-			}
 		}
 	}()
 
@@ -177,6 +166,7 @@ func New(
 			case <-ws.tmb.Dying():
 				return nil
 			case <-ws.client.Done():
+				ws.logger.Infof("AND FINISHED OFF HERE")
 				ws.sendQueueReady = false
 				if autoReconnect {
 					if err := ws.connect(u, endpoint, headers, params); err != nil {
@@ -286,6 +276,8 @@ func (w *Websocket) connect(connectionUrl *url.URL, endpoint string, headers map
 	backoffParams.MaxElapsedTime = time.Hour * 72 // Wait in total at most 72 hours
 	backoffParams.MaxInterval = time.Minute * 15  // At most 15 minutes in between requests
 
+	baseUrl := connectionUrl.String()
+
 	ticker := backoff.NewTicker(backoffParams)
 	for {
 		select {
@@ -303,8 +295,8 @@ func (w *Websocket) connect(connectionUrl *url.URL, endpoint string, headers map
 					return fmt.Errorf("failed to retrieve agent vault: %s", err)
 				}
 
-				w.logger.Infof("CONNECTION URL: %s", connectionUrl.String())
-				solvedChallenge, err := challenge.Get(w.logger, connectionUrl.String(), params["target_id"][0], params["version"][0], config.Data.PrivateKey)
+				w.logger.Infof("CONNECTION URL: %s", baseUrl)
+				solvedChallenge, err := challenge.Get(w.logger, baseUrl, params["target_id"][0], params["version"][0], config.Data.PrivateKey)
 				if err != nil {
 					return err
 				}
@@ -319,12 +311,12 @@ func (w *Websocket) connect(connectionUrl *url.URL, endpoint string, headers map
 				}
 			}
 
-			url := path.Join(connectionUrl.Path, endpoint)
+			connectionUrl.Path = path.Join(connectionUrl.Path, endpoint)
 
-			w.logger.Infof("CONNECTION URL: %+v", url)
+			w.logger.Infof("CONNECTION URL: %+v", connectionUrl.String())
 			w.logger.Infof("PARAMS: %+v", params)
 
-			if err := w.client.Connect(url, params); err != nil {
+			if err := w.client.Connect(connectionUrl.String(), params); err != nil {
 				w.logger.Errorf("retrying in %s because of and error on connect: %s", backoffParams.NextBackOff().Round(time.Second), err)
 			} else {
 				w.logger.Info("Connection successful!")
@@ -354,30 +346,4 @@ func (w *Websocket) waitForAgentWebsocketReady() {
 	} else {
 		w.sendQueueReady = true
 	}
-}
-
-func (w *Websocket) closeConnection(bastionUrl string, params map[string][]string) error {
-	var connectionId string
-	switch w.myType {
-	case AgentDataChannel:
-		connectionId = params["connection_id"][0]
-	case DaemonDataChannel:
-		connectionId = params["connectionId"][0]
-	}
-
-	endpoint := strings.Replace(closeConnectionEndpoint, "$ID", connectionId, -1)
-
-	options := httpclient.HTTPOptions{
-		Endpoint: endpoint,
-	}
-	client, err := httpclient.NewWithBackoff(w.logger, bastionUrl, options)
-	if err != nil {
-		return err
-	}
-	_, err = client.Patch(context.Background())
-	if err != nil {
-		return fmt.Errorf("error closing connection: %s", err)
-	}
-
-	return nil
 }

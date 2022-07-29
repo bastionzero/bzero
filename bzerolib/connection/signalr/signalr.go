@@ -28,8 +28,8 @@ type SignalR struct {
 	doneChan chan struct{}
 
 	client   *websocket.Websocket
-	outbound chan *am.AgentMessage
 	inbound  chan *SignalRMessage
+	outbound chan *am.AgentMessage
 
 	// Function for choosing target method
 	targetSelector func(am.AgentMessage) (string, error)
@@ -52,6 +52,7 @@ func New(
 		logger:      logger,
 		client:      client,
 		doneChan:    make(chan struct{}),
+		inbound:     make(chan *SignalRMessage, 200),
 		outbound:    make(chan *am.AgentMessage, 200),
 		broadcaster: broker.New(),
 		invocator:   invocation.New(),
@@ -125,6 +126,7 @@ func (s *SignalR) Connect(targetUrl string, params map[string][]string) error {
 	// If the handshake was successful, then we've made our connection and we can
 	// start listening and sending on it
 	s.tmb.Go(func() error {
+		defer s.logger.Info("Connection is dead")
 		defer close(s.doneChan)
 		defer s.client.Close()
 
@@ -136,23 +138,27 @@ func (s *SignalR) Connect(targetUrl string, params map[string][]string) error {
 					return nil
 				case msg := <-s.outbound:
 					if err := s.wrap(*msg); err != nil {
-						s.logger.Errorf("failed to send agent message: %w", err)
+						s.logger.Errorf("failed to send agent message: %s", err)
 					}
 				}
 			}
 		})
 
 		// Unwrap and forward inbound messages
+		s.logger.Info("WEVE STARTING LISTENING")
 		for {
 			select {
 			case <-s.tmb.Dying():
 				return nil
 			case <-s.client.Done():
-				return fmt.Errorf("connection died")
+				s.logger.Infof("detected closure of underlying websocket")
+				return fmt.Errorf("closed websocket")
 			case rawMsg := <-s.client.Inbound():
+				s.logger.Infof("TRAPPED?")
 				if err := s.unwrap(*rawMsg); err != nil {
-					s.logger.Errorf("error processing raw message from websocket: %w", err)
+					s.logger.Errorf("error processing raw message from websocket: %s", err)
 				}
+				s.logger.Infof("NOPE")
 			}
 		}
 	})
@@ -221,7 +227,8 @@ func (s *SignalR) unwrap(raw []byte) error {
 	splitMessages := bytes.Split(raw, []byte{signalRMessageTerminatorByte})
 
 	for _, rawMessage := range splitMessages {
-		if len(rawMessage) == 0 {
+		// Ignore empty slices AND empty json "{}"
+		if len(rawMessage) <= 2 {
 			continue
 		}
 
@@ -235,11 +242,13 @@ func (s *SignalR) unwrap(raw []byte) error {
 		// This SignalR close message can be thrown on `OnConnectedAsync` as a result of
 		//  of failed param validation
 		case Close:
+			s.logger.Infof("received SignalR message to close the connection")
 			s.Close(fmt.Errorf("received SignalR message to close the connection"))
 
 		// These messages let us know if a previous message was recieved correctly
 		// and provides us with the resulting error if not
 		case Completion:
+			s.logger.Infof("trapped on completion?")
 			if err := s.processCompletionMessage(rawMessage); err != nil {
 				s.logger.Error(err)
 			}
@@ -247,6 +256,7 @@ func (s *SignalR) unwrap(raw []byte) error {
 		// These messages are regular SignalR messages that we'll process and
 		// forward to whoever is listening
 		case Invocation:
+			s.logger.Infof("trapped on invocation?")
 			var message SignalRMessage
 			if err := json.Unmarshal(rawMessage, &message); err != nil {
 				return fmt.Errorf("error unmarshalling SignalR message: %s. Error: %w", string(rawMessage), err)
@@ -256,7 +266,7 @@ func (s *SignalR) unwrap(raw []byte) error {
 			s.inbound <- &message
 
 		default:
-			s.logger.Infof("Ignoring SignalR message with type %v", SignalRMessageType(signalRMessageType.Type))
+			s.logger.Infof("Ignoring %s message", SignalRMessageType(signalRMessageType.Type).String())
 		}
 	}
 

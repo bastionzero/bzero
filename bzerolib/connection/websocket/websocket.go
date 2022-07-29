@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"bastionzero.com/bctl/v1/bzerolib/logger"
 	gorilla "github.com/gorilla/websocket"
-	"gopkg.in/tomb.v2"
 )
 
 type IWebsocket interface {
@@ -17,8 +17,9 @@ type IWebsocket interface {
 }
 
 type Websocket struct {
-	tmb      tomb.Tomb
+	logger   *logger.Logger
 	doneChan chan struct{}
+	isDead   bool
 
 	client *gorilla.Conn
 
@@ -29,22 +30,36 @@ type Websocket struct {
 	outbound chan *[]byte
 }
 
-func New() *Websocket {
-	return &Websocket{
+func New(logger *logger.Logger) *Websocket {
+	ws := &Websocket{
 		doneChan: make(chan struct{}),
+		logger:   logger,
 		inbound:  make(chan *[]byte, 200),
 		outbound: make(chan *[]byte, 200),
 	}
+
+	go func() {
+		<-ws.doneChan
+		ws.logger.Infof("chan definitely done 1")
+	}()
+
+	go func() {
+		<-ws.doneChan
+		ws.logger.Infof("chan definitely done 2")
+	}()
+
+	return ws
 }
 
 func (w *Websocket) Close() {
-	if w.tmb.Alive() {
-		w.tmb.Kill(nil)
-		w.tmb.Wait()
+	if !w.isDead {
+		w.isDead = true
+		close(w.doneChan)
 	}
 }
 
 func (w *Websocket) Done() <-chan struct{} {
+	w.logger.Info("SOMEONE IS LISTENING")
 	return w.doneChan
 }
 
@@ -62,54 +77,59 @@ func (w *Websocket) Send(message []byte) error {
 func (w *Websocket) Dial(websocketUrl *url.URL) (err error) {
 	// Reinitialize our variables every time in case this is post death
 	// LUCIE: race condition between done() and dial reconnecting after death?
-	w.doneChan = make(chan struct{})
-	w.tmb = tomb.Tomb{}
+	if w.isDead {
+		w.logger.Infof("WE MADE ANOTHER CHANNEL")
+		w.doneChan = make(chan struct{})
+		w.isDead = false
+	}
 
 	// Make sure url scheme is correct
 	websocketUrl.Scheme = "wss"
 
 	// Try to connect websocket once
 	if w.client, _, err = gorilla.DefaultDialer.Dial(websocketUrl.String(), http.Header{}); err != nil {
-		return fmt.Errorf("error dialing websocket: %w", err)
+		return fmt.Errorf("error dialing websocket: %s", err)
 	}
 
-	// Set our go routines for listening and writing to our websocket connection
-	w.tmb.Go(func() error {
-		defer close(w.doneChan)
-		defer w.client.Close()
+	go w.receive()
 
-		// Listen for incoming messages
-		w.tmb.Go(w.receive)
+	// Send outgoing messages
+	go func() {
+		defer w.logger.Info("Websocket connection closed")
 
-		// Send outgoing messages
 		for {
 			select {
-			case <-w.tmb.Dying():
-				return nil
+			case <-w.doneChan:
+				return
 			case msg := <-w.outbound:
 				if err := w.Send(*msg); err != nil {
-					return err
+					w.logger.Error(err)
 				}
 			}
 		}
-	})
+	}()
 
 	return nil
 }
 
-func (w *Websocket) receive() error {
+func (w *Websocket) receive() {
+	defer func() {
+		if !w.isDead {
+			close(w.doneChan)
+		}
+		w.isDead = true
+	}()
+
 	for {
 		// Read incoming message(s)
-		if _, rawMessage, err := w.client.ReadMessage(); !w.tmb.Alive() {
-			return nil
+		if _, rawMessage, err := w.client.ReadMessage(); w.isDead {
+			w.client.Close()
 		} else if err != nil {
-
 			// Check if it's a clean exit
-			if gorilla.IsCloseError(err, gorilla.CloseNormalClosure) {
-				return nil
+			if !gorilla.IsCloseError(err, gorilla.CloseNormalClosure) {
+				w.logger.Error(err)
 			}
-			return fmt.Errorf("abnormal websocket closure: %w", err)
-
+			return
 		} else {
 			w.inbound <- &rawMessage
 		}
